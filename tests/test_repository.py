@@ -2,7 +2,7 @@ from datetime import date
 
 
 def test_create_and_meta(repo):
-    assert repo.schema_version == 1
+    assert repo.schema_version == 2
     assert repo.get_meta("db_uuid")
     assert repo.get_meta("drive_label") == "test"
 

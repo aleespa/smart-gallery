@@ -17,9 +17,11 @@ from smart_gallery.config import resolve_db_path
 from smart_gallery.db import GalleryRepository
 from smart_gallery.organize import FilterOptions, Options, normalize_extensions
 from smart_gallery.services import (
+    cluster_faces,
     export_media,
     import_media,
     init_drive,
+    scan_faces,
     sync_drive,
 )
 
@@ -61,6 +63,10 @@ def _filter_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-iso", type=int)
     p.add_argument("--min-shutter-speed")
     p.add_argument("--max-shutter-speed")
+    p.add_argument(
+        "--people", nargs="+", metavar="NAME",
+        help="Only media containing these named people (face recognition).",
+    )
     return p
 
 
@@ -97,6 +103,7 @@ def build_filter_query(args) -> FilterOptions:
         aperture_range=aperture_range,
         iso_range=iso_range,
         shutter_speed_range=shutter_range,
+        people=getattr(args, "people", None),
     )
 
 
@@ -142,6 +149,35 @@ def parse_args(argv=None):
     p_report.add_argument("drive", type=Path)
     p_report.add_argument("--to", required=True, type=Path, dest="output")
     p_report.add_argument("--figures", action="store_true")
+
+    # ── face recognition ─────────────────────────────────────────────────────
+    p_scan = sub.add_parser("scan-faces", help="Detect & embed faces in every catalogued image (GPU).")
+    p_scan.add_argument("drive", type=Path)
+    p_scan.add_argument("--rescan", action="store_true", help="Clear all face data and scan everything again.")
+    p_scan.add_argument("--limit", type=int, default=None, help="Scan at most N images (testing).")
+
+    p_cluster = sub.add_parser("cluster-faces", help="Group face embeddings into people.")
+    p_cluster.add_argument("drive", type=Path)
+    p_cluster.add_argument("--algo", choices=["hdbscan", "dbscan"], default="hdbscan")
+    p_cluster.add_argument("--eps", type=float, default=0.45, help="DBSCAN cosine epsilon.")
+    p_cluster.add_argument("--min-samples", type=int, default=4, help="DBSCAN min samples.")
+    p_cluster.add_argument("--min-cluster-size", type=int, default=5, help="HDBSCAN min cluster size.")
+    g_mode = p_cluster.add_mutually_exclusive_group()
+    g_mode.add_argument("--rebuild", action="store_true", help="Drop all people and re-cluster from scratch.")
+    g_mode.add_argument("--incremental", action="store_true", help="Match new faces to existing people (fast).")
+
+    p_people = sub.add_parser("people", help="List detected people and their photo counts.")
+    p_people.add_argument("drive", type=Path)
+
+    p_name = sub.add_parser("name-person", help="Set (or clear) the name of a person cluster.")
+    p_name.add_argument("drive", type=Path)
+    p_name.add_argument("person_id", type=int)
+    p_name.add_argument("name", nargs="?", default=None, help="Name to assign; omit to clear.")
+
+    p_merge = sub.add_parser("merge-persons", help="Merge several person clusters into one.")
+    p_merge.add_argument("drive", type=Path)
+    p_merge.add_argument("dest", type=int, help="Destination person id (kept).")
+    p_merge.add_argument("sources", type=int, nargs="+", help="Person ids merged into dest.")
 
     return parser.parse_args(argv)
 
@@ -235,6 +271,76 @@ def _handle_report(args):
                 logger.error(f"Figure generation failed (install the 'figures' extra?): {exc}")
 
 
+def _handle_scan_faces(args):
+    cb = TqdmProgress("Scanning faces")
+    with GalleryRepository.open(args.drive) as repo:
+        try:
+            report = scan_faces(repo, rescan=args.rescan, limit=args.limit, progress_callback=cb)
+        finally:
+            cb.close()
+    logger.success(
+        f"Scanned {report.images_scanned:,} images — {report.faces_found:,} faces "
+        f"(provider={report.provider})."
+    )
+
+
+def _handle_cluster_faces(args):
+    with GalleryRepository.open(args.drive) as repo:
+        report = cluster_faces(
+            repo, algo=args.algo, eps=args.eps, min_samples=args.min_samples,
+            min_cluster_size=args.min_cluster_size, rebuild=args.rebuild,
+            incremental=args.incremental,
+        )
+    if args.incremental:
+        logger.success(
+            f"Matched {report.faces_assigned:,} faces to {report.persons_matched} people."
+        )
+    else:
+        logger.success(
+            f"{report.persons_created} people from {report.faces_assigned:,} faces "
+            f"({report.noise:,} ungrouped)."
+        )
+
+
+def _handle_people(args):
+    with GalleryRepository.open(args.drive, read_only=True) as repo:
+        people = repo.list_persons()
+    if not people:
+        logger.info("No people yet. Run `scan-faces` then `cluster-faces`.")
+        return
+    print(f"{'ID':>5}  {'FACES':>6}  {'NAME':<24}  SAMPLE")
+    for p in people:
+        name = p["name"] or "(unnamed)"
+        sample = p["cover_relpath"] or ""
+        print(f"{p['id']:>5}  {p['face_count']:>6}  {name:<24}  {sample}")
+    print(f"\n{len(people)} people. Name one with: smart-gallery name-person <drive> <id> \"<name>\"")
+
+
+def _handle_name_person(args):
+    with GalleryRepository.open(args.drive) as repo:
+        if repo.get_person(args.person_id) is None:
+            logger.error(f"No person with id {args.person_id}.")
+            sys.exit(1)
+        repo.set_person_name(args.person_id, args.name)
+    if args.name:
+        logger.success(f"Person {args.person_id} named '{args.name}'.")
+    else:
+        logger.success(f"Cleared the name of person {args.person_id}.")
+
+
+def _handle_merge_persons(args):
+    with GalleryRepository.open(args.drive) as repo:
+        if repo.get_person(args.dest) is None:
+            logger.error(f"No destination person with id {args.dest}.")
+            sys.exit(1)
+        repo.merge_persons(args.dest, args.sources)
+        dest = repo.get_person(args.dest)
+    logger.success(
+        f"Merged {len(args.sources)} cluster(s) into person {args.dest} "
+        f"({dest['face_count']:,} faces)."
+    )
+
+
 _HANDLERS = {
     "init": _handle_init,
     "import": _handle_import,
@@ -242,6 +348,11 @@ _HANDLERS = {
     "export": _handle_export,
     "dashboard": _handle_dashboard,
     "report": _handle_report,
+    "scan-faces": _handle_scan_faces,
+    "cluster-faces": _handle_cluster_faces,
+    "people": _handle_people,
+    "name-person": _handle_name_person,
+    "merge-persons": _handle_merge_persons,
 }
 
 

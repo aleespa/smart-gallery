@@ -8,17 +8,27 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from loguru import logger
 
-from smart_gallery.config import drive_root_of, resolve_db_path
-from smart_gallery.db.schema import init_schema
+from smart_gallery.config import (
+    FACE_EMBEDDING_DIM,
+    drive_root_of,
+    resolve_db_path,
+    to_abspath,
+)
+from smart_gallery.db.schema import init_schema, migrate
 from smart_gallery.db.where import build_where
-from smart_gallery.models import DB_COLUMNS, MediaItem
+from smart_gallery.models import (
+    DB_COLUMNS,
+    FACE_COLUMNS,
+    PERSON_COLUMNS,
+    MediaItem,
+    Person,
+)
 from smart_gallery.organize.filters import FilterOptions
 
 _DELETE_CHUNK = 500
@@ -44,6 +54,17 @@ _UPSERT_SQL = (
     f"updated_at=datetime('now')"
 )
 
+_FACE_COLUMN_LIST = ", ".join(FACE_COLUMNS)
+_FACE_PLACEHOLDERS = ", ".join("?" for _ in FACE_COLUMNS)
+_FACE_INSERT_SQL = (
+    f"INSERT INTO faces ({_FACE_COLUMN_LIST}) VALUES ({_FACE_PLACEHOLDERS})"
+)
+_PERSON_COLUMN_LIST = ", ".join(PERSON_COLUMNS)
+_PERSON_PLACEHOLDERS = ", ".join("?" for _ in PERSON_COLUMNS)
+_PERSON_INSERT_SQL = (
+    f"INSERT INTO persons ({_PERSON_COLUMN_LIST}) VALUES ({_PERSON_PLACEHOLDERS})"
+)
+
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
@@ -66,6 +87,9 @@ class GalleryRepository:
             conn = sqlite3.connect(str(db_path), timeout=5.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA busy_timeout=5000;")
+        # FK enforcement makes deletes cascade faces/face_scan_state for a media
+        # row (and NULL out person_id when a person is removed).
+        conn.execute("PRAGMA foreign_keys=ON;")
         if not read_only:
             try:
                 conn.execute("PRAGMA journal_mode=WAL;")
@@ -88,6 +112,9 @@ class GalleryRepository:
         repo = cls(cls._connect(db_path, read_only), drive_root_of(db_path), db_path)
         if create:
             repo.init_schema()
+        elif not read_only:
+            # Bring older (v1) catalogs up to date in place: adds the face tables.
+            migrate(repo.conn)
         return repo
 
     @classmethod
@@ -264,3 +291,227 @@ class GalleryRepository:
         lo = date.fromisoformat(row["lo"]) if row and row["lo"] else None
         hi = date.fromisoformat(row["hi"]) if row and row["hi"] else None
         return lo, hi
+
+    # ── faces: scanning (schema v2) ──────────────────────────────────────────
+    def count_unscanned_images(self, det_version: str) -> int:
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM media_items "
+            "WHERE media_type='image' AND id NOT IN "
+            "(SELECT media_id FROM face_scan_state WHERE det_version=?)",
+            (det_version,),
+        ).fetchone()
+        return int(row["n"])
+
+    def unscanned_images(self, det_version: str) -> List[Tuple[int, str]]:
+        """Return (media_id, abspath) for images not yet scanned at this
+        ``det_version``. Materialized (not a live cursor) so the scan loop can
+        write faces back on the same connection while iterating."""
+        cur = self.conn.execute(
+            "SELECT id, relpath FROM media_items "
+            "WHERE media_type='image' AND id NOT IN "
+            "(SELECT media_id FROM face_scan_state WHERE det_version=?) "
+            "ORDER BY id",
+            (det_version,),
+        )
+        return [
+            (r["id"], str(to_abspath(r["relpath"], self.drive_root))) for r in cur
+        ]
+
+    def add_scan_results(self, results, det_version: str) -> int:
+        """Persist a chunk of scan results in one transaction. ``results`` is an
+        iterable of ``(media_id, list[Face])``; faceless images get an
+        ``n_faces=0`` state row so they are not retried. Returns faces inserted."""
+        cur = self.conn.cursor()
+        inserted = 0
+        for media_id, faces in results:
+            if faces:
+                cur.executemany(_FACE_INSERT_SQL, [f.as_params() for f in faces])
+                inserted += len(faces)
+            cur.execute(
+                "INSERT INTO face_scan_state(media_id, n_faces, det_version) "
+                "VALUES(?, ?, ?) ON CONFLICT(media_id) DO UPDATE SET "
+                "n_faces=excluded.n_faces, det_version=excluded.det_version, "
+                "scanned_at=datetime('now')",
+                (media_id, len(faces), det_version),
+            )
+        self.conn.commit()
+        return inserted
+
+    def clear_faces_for(self, media_ids: Iterable[int]) -> int:
+        """Delete faces + scan state for these media (so they re-scan)."""
+        ids = list(media_ids)
+        cur = self.conn.cursor()
+        for i in range(0, len(ids), _DELETE_CHUNK):
+            chunk = ids[i : i + _DELETE_CHUNK]
+            ph = ", ".join("?" for _ in chunk)
+            cur.execute(f"DELETE FROM faces WHERE media_id IN ({ph})", chunk)
+            cur.execute(
+                f"DELETE FROM face_scan_state WHERE media_id IN ({ph})", chunk
+            )
+        self.conn.commit()
+        return len(ids)
+
+    def reset_all_faces(self) -> None:
+        """Wipe all face data (faces, scan state, persons) for a full --rescan."""
+        self.conn.execute("DELETE FROM faces")
+        self.conn.execute("DELETE FROM face_scan_state")
+        self.conn.execute("DELETE FROM persons")
+        self.conn.commit()
+
+    def invalidate_faces_by_relpath(self, relpaths: Iterable[str]) -> int:
+        """Clear face data for changed files (sync calls this for updated rows so
+        the next scan re-processes them). Returns media rows invalidated."""
+        rels = list(relpaths)
+        ids: List[int] = []
+        for i in range(0, len(rels), _DELETE_CHUNK):
+            chunk = rels[i : i + _DELETE_CHUNK]
+            ph = ", ".join("?" for _ in chunk)
+            rows = self.conn.execute(
+                f"SELECT id FROM media_items WHERE relpath IN ({ph})", chunk
+            ).fetchall()
+            ids.extend(r["id"] for r in rows)
+        if ids:
+            self.clear_faces_for(ids)
+        return len(ids)
+
+    # ── faces: clustering / persons (schema v2) ──────────────────────────────
+    def faces_count(self) -> int:
+        return int(
+            self.conn.execute("SELECT COUNT(*) AS n FROM faces").fetchone()["n"]
+        )
+
+    def load_embeddings(self, *, only_unassigned: bool = False):
+        """Return ``(face_ids[int64 N], embeddings[float32 N×D], person_ids[object N])``."""
+        import numpy as np
+
+        sql = "SELECT id, embedding, person_id FROM faces"
+        if only_unassigned:
+            sql += " WHERE person_id IS NULL"
+        sql += " ORDER BY id"
+        rows = self.conn.execute(sql).fetchall()
+        n = len(rows)
+        ids = np.empty(n, dtype=np.int64)
+        embs = np.empty((n, FACE_EMBEDDING_DIM), dtype=np.float32)
+        pids = np.empty(n, dtype=object)
+        for i, r in enumerate(rows):
+            ids[i] = r["id"]
+            embs[i] = np.frombuffer(r["embedding"], dtype=np.float32)
+            pids[i] = r["person_id"]
+        return ids, embs, pids
+
+    def load_person_centroids(self):
+        """Return ``(person_ids[int64 P], centroids[float32 P×D])`` (named or not)."""
+        import numpy as np
+
+        rows = self.conn.execute(
+            "SELECT id, centroid FROM persons WHERE centroid IS NOT NULL ORDER BY id"
+        ).fetchall()
+        ids = np.array([r["id"] for r in rows], dtype=np.int64)
+        if not rows:
+            return ids, np.empty((0, FACE_EMBEDDING_DIM), dtype=np.float32)
+        mat = np.stack(
+            [np.frombuffer(r["centroid"], dtype=np.float32) for r in rows]
+        )
+        return ids, mat
+
+    def clear_persons(self) -> None:
+        """Unassign every face and drop all persons (for a full --rebuild)."""
+        self.conn.execute("UPDATE faces SET person_id=NULL, cluster_id=NULL")
+        self.conn.execute("DELETE FROM persons")
+        self.conn.commit()
+
+    def create_person(self, person: Person) -> int:
+        cur = self.conn.execute(_PERSON_INSERT_SQL, person.as_params())
+        self.conn.commit()
+        return int(cur.lastrowid)
+
+    def assign_faces(
+        self, person_id: Optional[int], cluster_id: Optional[int], face_ids
+    ) -> None:
+        ids = [int(i) for i in face_ids]
+        cur = self.conn.cursor()
+        for i in range(0, len(ids), _DELETE_CHUNK):
+            chunk = ids[i : i + _DELETE_CHUNK]
+            ph = ", ".join("?" for _ in chunk)
+            cur.execute(
+                f"UPDATE faces SET person_id=?, cluster_id=? WHERE id IN ({ph})",
+                [person_id, cluster_id, *chunk],
+            )
+        self.conn.commit()
+
+    def recompute_person(self, person_id: int) -> None:
+        """Refresh a person's centroid (L2-normalized mean), face_count and
+        cover (highest det_score). Deletes the person if it has no faces left."""
+        import numpy as np
+
+        rows = self.conn.execute(
+            "SELECT id, embedding, det_score FROM faces WHERE person_id=?",
+            (person_id,),
+        ).fetchall()
+        if not rows:
+            self.conn.execute("DELETE FROM persons WHERE id=?", (person_id,))
+            self.conn.commit()
+            return
+        embs = np.stack(
+            [np.frombuffer(r["embedding"], dtype=np.float32) for r in rows]
+        )
+        centroid = embs.mean(axis=0)
+        norm = float(np.linalg.norm(centroid))
+        if norm > 0:
+            centroid = centroid / norm
+        cover = max(rows, key=lambda r: (r["det_score"] or 0.0))
+        self.conn.execute(
+            "UPDATE persons SET centroid=?, face_count=?, cover_face_id=?, "
+            "updated_at=datetime('now') WHERE id=?",
+            (
+                centroid.astype("float32").tobytes(),
+                len(rows),
+                cover["id"],
+                person_id,
+            ),
+        )
+        self.conn.commit()
+
+    def list_persons(self) -> List[dict]:
+        """Persons with a cover-photo relpath, biggest first."""
+        cur = self.conn.execute(
+            "SELECT p.id, p.name, p.face_count, p.cover_face_id, "
+            "m.relpath AS cover_relpath "
+            "FROM persons p "
+            "LEFT JOIN faces f ON f.id = p.cover_face_id "
+            "LEFT JOIN media_items m ON m.id = f.media_id "
+            "ORDER BY p.face_count DESC, p.id"
+        )
+        return [dict(r) for r in cur]
+
+    def get_person(self, person_id: int) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT id, name, cluster_id, face_count, cover_face_id "
+            "FROM persons WHERE id=?",
+            (person_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def set_person_name(self, person_id: int, name: Optional[str]) -> bool:
+        cur = self.conn.execute(
+            "UPDATE persons SET name=?, updated_at=datetime('now') WHERE id=?",
+            (name, person_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def merge_persons(self, dst_id: int, src_ids: Iterable[int]) -> None:
+        """Re-point all faces of ``src_ids`` onto ``dst_id``, delete the emptied
+        source persons, and recompute the destination's stats."""
+        srcs = [int(s) for s in src_ids if int(s) != dst_id]
+        if not srcs:
+            return
+        cur = self.conn.cursor()
+        ph = ", ".join("?" for _ in srcs)
+        cur.execute(
+            f"UPDATE faces SET person_id=? WHERE person_id IN ({ph})",
+            [dst_id, *srcs],
+        )
+        cur.execute(f"DELETE FROM persons WHERE id IN ({ph})", srcs)
+        self.conn.commit()
+        self.recompute_person(dst_id)

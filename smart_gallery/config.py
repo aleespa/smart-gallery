@@ -13,7 +13,13 @@ from typing import Iterator, Set
 
 DB_DIRNAME = ".smart_gallery"
 DB_FILENAME = "gallery.db"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+# Face recognition. ``FACE_DET_VERSION`` tags every scanned row so a model change
+# can invalidate and re-scan. Bump it if the model pack or detector changes.
+FACE_MODEL_NAME = "buffalo_l"
+FACE_DET_VERSION = "buffalo_l@scrfd10g_r50"
+FACE_EMBEDDING_DIM = 512
 
 IMAGE_EXTENSIONS: Set[str] = {".jpg", ".jpeg", ".png", ".webp", ".cr2", ".cr3"}
 VIDEO_EXTENSIONS: Set[str] = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".3gp", ".gif"}

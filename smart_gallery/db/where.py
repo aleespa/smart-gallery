@@ -80,5 +80,16 @@ def build_where(query: FilterOptions) -> Tuple[str, list]:
             (parse_shutter(low_s), parse_shutter(high_s)),
         )
 
+    # People filter (face recognition): media that contain a face assigned to a
+    # named person. SQL-only — there is no MediaItem-level equivalent, so this
+    # clause has no counterpart in organize.filters.matches().
+    if query.people:
+        clauses.append(
+            "id IN (SELECT f.media_id FROM faces f "
+            "JOIN persons p ON p.id = f.person_id "
+            f"WHERE p.name IN ({_qmarks(query.people)}))"
+        )
+        params.extend(query.people)
+
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     return where, params

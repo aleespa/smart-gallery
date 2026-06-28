@@ -33,13 +33,22 @@ inside this repo, or just `smart-gallery …` once the package is on your `PATH`
 smart-gallery <command> [options]
 
 Commands:
-  init        Create a catalog on a drive and scan it.
-  import      Copy media into the drive and update the catalog.
-  sync        Reconcile the catalog with the live drive.
-  export      Copy a filtered subset out to another directory.
-  dashboard   Launch the Streamlit dashboard on a catalog.
-  report      Write an Excel report (and optional figures).
+  init          Create a catalog on a drive and scan it.
+  import        Copy media into the drive and update the catalog.
+  sync          Reconcile the catalog with the live drive.
+  export        Copy a filtered subset out to another directory.
+  dashboard     Launch the Streamlit dashboard on a catalog.
+  report        Write an Excel report (and optional figures).
+  scan-faces    Detect & embed faces in every catalogued image (GPU).
+  cluster-faces Group face embeddings into people.
+  people        List detected people and their photo counts.
+  name-person   Set (or clear) the name of a person cluster.
+  merge-persons Merge several person clusters into one.
 ```
+
+> **Face recognition / group by person** (optional `faces` extra, GPU) — detect
+> faces, cluster them into people, name them, then filter with `--people NAME`.
+> See **[FACES.md](FACES.md)** for the full guide.
 
 A `<drive>` argument is any directory you treat as a root — `E:/`, a subfolder,
 or a direct path to a `gallery.db`. The catalog always resolves to
@@ -204,11 +213,11 @@ python -m custom.import_canon
 ```
 smart_gallery/
   config.py        # path resolution, extensions, scan walk
-  models.py        # MediaItem — schema source of truth
-  analysis/        # ExifTool extraction -> MediaItem
+  models.py        # MediaItem (+ Face/Person) — schema source of truth
+  analysis/        # ExifTool extraction -> MediaItem; faces.py (InsightFace, GPU)
   organize/        # FilterOptions + in-memory predicate + placement engine
-  db/              # SQLite schema, repository, FilterOptions->SQL
-  services/        # init, import, sync, export
+  db/              # SQLite schema (+ migrate), repository, FilterOptions->SQL
+  services/        # init, import, sync, export, scan_faces, cluster_faces
   reporting/       # optional Excel report + figures
   dashboard/app.py # Streamlit, reads the DB directly
 custom/            # per-device import recipes

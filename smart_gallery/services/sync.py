@@ -12,7 +12,7 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 from loguru import logger
 
 from smart_gallery.analysis import analyze_paths
-from smart_gallery.config import iter_files, to_relpath
+from smart_gallery.config import FACE_DET_VERSION, iter_files, to_relpath
 from smart_gallery.db import GalleryRepository
 
 # relpath -> (absolute path, size_bytes, mtime_ns)
@@ -87,7 +87,19 @@ def sync_drive(
         changed_paths, drive_root=repo.drive_root, progress_callback=progress_callback
     )
     repo.apply_sync(to_delete, items)
+
+    # Deleted media cascade their faces via the FK; changed media keep their row
+    # id but their pixels (and thus faces) are now stale, so drop those face rows
+    # so the next scan re-processes them. New files are unscanned already.
+    if to_update:
+        repo.invalidate_faces_by_relpath(to_update)
+
+    pending = repo.count_unscanned_images(FACE_DET_VERSION)
     logger.success(
         f"Sync complete — +{report.added} ~{report.updated} -{report.deleted}"
     )
+    if pending:
+        logger.info(
+            f"{pending:,} image(s) pending face scan — run `smart-gallery scan-faces`."
+        )
     return report

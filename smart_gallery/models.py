@@ -12,10 +12,13 @@ import os
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from smart_gallery.config import classify, to_abspath, to_relpath
 from smart_gallery.util import clean_text, format_shutter, to_float, to_int
+
+if TYPE_CHECKING:
+    import numpy as np
 
 # Columns persisted in ``media_items``, in INSERT/SELECT order. ``id``,
 # ``created_at`` and ``updated_at`` are managed by the database itself.
@@ -294,3 +297,132 @@ def _sanitize(name: Optional[str]) -> Optional[str]:
     if not name:
         return None
     return re.sub(r"[^\w\-_. ]", "_", name)
+
+
+# ── face recognition entities (schema v2) ────────────────────────────────────
+# Insertable columns, in INSERT order, kept in lock-step with db/schema.py
+# (a parity test asserts the SQL tables match these tuples). ``id`` and the
+# persons timestamps are managed by the database.
+FACE_COLUMNS = (
+    "media_id",
+    "bbox_x",
+    "bbox_y",
+    "bbox_w",
+    "bbox_h",
+    "det_score",
+    "embedding",
+    "person_id",
+    "cluster_id",
+)
+
+PERSON_COLUMNS = (
+    "name",
+    "cluster_id",
+    "centroid",
+    "face_count",
+    "cover_face_id",
+)
+
+
+def embedding_to_blob(vec) -> bytes:
+    """Pack a float embedding/centroid into a compact float32 BLOB."""
+    import numpy as np
+
+    return np.asarray(vec, dtype=np.float32).tobytes()
+
+
+def blob_to_embedding(blob: Optional[bytes]):
+    """Unpack a float32 BLOB back into a 1-D numpy array (or None)."""
+    import numpy as np
+
+    if blob is None:
+        return None
+    return np.frombuffer(blob, dtype=np.float32)
+
+
+@dataclass(slots=True)
+class Face:
+    """One detected face: a bounding box + an L2-normalized ArcFace embedding,
+    linked to a ``media_items`` row by ``media_id``."""
+
+    media_id: int
+    bbox_x: float
+    bbox_y: float
+    bbox_w: float
+    bbox_h: float
+    det_score: Optional[float]
+    embedding: "np.ndarray"  # float32, length FACE_EMBEDDING_DIM, L2-normalized
+    person_id: Optional[int] = None
+    cluster_id: Optional[int] = None
+    id: Optional[int] = None  # DB-assigned on read-back
+
+    @staticmethod
+    def columns() -> tuple[str, ...]:
+        return FACE_COLUMNS
+
+    def as_params(self) -> tuple:
+        """Ordered values matching ``FACE_COLUMNS`` (embedding -> float32 blob)."""
+        values = []
+        for col in FACE_COLUMNS:
+            val = getattr(self, col)
+            values.append(embedding_to_blob(val) if col == "embedding" else val)
+        return tuple(values)
+
+    @classmethod
+    def from_detection(
+        cls, media_id: int, bbox, det_score, embedding
+    ) -> "Face":
+        """Build from an InsightFace detection: bbox is (x1, y1, x2, y2)."""
+        x1, y1, x2, y2 = (float(v) for v in bbox)
+        return cls(
+            media_id=media_id,
+            bbox_x=x1,
+            bbox_y=y1,
+            bbox_w=x2 - x1,
+            bbox_h=y2 - y1,
+            det_score=None if det_score is None else float(det_score),
+            embedding=embedding,
+        )
+
+    @classmethod
+    def from_row(cls, row) -> "Face":
+        return cls(
+            id=row["id"],
+            media_id=row["media_id"],
+            bbox_x=row["bbox_x"],
+            bbox_y=row["bbox_y"],
+            bbox_w=row["bbox_w"],
+            bbox_h=row["bbox_h"],
+            det_score=row["det_score"],
+            embedding=blob_to_embedding(row["embedding"]),
+            person_id=row["person_id"],
+            cluster_id=row["cluster_id"],
+        )
+
+
+@dataclass(slots=True)
+class Person:
+    """A cluster of faces believed to be one individual. ``name`` is NULL until
+    the user labels it; ``centroid`` is the L2-normalized mean embedding used for
+    incremental matching of new faces."""
+
+    name: Optional[str] = None
+    cluster_id: Optional[int] = None
+    centroid: Optional["np.ndarray"] = None
+    face_count: int = 0
+    cover_face_id: Optional[int] = None
+    id: Optional[int] = None  # DB-assigned
+
+    @staticmethod
+    def columns() -> tuple[str, ...]:
+        return PERSON_COLUMNS
+
+    def as_params(self) -> tuple:
+        """Ordered values matching ``PERSON_COLUMNS`` (centroid -> float32 blob)."""
+        return (
+            self.name,
+            self.cluster_id,
+            None if self.centroid is None else embedding_to_blob(self.centroid),
+            self.face_count,
+            self.cover_face_id,
+        )

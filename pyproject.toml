@@ -19,11 +19,35 @@ dependencies = [
 # Static matplotlib/geopandas report figures. The dashboard does not need these.
 figures = ["matplotlib>=3.10", "geopandas>=1.1", "geodatasets>=2026.1.0"]
 
+# GPU face recognition (scan-faces / cluster-faces). Verified on an RTX 5060
+# (Blackwell sm_120). Install with: uv sync --extra faces
+# IMPORTANT: install ONLY onnxruntime-gpu, never the CPU `onnxruntime` — they
+# unpack to the same folder and the CPU build shadows the GPU one (silent CPU
+# fallback). InsightFace pulls in `onnxruntime`; the [tool.uv] override below
+# excludes it. Blackwell needs the nvidia-cudnn-cu13 wheel + onnxruntime's
+# preload_dlls() (handled in smart_gallery/analysis/faces.py).
+faces = [
+    "insightface>=0.7.3",
+    "onnxruntime-gpu>=1.27",
+    "nvidia-cudnn-cu13>=9.23",
+    "nvidia-cuda-runtime>=13.3",
+    "nvidia-cufft>=12.3",
+    "opencv-python-headless>=4.10",
+    "scikit-learn>=1.5",
+    "hdbscan>=0.8.40",
+    "rawpy>=0.22",
+]
+
 [project.scripts]
 smart-gallery = "smart_gallery.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=9.0.2", "ruff>=0.14", "black>=26.1"]
+
+[tool.uv]
+# Keep the CPU `onnxruntime` (a transitive dep of insightface) out of the
+# environment so it can't shadow onnxruntime-gpu. The marker never resolves.
+override-dependencies = ["onnxruntime; sys_platform == 'no-such-platform'"]
 
 [build-system]
 requires = ["hatchling"]
@@ -35,4 +59,5 @@ packages = ["smart_gallery"]
 [tool.pytest.ini_options]
 markers = [
     "exiftool: integration tests that require the ExifTool binary on PATH",
+    "faces: tests that require the optional 'faces' extra (insightface/GPU)",
 ]

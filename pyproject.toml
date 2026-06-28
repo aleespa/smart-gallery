@@ -1,0 +1,38 @@
+[project]
+name = "smart_gallery"
+version = "0.1.0"
+description = "DB-centric photo & video gallery: a per-drive SQLite catalog with import, sync, export, and a dashboard."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "loguru~=0.7.3",
+    "tqdm>=4.67",
+    "pandas~=2.2.3",
+    "numpy>=2.0",
+    "openpyxl~=3.1.5",
+    "xlsxwriter>=3.2.9",
+    "streamlit>=1.53",
+    "plotly>=6.6.0",
+]
+
+[project.optional-dependencies]
+# Static matplotlib/geopandas report figures. The dashboard does not need these.
+figures = ["matplotlib>=3.10", "geopandas>=1.1", "geodatasets>=2026.1.0"]
+
+[project.scripts]
+smart-gallery = "smart_gallery.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=9.0.2", "ruff>=0.14", "black>=26.1"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["smart_gallery"]
+
+[tool.pytest.ini_options]
+markers = [
+    "exiftool: integration tests that require the ExifTool binary on PATH",
+]

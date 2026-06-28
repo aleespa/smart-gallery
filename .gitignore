@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual env / uv
+.venv/
+
+# Test / tooling caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# smart_gallery catalogs and their SQLite sidecars (never commit a drive's DB)
+.smart_gallery/
+*.db
+*.db-wal
+*.db-shm
+
+# Generated reports / figures
+*.xlsx
+Figures/
+logs/
+
+# IDE
+.idea/
+.vscode/
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -222,6 +222,55 @@ def test_filter_by_person_id_and_name(repo, make_item):
     assert repo.query_relpaths(FilterOptions(people=["Alice"])) == ["a.jpg"]
 
 
+def test_delete_person_unassigns_faces(repo, make_item):
+    mid = _add_media(repo, make_item, "a.jpg")
+    repo.add_scan_results(
+        [(mid, [Face.from_detection(mid, (0, 0, 40, 40), 0.9, _unit(0))])],
+        FACE_DET_VERSION,
+    )
+    ids, _, _ = repo.load_embeddings()
+    pid = repo.create_person(Person(cluster_id=0))
+    repo.assign_faces(pid, 0, ids.tolist())
+
+    assert repo.delete_person(pid) is True
+    assert repo.get_person(pid) is None
+    assert repo.faces_count() == 1  # face kept, just unassigned
+    _, _, pids = repo.load_embeddings()
+    assert pids[0] is None
+    assert repo.delete_person(9999) is False
+
+
+@pytest.mark.faces
+def test_split_person_breaks_impure_cluster(repo, make_item):
+    pytest.importorskip("sklearn")
+    from smart_gallery.services.cluster_faces import split_person
+
+    rng = np.random.default_rng(1)
+    mid = _add_media(repo, make_item, "a.jpg")
+    faces = []
+    for center in (_unit(0), _unit(200)):  # two genuinely different people
+        for _ in range(6):
+            v = center + 0.01 * rng.standard_normal(512).astype(np.float32)
+            faces.append(
+                Face.from_detection(
+                    mid, (0, 0, 40, 40), 0.9, (v / np.linalg.norm(v)).astype("float32")
+                )
+            )
+    repo.add_scan_results([(mid, faces)], FACE_DET_VERSION)
+
+    ids, _, _ = repo.load_embeddings()
+    impure = repo.create_person(Person(cluster_id=0))  # both people lumped together
+    repo.assign_faces(impure, 0, ids.tolist())
+    repo.recompute_person(impure)
+    assert len(repo.list_persons()) == 1
+
+    report = split_person(repo, impure, algo="dbscan", eps=0.3, min_samples=2)
+    assert report.persons_created == 2
+    people = repo.list_persons()
+    assert len(people) == 2  # the one impure cluster became two clean ones
+    assert sorted(p["face_count"] for p in people) == [6, 6]
+
+
 def test_merge_persons(repo, make_item):
     mid = _add_media(repo, make_item, "a.jpg")
     f1 = Face.from_detection(mid, (0, 0, 40, 40), 0.9, _unit(0))

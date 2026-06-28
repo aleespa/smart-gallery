@@ -525,6 +525,32 @@ class GalleryRepository:
         self.conn.commit()
         return cur.rowcount > 0
 
+    def delete_person(self, person_id: int) -> bool:
+        """Drop a person and unassign its faces (they become re-clusterable)."""
+        self.conn.execute(
+            "UPDATE faces SET person_id=NULL, cluster_id=NULL WHERE person_id=?",
+            (person_id,),
+        )
+        cur = self.conn.execute("DELETE FROM persons WHERE id=?", (person_id,))
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def load_face_embeddings_for_person(self, person_id: int):
+        """Return ``(face_ids[int64 N], embeddings[float32 N×D])`` for one person."""
+        import numpy as np
+
+        rows = self.conn.execute(
+            "SELECT id, embedding FROM faces WHERE person_id=? ORDER BY id",
+            (person_id,),
+        ).fetchall()
+        n = len(rows)
+        ids = np.empty(n, dtype=np.int64)
+        embs = np.empty((n, FACE_EMBEDDING_DIM), dtype=np.float32)
+        for i, r in enumerate(rows):
+            ids[i] = r["id"]
+            embs[i] = np.frombuffer(r["embedding"], dtype=np.float32)
+        return ids, embs
+
     def merge_persons(self, dst_id: int, src_ids: Iterable[int]) -> None:
         """Re-point all faces of ``src_ids`` onto ``dst_id``, delete the emptied
         source persons, and recompute the destination's stats."""

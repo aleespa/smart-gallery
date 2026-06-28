@@ -1,4 +1,8 @@
-from smart_gallery.services.cluster_faces import ClusterReport, cluster_faces
+from smart_gallery.services.cluster_faces import (
+    ClusterReport,
+    cluster_faces,
+    split_person,
+)
 from smart_gallery.services.export import ExportReport, export_media
 from smart_gallery.services.import_media import ImportReport, import_media
 from smart_gallery.services.init_db import init_drive
@@ -17,5 +21,6 @@ __all__ = [
     "scan_faces",
     "ScanFacesReport",
     "cluster_faces",
+    "split_person",
     "ClusterReport",
 ]

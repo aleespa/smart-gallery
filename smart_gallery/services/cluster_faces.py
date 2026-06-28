@@ -123,6 +123,59 @@ def cluster_faces(
     return report
 
 
+def split_person(
+    repo: GalleryRepository,
+    person_id: int,
+    *,
+    algo: str = "hdbscan",
+    eps: float = 0.30,
+    min_samples: int = 3,
+    min_cluster_size: int = 3,
+    pca: int = 0,
+) -> ClusterReport:
+    """Re-cluster the faces of ONE (impure) person with tighter settings,
+    replacing it with the resulting sub-clusters. Faces that no longer group
+    are left unassigned. Other people are untouched.
+
+    Defaults are deliberately stricter than a full run (smaller eps / cluster
+    size) since the point is to break an over-merged cluster apart.
+    """
+    if repo.get_person(person_id) is None:
+        raise ValueError(f"No person with id {person_id}.")
+
+    face_ids, embs = repo.load_face_embeddings_for_person(person_id)
+    if len(face_ids) == 0:
+        logger.warning(f"Person {person_id} has no faces.")
+        return ClusterReport()
+
+    logger.info(
+        f"Splitting person {person_id} ({len(face_ids):,} faces) with {algo} "
+        f"(eps={eps}, min_cluster_size={min_cluster_size})…"
+    )
+    work = _maybe_pca(embs, pca)
+    labels = _run_clustering(work, algo, eps, min_samples, min_cluster_size)
+
+    import numpy as np
+
+    repo.delete_person(person_id)  # unassigns these faces; we re-assign below
+
+    report = ClusterReport(noise=int((labels == -1).sum()))
+    for label in sorted({int(v) for v in labels if v >= 0}):
+        member_fids = face_ids[np.where(labels == label)[0]].tolist()
+        new_id = repo.create_person(Person(cluster_id=label))
+        repo.assign_faces(new_id, label, member_fids)
+        repo.recompute_person(new_id)
+        report.persons_created += 1
+        report.faces_assigned += len(member_fids)
+
+    logger.success(
+        f"Split person {person_id} -> {report.persons_created} sub-cluster(s) "
+        f"from {report.faces_assigned:,} faces ({report.noise:,} now ungrouped). "
+        f"Review with `smart-gallery people`."
+    )
+    return report
+
+
 def _incremental(repo: GalleryRepository, match_thresh: float) -> ClusterReport:
     import numpy as np
 

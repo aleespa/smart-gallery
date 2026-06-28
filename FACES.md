@@ -68,6 +68,11 @@ uv run smart-gallery name-person E:/ 2 "Bob"
 # 5) If one person was split into two clusters, merge them (keep id 1).
 uv run smart-gallery merge-persons E:/ 1 7 9
 
+#    If one cluster is impure (mixes different people), split it apart, or
+#    delete it so its faces can be re-grouped (see "Fixing bad clusters" below).
+uv run smart-gallery split-person E:/ 12
+uv run smart-gallery delete-person E:/ 12
+
 # 6) Browse / export by person — works anywhere the normal filters work.
 uv run smart-gallery export --from E:/ --to D:/AlicePhotos --people Alice
 uv run smart-gallery report E:/ --to alice.xlsx --people Alice
@@ -107,7 +112,47 @@ uv run smart-gallery cluster-faces E:/ --incremental  # attach new faces to know
 
 ---
 
-## 4. Tuning (environment variables)
+## 4. Fixing bad clusters
+
+Clustering is unsupervised, so you'll sometimes get an **impure cluster** — one
+person id that mixes several different people. This usually comes from a few
+low-quality faces (blurry, profile, very small) bridging distinct people, or
+thresholds that were a touch too loose. Fixes, least to most disruptive:
+
+**A. Split just that cluster (surgical — leaves all other people alone):**
+```bash
+uv run smart-gallery split-person E:/ 12          # re-cluster person 12, tighter
+uv run smart-gallery split-person E:/ 12 --eps 0.25 --min-cluster-size 4
+```
+It re-clusters only person 12's faces with stricter settings and replaces it
+with the resulting sub-clusters (new ids); faces that no longer group cleanly
+become unassigned. Then `people` to review and `name-person` the good ones.
+
+**B. Delete the junk cluster entirely:**
+```bash
+uv run smart-gallery delete-person E:/ 12   # faces become unassigned, not deleted
+uv run smart-gallery cluster-faces E:/ --incremental   # optionally re-home them
+```
+
+**C. Re-cluster everything more strictly** (blunt; drops names — re-name after):
+```bash
+uv run smart-gallery cluster-faces E:/ --rebuild --pca 128 --min-cluster-size 8
+# or DBSCAN with a tighter radius:
+uv run smart-gallery cluster-faces E:/ --rebuild --algo dbscan --eps 0.38 --min-samples 5
+```
+Stricter settings (smaller `--eps`, larger `--min-cluster-size`/`--min-samples`)
+reduce over-merging, at the cost of more ungrouped faces and real people
+occasionally splitting into two clusters (use `merge-persons` for those).
+
+**D. Drop weak faces at the source** (if bad merges persist): raise
+`SG_FACES_MIN_SCORE` (e.g. `0.6`) and re-scan, so blurry bridge-faces never enter
+clustering:
+```bash
+SG_FACES_MIN_SCORE=0.6 uv run smart-gallery scan-faces E:/ --rescan
+uv run smart-gallery cluster-faces E:/
+```
+
+## 5. Tuning (environment variables)
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -123,7 +168,7 @@ Clustering knobs are flags on `cluster-faces`: `--algo {hdbscan,dbscan}`,
 
 ---
 
-## 5. Where the data lives
+## 6. Where the data lives
 
 Two new tables in each drive's `gallery.db` (schema v2; old catalogs migrate
 automatically on first open):

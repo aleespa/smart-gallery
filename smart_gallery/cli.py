@@ -22,6 +22,7 @@ from smart_gallery.services import (
     import_media,
     init_drive,
     scan_faces,
+    split_person,
     sync_drive,
 )
 
@@ -188,6 +189,19 @@ def parse_args(argv=None):
     p_merge.add_argument("drive", type=Path)
     p_merge.add_argument("dest", type=int, help="Destination person id (kept).")
     p_merge.add_argument("sources", type=int, nargs="+", help="Person ids merged into dest.")
+
+    p_split = sub.add_parser("split-person", help="Re-cluster one impure person into tighter sub-clusters.")
+    p_split.add_argument("drive", type=Path)
+    p_split.add_argument("person_id", type=int)
+    p_split.add_argument("--algo", choices=["hdbscan", "dbscan"], default="hdbscan")
+    p_split.add_argument("--eps", type=float, default=0.30, help="DBSCAN cosine epsilon (tighter than a full run).")
+    p_split.add_argument("--min-samples", type=int, default=3)
+    p_split.add_argument("--min-cluster-size", type=int, default=3, help="HDBSCAN min cluster size.")
+    p_split.add_argument("--pca", type=int, default=0, metavar="DIMS")
+
+    p_del = sub.add_parser("delete-person", help="Delete a person cluster (its faces become unassigned).")
+    p_del.add_argument("drive", type=Path)
+    p_del.add_argument("person_id", type=int)
 
     return parser.parse_args(argv)
 
@@ -369,6 +383,34 @@ def _handle_merge_persons(args):
     )
 
 
+def _handle_split_person(args):
+    with GalleryRepository.open(args.drive) as repo:
+        try:
+            report = split_person(
+                repo, args.person_id, algo=args.algo, eps=args.eps,
+                min_samples=args.min_samples, min_cluster_size=args.min_cluster_size,
+                pca=args.pca,
+            )
+        except ValueError as exc:
+            logger.error(str(exc))
+            sys.exit(1)
+    logger.success(
+        f"Split into {report.persons_created} sub-cluster(s); "
+        f"{report.noise:,} faces now ungrouped. Review with `people`."
+    )
+
+
+def _handle_delete_person(args):
+    with GalleryRepository.open(args.drive) as repo:
+        if not repo.delete_person(args.person_id):
+            logger.error(f"No person with id {args.person_id}.")
+            sys.exit(1)
+    logger.success(
+        f"Deleted person {args.person_id}; its faces are now unassigned "
+        f"(re-group them with `cluster-faces`)."
+    )
+
+
 _HANDLERS = {
     "init": _handle_init,
     "import": _handle_import,
@@ -381,6 +423,8 @@ _HANDLERS = {
     "people": _handle_people,
     "name-person": _handle_name_person,
     "merge-persons": _handle_merge_persons,
+    "split-person": _handle_split_person,
+    "delete-person": _handle_delete_person,
 }
 
 

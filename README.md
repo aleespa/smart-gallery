@@ -44,6 +44,8 @@ Commands:
   people        List detected people and their photo counts.
   name-person   Set (or clear) the name of a person cluster.
   merge-persons Merge several person clusters into one.
+  split-person  Re-cluster one impure person into tighter sub-clusters.
+  delete-person Delete a person cluster (its faces become unassigned).
 ```
 
 > **Face recognition / group by person** (optional `faces` extra, GPU) — detect

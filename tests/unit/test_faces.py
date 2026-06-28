@@ -174,6 +174,54 @@ def test_person_assign_and_recompute(repo, make_item):
     assert listed[0]["cover_relpath"] == "a.jpg"
 
 
+def test_person_samples_top_n_distinct_media(repo, make_item):
+    mids = [_add_media(repo, make_item, f"p{i}.jpg") for i in range(4)]
+    results = [
+        # two faces in the same photo -> that photo counts once, by its best score
+        (mids[0], [
+            Face.from_detection(mids[0], (0, 0, 40, 40), 0.90, _unit(0)),
+            Face.from_detection(mids[0], (0, 0, 40, 40), 0.95, _unit(0)),
+        ]),
+        (mids[1], [Face.from_detection(mids[1], (0, 0, 40, 40), 0.80, _unit(0))]),
+        (mids[2], [Face.from_detection(mids[2], (0, 0, 40, 40), 0.70, _unit(0))]),
+        (mids[3], [Face.from_detection(mids[3], (0, 0, 40, 40), 0.60, _unit(0))]),
+    ]
+    repo.add_scan_results(results, FACE_DET_VERSION)
+    ids, _, _ = repo.load_embeddings()
+    pid = repo.create_person(Person(cluster_id=0))
+    repo.assign_faces(pid, 0, ids.tolist())
+
+    samples = repo.person_samples(limit=3)
+    assert samples[pid] == ["p0.jpg", "p1.jpg", "p2.jpg"]  # distinct, best-first, capped
+
+
+def test_filter_by_person_id_and_name(repo, make_item):
+    from smart_gallery.organize.filters import FilterOptions
+
+    mid_a = _add_media(repo, make_item, "a.jpg")
+    mid_b = _add_media(repo, make_item, "b.jpg")
+    repo.add_scan_results(
+        [
+            (mid_a, [Face.from_detection(mid_a, (0, 0, 40, 40), 0.9, _unit(0))]),
+            (mid_b, [Face.from_detection(mid_b, (0, 0, 40, 40), 0.9, _unit(1))]),
+        ],
+        FACE_DET_VERSION,
+    )
+    fa = repo.conn.execute(
+        "SELECT id FROM faces WHERE media_id=?", (mid_a,)
+    ).fetchone()[0]
+    pid = repo.create_person(Person(cluster_id=0))
+    repo.assign_faces(pid, 0, [fa])
+
+    # Filter by id works while the cluster is still unnamed.
+    assert repo.query_relpaths(FilterOptions(person_ids=[pid])) == ["a.jpg"]
+    # An id with no faces yields nothing.
+    assert repo.query_relpaths(FilterOptions(person_ids=[9999])) == []
+    # And by name once named.
+    repo.set_person_name(pid, "Alice")
+    assert repo.query_relpaths(FilterOptions(people=["Alice"])) == ["a.jpg"]
+
+
 def test_merge_persons(repo, make_item):
     mid = _add_media(repo, make_item, "a.jpg")
     f1 = Face.from_detection(mid, (0, 0, 40, 40), 0.9, _unit(0))

@@ -52,12 +52,14 @@ uv run smart-gallery scan-faces E:/
 # 2) Group the faces into people (creates unnamed "person" clusters).
 uv run smart-gallery cluster-faces E:/
 
-# 3) Review the clusters and their photo counts.
+# 3) Review the clusters. Each person lists its 3 best sample photos as
+#    clickable links (OSC-8) — click one to open the image in your viewer.
 uv run smart-gallery people E:/
-#   ID   FACES  NAME              SAMPLE
-#    1     842  (unnamed)         2025/05/Pictures/IMG_0001.JPG
-#    2     310  (unnamed)         2024/12/IMG_2207.JPG
-#   ...
+#   [   1]  (unnamed)                 842 faces
+#            IMG_0001.JPG   IMG_2207.JPG   IMG_3310.JPG     <- each is clickable
+#   [   2]  (unnamed)                 310 faces
+#            ...
+# Show more/fewer thumbnails per person with --samples N (default 3).
 
 # 4) Name the ones you recognise.
 uv run smart-gallery name-person E:/ 1 "Alice"
@@ -69,10 +71,15 @@ uv run smart-gallery merge-persons E:/ 1 7 9
 # 6) Browse / export by person — works anywhere the normal filters work.
 uv run smart-gallery export --from E:/ --to D:/AlicePhotos --people Alice
 uv run smart-gallery report E:/ --to alice.xlsx --people Alice
+
+# Export an UNNAMED cluster by its id (from `people`) before you've named it:
+uv run smart-gallery export --from E:/ --to D:/Cluster7 --person-ids 7
+uv run smart-gallery export --from E:/ --to D:/Some --person-ids 7 12 30
 ```
 
-`--people NAME [NAME ...]` is also accepted by `export` and `report`, and shows
-up as a filter in the dashboard.
+`--people NAME [NAME ...]` (by name) and `--person-ids ID [ID ...]` (by cluster
+id, works before naming) are both accepted by `export` and `report`. Combining
+several ids/names selects media containing **any** of them.
 
 ---
 

@@ -26,8 +26,10 @@ class FilterOptions:
     # People filter (face recognition). SQL-only: it joins the faces/persons
     # tables, which a lone MediaItem has no knowledge of, so it is intentionally
     # NOT evaluated by the in-memory ``matches()`` predicate (and is excluded
-    # from the SQL/in-memory parity test).
+    # from the SQL/in-memory parity test). ``people`` matches by name;
+    # ``person_ids`` matches by cluster id (works before a cluster is named).
     people: Optional[List[str]] = None
+    person_ids: Optional[List[int]] = None
 
 
 def normalize_extensions(extensions) -> Optional[List[str]]:
@@ -66,6 +68,7 @@ def is_query_empty(query: Optional[FilterOptions]) -> bool:
         or query.iso_range
         or query.shutter_speed_range
         or query.people
+        or query.person_ids
     )
 
 

@@ -34,15 +34,33 @@ class ClusterReport:
     noise: int = 0
 
 
+def _maybe_pca(embs, pca: int):
+    """Optionally reduce embedding dimensionality before clustering. ArcFace
+    vectors keep almost all of their discriminative variance in well under 512
+    dims, and a smaller space makes HDBSCAN's space-partitioning tree (which
+    degrades badly past ~50-d) far faster. Re-normalize so cosine geometry
+    holds. Off by default to preserve maximum accuracy."""
+    if not pca or pca >= embs.shape[1] or embs.shape[0] <= pca:
+        return embs
+    import numpy as np
+    from sklearn.decomposition import PCA
+
+    reduced = PCA(n_components=pca, random_state=0).fit_transform(embs)
+    norms = np.linalg.norm(reduced, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    logger.info(f"PCA-reduced embeddings {embs.shape[1]} -> {pca} dims for clustering")
+    return (reduced / norms).astype("float32")
+
+
 def _run_clustering(embs, algo: str, eps: float, min_samples: int,
                     min_cluster_size: int):
     """Return an integer label per row (>=0 = cluster, -1 = noise)."""
     if algo == "dbscan":
         from sklearn.cluster import DBSCAN
 
-        return DBSCAN(eps=eps, min_samples=min_samples, metric="cosine").fit_predict(
-            embs
-        )
+        return DBSCAN(
+            eps=eps, min_samples=min_samples, metric="cosine", n_jobs=-1
+        ).fit_predict(embs)
     try:
         from hdbscan import HDBSCAN
     except ImportError as exc:  # pragma: no cover - optional within the extra
@@ -50,8 +68,10 @@ def _run_clustering(embs, algo: str, eps: float, min_samples: int,
             "hdbscan not installed; use --algo dbscan or `uv sync --extra faces`."
         ) from exc
     # Euclidean on L2-normalized vectors ranks the same as cosine.
+    # core_dist_n_jobs=-1 parallelizes the dominant core-distance phase across
+    # all cores — the biggest safe speedup at scale (no effect on the result).
     return HDBSCAN(
-        min_cluster_size=min_cluster_size, metric="euclidean"
+        min_cluster_size=min_cluster_size, metric="euclidean", core_dist_n_jobs=-1
     ).fit_predict(embs)
 
 
@@ -65,6 +85,7 @@ def cluster_faces(
     rebuild: bool = False,
     incremental: bool = False,
     match_thresh: float = DEFAULT_MATCH_THRESH,
+    pca: int = 0,
 ) -> ClusterReport:
     if incremental:
         return _incremental(repo, match_thresh)
@@ -78,6 +99,7 @@ def cluster_faces(
         logger.success("No unassigned faces to cluster.")
         return ClusterReport()
 
+    embs = _maybe_pca(embs, pca)
     logger.info(f"Clustering {len(face_ids):,} faces with {algo}…")
     labels = _run_clustering(embs, algo, eps, min_samples, min_cluster_size)
 

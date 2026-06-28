@@ -484,6 +484,31 @@ class GalleryRepository:
         )
         return [dict(r) for r in cur]
 
+    def person_samples(self, limit: int = 3) -> Dict[int, List[str]]:
+        """For every person, up to ``limit`` distinct sample-photo relpaths,
+        highest detection score first. One query for all persons."""
+        sql = """
+        WITH best AS (
+            SELECT f.person_id AS pid, m.id AS mid, m.relpath AS relpath,
+                   MAX(f.det_score) AS score
+            FROM faces f JOIN media_items m ON m.id = f.media_id
+            WHERE f.person_id IS NOT NULL
+            GROUP BY f.person_id, m.id
+        ),
+        ranked AS (
+            SELECT pid, relpath,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY pid ORDER BY score DESC, relpath
+                   ) AS rn
+            FROM best
+        )
+        SELECT pid, relpath FROM ranked WHERE rn <= ? ORDER BY pid, rn
+        """
+        out: Dict[int, List[str]] = {}
+        for r in self.conn.execute(sql, (limit,)):
+            out.setdefault(r["pid"], []).append(r["relpath"])
+        return out
+
     def get_person(self, person_id: int) -> Optional[dict]:
         row = self.conn.execute(
             "SELECT id, name, cluster_id, face_count, cover_face_id "

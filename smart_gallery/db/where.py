@@ -91,5 +91,12 @@ def build_where(query: FilterOptions) -> Tuple[str, list]:
         )
         params.extend(query.people)
 
+    if query.person_ids:
+        clauses.append(
+            "id IN (SELECT media_id FROM faces "
+            f"WHERE person_id IN ({_qmarks(query.person_ids)}))"
+        )
+        params.extend(query.person_ids)
+
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     return where, params

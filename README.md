@@ -203,11 +203,12 @@ Run `smart-gallery <command> --help` for the authoritative flag list.
 
 ## Per-device import recipes
 
-`custom/import_canon.py` and `custom/import_phone.py` are thin declarative
-configs over `custom/recipe.py`. Edit the paths/extensions and run:
+`custom/import_canon.ps1` and `custom/import_phone.ps1` are thin PowerShell
+wrappers over `smart-gallery import`. Each holds a small device config (source,
+per-drive photo/video targets, extensions) at the top; edit those and run:
 
-```bash
-python -m custom.import_canon
+```powershell
+./custom/import_canon.ps1
 ```
 
 ## Layout
@@ -222,6 +223,6 @@ smart_gallery/
   services/        # init, import, sync, export, scan_faces, cluster_faces
   reporting/       # optional Excel report + figures
   dashboard/app.py # Streamlit, reads the DB directly
-custom/            # per-device import recipes
+custom/            # per-device import wrappers (PowerShell over the CLI)
 tests/             # unit + integration (ExifTool-marked)
 ```

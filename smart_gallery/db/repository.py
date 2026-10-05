@@ -400,11 +400,13 @@ class GalleryRepository:
         return ids, embs, pids
 
     def load_person_centroids(self):
-        """Return ``(person_ids[int64 P], centroids[float32 P×D])`` (named or not)."""
+        """Return person ids and centroids, preferring supplied sample references."""
         import numpy as np
 
         rows = self.conn.execute(
-            "SELECT id, centroid FROM persons WHERE centroid IS NOT NULL ORDER BY id"
+            "SELECT id, COALESCE(reference_centroid, centroid) AS centroid "
+            "FROM persons WHERE COALESCE(reference_centroid, centroid) IS NOT NULL "
+            "ORDER BY id"
         ).fetchall()
         ids = np.array([r["id"] for r in rows], dtype=np.int64)
         if not rows:
@@ -413,6 +415,135 @@ class GalleryRepository:
             [np.frombuffer(r["centroid"], dtype=np.float32) for r in rows]
         )
         return ids, mat
+
+    def identify_faces_from_samples(
+        self, references, *, threshold: float, margin: float, reassign: bool = False
+    ) -> dict:
+        """Persist sample references and assign confident faces atomically.
+
+        ``references`` maps person names to normalized vectors. With ``reassign``,
+        only existing assignments to these named people are reconsidered; other
+        people's faces remain untouched.
+        """
+        import numpy as np
+
+        conn = self.conn
+        assigned = unmatched = ambiguous = already_assigned = 0
+        conn.execute("BEGIN")
+        try:
+            target_ids = {}
+            for name, embedding in references.items():
+                matches = conn.execute(
+                    "SELECT id FROM persons WHERE name=? COLLATE NOCASE ORDER BY id",
+                    (name,),
+                ).fetchall()
+                if len(matches) > 1:
+                    raise ValueError(
+                        f"Multiple existing people match the name {name!r}; "
+                        "resolve duplicate names before identifying faces."
+                    )
+                if matches:
+                    row = matches[0]
+                    person_id = int(row["id"])
+                else:
+                    cur = conn.execute(
+                        "INSERT INTO persons(name, reference_centroid) VALUES(?, ?)",
+                        (name, np.asarray(embedding, dtype=np.float32).tobytes()),
+                    )
+                    person_id = int(cur.lastrowid)
+                target_ids[name] = person_id
+                conn.execute(
+                    "UPDATE persons SET reference_centroid=?, updated_at=datetime('now') "
+                    "WHERE id=?",
+                    (np.asarray(embedding, dtype=np.float32).tobytes(), person_id),
+                )
+
+            ids_by_name = {pid: name for name, pid in target_ids.items()}
+            target_ids_list = list(target_ids.values())
+            if reassign and target_ids_list:
+                placeholders = ",".join("?" for _ in target_ids_list)
+                conn.execute(
+                    f"UPDATE faces SET person_id=NULL, cluster_id=NULL "
+                    f"WHERE person_id IN ({placeholders})",
+                    target_ids_list,
+                )
+
+            rows = conn.execute(
+                "SELECT id, embedding, person_id FROM faces ORDER BY id"
+            ).fetchall()
+            eligible = []
+            for row in rows:
+                if row["person_id"] is None or (
+                    reassign and row["person_id"] in ids_by_name
+                ):
+                    eligible.append(row)
+                else:
+                    already_assigned += 1
+
+            names = list(references)
+            centroids = np.stack([references[name] for name in names]).astype(np.float32)
+            person_ids = [target_ids[name] for name in names]
+            for row in eligible:
+                embedding = np.frombuffer(row["embedding"], dtype=np.float32)
+                similarities = centroids @ embedding
+                order = np.argsort(similarities)
+                best_index = int(order[-1])
+                best_score = float(similarities[best_index])
+                second_score = float(similarities[order[-2]]) if len(order) > 1 else -1.0
+                if best_score < threshold:
+                    unmatched += 1
+                elif len(order) > 1 and best_score - second_score < margin:
+                    ambiguous += 1
+                else:
+                    conn.execute(
+                        "UPDATE faces SET person_id=?, cluster_id=NULL WHERE id=?",
+                        (person_ids[best_index], row["id"]),
+                    )
+                    assigned += 1
+
+            for person_id in set(target_ids.values()):
+                person_faces = conn.execute(
+                    "SELECT id, embedding, det_score FROM faces WHERE person_id=?",
+                    (person_id,),
+                ).fetchall()
+                if person_faces:
+                    mean = np.stack(
+                        [
+                            np.frombuffer(face["embedding"], dtype=np.float32)
+                            for face in person_faces
+                        ]
+                    ).mean(axis=0)
+                    norm = float(np.linalg.norm(mean))
+                    if norm:
+                        mean /= norm
+                    cover = max(person_faces, key=lambda face: face["det_score"] or 0.0)
+                    conn.execute(
+                        "UPDATE persons SET centroid=?, face_count=?, cover_face_id=?, "
+                        "updated_at=datetime('now') WHERE id=?",
+                        (
+                            mean.astype(np.float32).tobytes(),
+                            len(person_faces),
+                            cover["id"],
+                            person_id,
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE persons SET centroid=NULL, face_count=0, cover_face_id=NULL, "
+                        "updated_at=datetime('now') WHERE id=?",
+                        (person_id,),
+                    )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        return {
+            "assigned": assigned,
+            "unmatched": unmatched,
+            "ambiguous": ambiguous,
+            "already_assigned": already_assigned,
+            "persons": len(target_ids),
+        }
 
     def clear_persons(self) -> None:
         """Unassign every face and drop all persons (for a full --rebuild)."""

@@ -1,9 +1,9 @@
 # Face recognition — grouping photos by person
 
-smart_gallery can detect every face in your catalogued photos, group them into
-people automatically, let you name each person, and then filter/browse by
-person. Faces are stored **in the same per-drive `gallery.db`**, linked to the
-existing `media_items` rows — nothing in your media catalog changes.
+smart_gallery detects faces in your catalogued photos, identifies people from
+sample photos you provide, and lets you filter/browse by person. Faces are
+stored **in the same per-drive `gallery.db`**, linked to existing `media_items`
+rows — nothing in your media catalog changes.
 
 It runs on the GPU (NVIDIA, via InsightFace) and is **verified working on an RTX
 5060 / Blackwell**. A 90k-photo library scans in roughly **15–40 minutes**
@@ -49,42 +49,57 @@ Assuming your photos already live in a catalog (`smart-gallery init <drive>` /
 # 1) Detect + embed faces for every image (resumable; safe to re-run / kill).
 uv run smart-gallery scan-faces E:/
 
-# 2) Group the faces into people (creates unnamed "person" clusters).
-uv run smart-gallery cluster-faces E:/
+# 2) Make one directory per person, named as it should appear in the catalog.
+#    Put clear, single-face examples in each directory. Multiple examples help.
+#       E:/face_samples/Alice/*.jpg
+#       E:/face_samples/Bob/*.jpg
 
-# 3) Review the clusters. Each person lists its 3 best sample photos as
+# 3) Match catalog faces against those examples.
+uv run smart-gallery identify-faces E:/ --samples E:/face_samples
+
+# 4) Review the results. Each person lists its 3 best catalog photos as
 #    clickable links (OSC-8) — click one to open the image in your viewer.
 uv run smart-gallery people E:/
-#   [   1]  (unnamed)                 842 faces
+#   [   1]  Alice                    842 faces
 #            IMG_0001.JPG   IMG_2207.JPG   IMG_3310.JPG     <- each is clickable
-#   [   2]  (unnamed)                 310 faces
+#   [   2]  Bob                      310 faces
 #            ...
 # Show more/fewer thumbnails per person with --samples N (default 3).
 
-# 4) Name the ones you recognise.
-uv run smart-gallery name-person E:/ 1 "Alice"
-uv run smart-gallery name-person E:/ 2 "Bob"
-
-# 5) If one person was split into two clusters, merge them (keep id 1).
-uv run smart-gallery merge-persons E:/ 1 7 9
-
-#    If one cluster is impure (mixes different people), split it apart, or
-#    delete it so its faces can be re-grouped (see "Fixing bad clusters" below).
-uv run smart-gallery split-person E:/ 12
-uv run smart-gallery delete-person E:/ 12
-
-# 6) Browse / export by person — works anywhere the normal filters work.
+# 5) Browse / export by person.
 uv run smart-gallery export --from E:/ --to D:/AlicePhotos --people Alice
 uv run smart-gallery report E:/ --to alice.xlsx --people Alice
 
-# Export an UNNAMED cluster by its id (from `people`) before you've named it:
+# Optional: group faces which do not match any supplied samples.
+uv run smart-gallery cluster-faces E:/
+
+# Optional manual corrections.
+uv run smart-gallery merge-persons E:/ 1 7 9
+
+#    If one person has mixed faces, split it or delete it for re-identification.
+uv run smart-gallery split-person E:/ 12
+uv run smart-gallery delete-person E:/ 12
+
+# Export any person by its id (from `people`):
 uv run smart-gallery export --from E:/ --to D:/Cluster7 --person-ids 7
 uv run smart-gallery export --from E:/ --to D:/Some --person-ids 7 12 30
 ```
 
-`--people NAME [NAME ...]` (by name) and `--person-ids ID [ID ...]` (by cluster
-id, works before naming) are both accepted by `export` and `report`. Combining
-several ids/names selects media containing **any** of them.
+`identify-faces` requires exactly one detected face in each sample photo;
+photos with zero or multiple detected faces are skipped and reported. Each
+immediate subdirectory name becomes a person name. Faces below the similarity
+threshold or too close to another person's score remain unassigned. Tune the
+cosine threshold with `--threshold` (default `0.5`) and the required lead over
+the runner-up with `--margin` (default `0.05`). Re-running processes only
+unassigned faces, preserving existing assignments. Use `--reassign` to
+reconsider faces currently assigned to people named by the supplied sample
+directories; unmatched faces from those people become unassigned. Other people
+are left alone. Sample embeddings are stored separately from catalog centroids,
+so later updates do not replace the supplied references.
+
+`--people NAME [NAME ...]` and `--person-ids ID [ID ...]` are accepted by
+`export` and `report`. Combining several ids/names selects media containing any
+of them.
 
 ---
 
@@ -98,23 +113,27 @@ uv run smart-gallery sync E:/
 # ... 1,204 image(s) pending face scan — run `smart-gallery scan-faces`.
 
 uv run smart-gallery scan-faces E:/                 # only scans the new images
-uv run smart-gallery cluster-faces E:/ --incremental  # attach new faces to known people
+uv run smart-gallery identify-faces E:/ --samples E:/face_samples
+# Or match new faces to known centroids, including sample references:
+uv run smart-gallery cluster-faces E:/ --incremental
 ```
 
 * `scan-faces` skips images already scanned (tracked in `face_scan_state`), so
   it only processes what's new.
-* `cluster-faces --incremental` matches each new face to the nearest existing
-  named/unnamed person by centroid — fast, and it preserves your names.
-* Run a full `cluster-faces --rebuild` occasionally to re-derive clusters from
-  scratch (this drops names — re-name afterwards).
+* `identify-faces` matches new unassigned faces against the supplied sample
+  references and preserves existing assignments. `cluster-faces --incremental`
+  is also available and prefers sample references where present.
+* `cluster-faces --rebuild` is an optional unsupervised workflow; it removes
+  current people, including their names and sample references.
 * `sync` automatically drops face data for files whose pixels changed, and the
   database FK cascade removes faces for deleted files.
 
 ---
 
-## 4. Fixing bad clusters
+## 4. Fixing assignments
 
-Clustering is unsupervised, so you'll sometimes get an **impure cluster** — one
+Any matcher can occasionally make a wrong assignment, especially for similar
+looking people or low-quality faces. You may see an **impure person** — one
 person id that mixes several different people. This usually comes from a few
 low-quality faces (blurry, profile, very small) bridging distinct people, or
 thresholds that were a touch too loose. Fixes, least to most disruptive:
@@ -134,15 +153,15 @@ uv run smart-gallery delete-person E:/ 12   # faces become unassigned, not delet
 uv run smart-gallery cluster-faces E:/ --incremental   # optionally re-home them
 ```
 
-**C. Re-cluster everything more strictly** (blunt; drops names — re-name after):
+**C. Optionally re-cluster unassigned faces or rebuild all clusters:**
 ```bash
 uv run smart-gallery cluster-faces E:/ --rebuild --pca 128 --min-cluster-size 8
 # or DBSCAN with a tighter radius:
 uv run smart-gallery cluster-faces E:/ --rebuild --algo dbscan --eps 0.38 --min-samples 5
 ```
-Stricter settings (smaller `--eps`, larger `--min-cluster-size`/`--min-samples`)
-reduce over-merging, at the cost of more ungrouped faces and real people
-occasionally splitting into two clusters (use `merge-persons` for those).
+Stricter settings reduce over-merging, at the cost of more ungrouped faces. A
+full rebuild removes sample-created people and their labels; use it only when
+that is intended.
 
 **D. Drop weak faces at the source** (if bad merges persist): raise
 `SG_FACES_MIN_SCORE` (e.g. `0.6`) and re-scan, so blurry bridge-faces never enter
@@ -176,8 +195,9 @@ automatically on first open):
 * **`faces`** — one row per detected face: bounding box, detection score, a
   512-d L2-normalized ArcFace embedding (BLOB), and the `person_id` it belongs
   to. `media_id` links to `media_items.id`.
-* **`persons`** — one row per person: optional `name`, a centroid embedding for
-  matching, face count, and a cover face for listings.
+* **`persons`** — one row per person: optional `name`, a catalog-face centroid,
+  an optional sample-photo reference centroid, face count, and a cover face for
+  listings.
 * **`face_scan_state`** — bookkeeping for resumable scans.
 
 Because faces are keyed to `media_items.id` (not stored as media columns), the

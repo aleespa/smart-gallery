@@ -1,7 +1,7 @@
 """smart-gallery command-line interface.
 
-Verbs: init, import, sync, export, dashboard, report. Filter flags are shared
-across import/export/report via a parent parser and compiled to a FilterOptions.
+Verbs: init, import, sync, compare, export, dashboard, report. Filter flags are
+shared across import/export/report via a parent parser and compiled to a FilterOptions.
 """
 
 import argparse
@@ -18,12 +18,16 @@ from smart_gallery.db import GalleryRepository
 from smart_gallery.organize import FilterOptions, Options, normalize_extensions
 from smart_gallery.services import (
     cluster_faces,
+    compare_galleries,
     export_media,
+    format_compare_report,
     import_media,
+    identify_faces,
     init_drive,
     scan_faces,
     split_person,
     sync_drive,
+    write_compare_report,
 )
 
 
@@ -137,6 +141,16 @@ def parse_args(argv=None):
     p_sync.add_argument("drive", type=Path)
     p_sync.add_argument("--dry-run", action="store_true")
 
+    p_compare = sub.add_parser(
+        "compare", help="Compare the contents of two gallery catalogs."
+    )
+    p_compare.add_argument("gallery_a", type=Path, metavar="GALLERY_A")
+    p_compare.add_argument("gallery_b", type=Path, metavar="GALLERY_B")
+    p_compare.add_argument("--match-by", choices=["path", "name", "hash"], default="path")
+    p_compare.add_argument("--format", choices=["text", "json", "csv"], default="text")
+    p_compare.add_argument("--output", type=Path, help="Write the report to this file.")
+    p_compare.add_argument("--details", action="store_true", help="Include individual records in text output.")
+
     p_export = sub.add_parser("export", parents=[filt], help="Copy a filtered subset out to another directory.")
     p_export.add_argument("--from", required=True, type=Path, dest="drive")
     p_export.add_argument("--to", required=True, type=Path, dest="dest")
@@ -162,7 +176,35 @@ def parse_args(argv=None):
     p_scan.add_argument("--rescan", action="store_true", help="Clear all face data and scan everything again.")
     p_scan.add_argument("--limit", type=int, default=None, help="Scan at most N images (testing).")
 
-    p_cluster = sub.add_parser("cluster-faces", help="Group face embeddings into people.")
+    p_identify = sub.add_parser(
+        "identify-faces", help="Identify faces using person-named sample directories."
+    )
+    p_identify.add_argument("drive", type=Path)
+    p_identify.add_argument(
+        "--samples",
+        required=True,
+        type=Path,
+        help="Root directory containing one sample-photo directory per person.",
+    )
+    p_identify.add_argument(
+        "--threshold",
+        type=float,
+        default=0.5,
+        help="Minimum cosine similarity for a match (default: 0.5).",
+    )
+    p_identify.add_argument(
+        "--margin",
+        type=float,
+        default=0.05,
+        help="Minimum lead over the second-best match (default: 0.05).",
+    )
+    p_identify.add_argument(
+        "--reassign",
+        action="store_true",
+        help="Reconsider all faces assigned to people in the sample set.",
+    )
+
+    p_cluster = sub.add_parser("cluster-faces", help="Optionally cluster faces without sample photos.")
     p_cluster.add_argument("drive", type=Path)
     p_cluster.add_argument("--algo", choices=["hdbscan", "dbscan"], default="hdbscan")
     p_cluster.add_argument("--eps", type=float, default=0.45, help="DBSCAN cosine epsilon.")
@@ -250,6 +292,19 @@ def _handle_sync(args):
     )
 
 
+def _handle_compare(args):
+    report = compare_galleries(args.gallery_a, args.gallery_b, match_by=args.match_by)
+    if args.output:
+        output_path = write_compare_report(
+            report, args.output, output_format=args.format, details=args.details,
+        )
+        logger.success(f"Comparison written to {output_path}")
+    else:
+        print(format_compare_report(
+            report, output_format=args.format, details=args.details,
+        ))
+
+
 def _handle_export(args):
     options = None if args.mirror else Options(
         by_media_type=args.by_media_type, structure=args.structure, on_exist=args.on_exist,
@@ -324,6 +379,23 @@ def _handle_cluster_faces(args):
             f"{report.persons_created} people from {report.faces_assigned:,} faces "
             f"({report.noise:,} ungrouped)."
         )
+
+
+def _handle_identify_faces(args):
+    with GalleryRepository.open(args.drive) as repo:
+        report = identify_faces(
+            repo,
+            args.samples,
+            threshold=args.threshold,
+            margin=args.margin,
+            reassign=args.reassign,
+        )
+    logger.success(
+        f"Identified {report.faces_assigned:,} face(s) across {report.persons} people; "
+        f"{report.faces_unmatched:,} unmatched, {report.faces_ambiguous:,} ambiguous, "
+        f"{report.faces_already_assigned:,} already assigned. "
+        f"Usable samples: {report.sample_images}; skipped: {report.sample_skipped}."
+    )
 
 
 def _osc8_link(uri: str, text: str) -> str:
@@ -415,10 +487,12 @@ _HANDLERS = {
     "init": _handle_init,
     "import": _handle_import,
     "sync": _handle_sync,
+    "compare": _handle_compare,
     "export": _handle_export,
     "dashboard": _handle_dashboard,
     "report": _handle_report,
     "scan-faces": _handle_scan_faces,
+    "identify-faces": _handle_identify_faces,
     "cluster-faces": _handle_cluster_faces,
     "people": _handle_people,
     "name-person": _handle_name_person,
@@ -433,6 +507,9 @@ def main(argv=None):
     try:
         _HANDLERS[args.command](args)
     except (FileNotFoundError, FileExistsError) as exc:
+        logger.error(str(exc))
+        sys.exit(1)
+    except ValueError as exc:
         logger.error(str(exc))
         sys.exit(1)
     except Exception as exc:  # noqa: BLE001

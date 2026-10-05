@@ -36,11 +36,13 @@ Commands:
   init          Create a catalog on a drive and scan it.
   import        Copy media into the drive and update the catalog.
   sync          Reconcile the catalog with the live drive.
+  compare       Compare two gallery catalogs.
   export        Copy a filtered subset out to another directory.
   dashboard     Launch the Streamlit dashboard on a catalog.
   report        Write an Excel report (and optional figures).
   scan-faces    Detect & embed faces in every catalogued image (GPU).
-  cluster-faces Group face embeddings into people.
+  identify-faces Identify faces using person-named sample directories.
+  cluster-faces Optionally group faces without sample photos.
   people        List detected people and their photo counts.
   name-person   Set (or clear) the name of a person cluster.
   merge-persons Merge several person clusters into one.
@@ -49,7 +51,7 @@ Commands:
 ```
 
 > **Face recognition / group by person** (optional `faces` extra, GPU) — detect
-> faces, cluster them into people, name them, then filter with `--people NAME`.
+> faces, identify them from person-named sample directories, then filter with `--people NAME`.
 > See **[FACES.md](FACES.md)** for the full guide.
 
 A `<drive>` argument is any directory you treat as a root — `E:/`, a subfolder,
@@ -138,6 +140,31 @@ Does a cheap path-and-stat walk, diffs it against the catalog, then **prunes row
 whose files are gone** and **analyzes only new or changed files** (detected by
 size + mtime). Unchanged files are never re-read. Prints a summary like
 `+12 ~3 -5 =40100` (added / updated / deleted / unchanged).
+
+### `compare` — compare two catalogs
+
+```bash
+smart-gallery compare <gallery-a> <gallery-b>
+                     [--match-by path|name|hash]
+                     [--format text|json|csv] [--output FILE] [--details]
+```
+
+Each gallery can be a drive root or a direct `gallery.db` path. The default
+`path` mode matches catalog-relative paths; `name` matches unique filenames;
+`hash` matches unique stored content hashes. Name or hash duplicates are
+reported as ambiguous. Hash mode requires at least one stored hash in each
+catalog, and records without hashes are shown as unmatched. The current CLI
+does not populate content hashes, so hash mode is useful only when catalogs
+already contain them. Matched rows are marked changed when any other stored
+media field differs. A basic summary is printed by default; `--details` adds
+records in text mode. JSON includes summary counts; CSV contains comparison
+records. Use `--output` to save any format. Comparison opens both databases
+read-only; unlike `sync`, it does not inspect or reconcile the live files.
+
+```bash
+smart-gallery compare E:/ F:/ --match-by name --details
+smart-gallery compare E:/.smart_gallery/gallery.db F:/ --format csv --output diff.csv
+```
 
 ### `export` — copy a filtered subset elsewhere
 

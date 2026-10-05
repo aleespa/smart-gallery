@@ -84,7 +84,7 @@ def test_person_as_params():
     assert Person().as_params()[PERSON_COLUMNS.index("centroid")] is None
 
 
-# ── migration v1 -> v2 ───────────────────────────────────────────────────────
+# ── migration v1 -> v3 ───────────────────────────────────────────────────────
 def test_migrate_v1_catalog_gains_face_tables(tmp_path):
     db = tmp_path / "gallery.db"
     conn = sqlite3.connect(db)
@@ -95,7 +95,7 @@ def test_migrate_v1_catalog_gains_face_tables(tmp_path):
     conn.close()
 
     with GalleryRepository.open(db) as repo:  # read-write -> migrate runs
-        assert repo.schema_version == 2
+        assert repo.schema_version == 3
         tables = {
             r[0]
             for r in repo.conn.execute(

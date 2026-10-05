@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 
 # ── device config ────────────────────────────────────────────────────────────
-$Source          = 'C:\Users\Alejandro\Pictures\Pixel10-07.06.2026'
+$Source          = 'C:\Users\Alejandro\Pictures\Pixel 03.08.2026'
 $PhotoTargets    = @('E:\Photos\Other cameras', 'D:\Photos\Other cameras')
 $VideoTargets    = @('E:\Videos',               'D:\Videos')
 $PhotoExtensions = @('.cr3', '.jpg')

@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS persons (
     name          TEXT,
     cluster_id    INTEGER,
     centroid      BLOB,
+    reference_centroid BLOB,
     face_count    INTEGER NOT NULL DEFAULT 0,
     cover_face_id INTEGER,
     created_at    TEXT DEFAULT (datetime('now')),
@@ -141,6 +142,13 @@ def migrate(conn: sqlite3.Connection) -> None:
         conn.execute(CREATE_FACE_SCAN_STATE)
         for stmt in CREATE_INDEXES:
             conn.execute(stmt)
+
+    if current < 3:
+        columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(persons)")
+        }
+        if "reference_centroid" not in columns:
+            conn.execute("ALTER TABLE persons ADD COLUMN reference_centroid BLOB")
 
     conn.execute(
         "INSERT INTO meta(key, value) VALUES('schema_version', ?) "

@@ -319,6 +319,7 @@ PERSON_COLUMNS = (
     "name",
     "cluster_id",
     "centroid",
+    "reference_centroid",
     "face_count",
     "cover_face_id",
 )
@@ -403,12 +404,13 @@ class Face:
 @dataclass(slots=True)
 class Person:
     """A cluster of faces believed to be one individual. ``name`` is NULL until
-    the user labels it; ``centroid`` is the L2-normalized mean embedding used for
-    incremental matching of new faces."""
+    the user labels it; ``centroid`` summarizes assigned catalog faces and
+    ``reference_centroid`` stores the L2-normalized sample-photo reference."""
 
     name: Optional[str] = None
     cluster_id: Optional[int] = None
     centroid: Optional["np.ndarray"] = None
+    reference_centroid: Optional["np.ndarray"] = None
     face_count: int = 0
     cover_face_id: Optional[int] = None
     id: Optional[int] = None  # DB-assigned
@@ -418,11 +420,14 @@ class Person:
         return PERSON_COLUMNS
 
     def as_params(self) -> tuple:
-        """Ordered values matching ``PERSON_COLUMNS`` (centroid -> float32 blob)."""
+        """Ordered values matching ``PERSON_COLUMNS`` (embeddings -> float32 blobs)."""
         return (
             self.name,
             self.cluster_id,
             None if self.centroid is None else embedding_to_blob(self.centroid),
+            None
+            if self.reference_centroid is None
+            else embedding_to_blob(self.reference_centroid),
             self.face_count,
             self.cover_face_id,
         )

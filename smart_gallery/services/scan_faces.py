@@ -108,6 +108,6 @@ def scan_faces(
     logger.success(
         f"Face scan complete — {report.images_scanned:,} images, "
         f"{report.faces_found:,} faces (provider={report.provider}). "
-        f"Next: `smart-gallery cluster-faces` to group them into people."
+        f"Next: `smart-gallery identify-faces` with a sample directory for each person."
     )
     return report

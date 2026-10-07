@@ -10,6 +10,7 @@ from smart_gallery.services.compare import (
     format_compare_report,
     write_compare_report,
 )
+from smart_gallery.services.convert_cr3 import ConvertCr3Report, convert_cr3
 from smart_gallery.services.export import ExportReport, export_media
 from smart_gallery.services.import_media import ImportReport, import_media
 from smart_gallery.services.identify_faces import (
@@ -41,4 +42,6 @@ __all__ = [
     "write_compare_report",
     "CompareReport",
     "CompareRow",
+    "convert_cr3",
+    "ConvertCr3Report",
 ]

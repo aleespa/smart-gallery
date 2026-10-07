@@ -38,6 +38,7 @@ Commands:
   sync          Reconcile the catalog with the live drive.
   compare       Compare two gallery catalogs.
   export        Copy a filtered subset out to another directory.
+  convert-raw   Extract embedded JPEG previews from CR2/CR3 files.
   dashboard     Launch the Streamlit dashboard on a catalog.
   report        Write an Excel report (and optional figures).
   scan-faces    Detect & embed faces in every catalogued image (GPU).
@@ -196,6 +197,25 @@ smart-gallery export --from E:/ --to D:/Selects \
 
 # Or copy a subset preserving the drive's structure, plus a portable catalog:
 smart-gallery export --from E:/ --to D:/Mirror --file-types image --mirror --portable-db
+```
+
+### `convert-raw` — extract JPEG previews from Canon RAW files
+
+```bash
+smart-gallery convert-raw <sources…>
+```
+
+Each source can be a CR2/CR3 file or a directory. Directories are searched
+recursively. ExifTool extracts the embedded `JpgFromRaw` image and writes a
+same-named `.jpg` beside each RAW file. This is typically the full-resolution
+embedded JPEG; it may still be more compressed than the separate JPEG produced
+by the camera's RAW+JPEG mode. If a same-stem `.jpg` or `.jpeg` already
+exists, that RAW file is skipped. The previous `convert-cr3` command name
+remains available as an alias.
+
+```bash
+smart-gallery convert-raw F:/DCIM
+smart-gallery convert-raw F:/DCIM/IMG_0001.CR3
 ```
 
 ### `dashboard` — explore the catalog

@@ -19,6 +19,7 @@ from smart_gallery.organize import FilterOptions, Options, normalize_extensions
 from smart_gallery.services import (
     cluster_faces,
     compare_galleries,
+    convert_cr3,
     export_media,
     format_compare_report,
     import_media,
@@ -161,6 +162,18 @@ def parse_args(argv=None):
     p_export.add_argument("--no-manifest", action="store_false", dest="manifest", default=True)
     p_export.add_argument("--portable-db", action="store_true")
     p_export.add_argument("--dry-run", action="store_true")
+
+    p_convert = sub.add_parser(
+        "convert-raw",
+        aliases=["convert-cr3"],
+        help="Extract embedded JPEG previews from CR2/CR3 files.",
+    )
+    p_convert.add_argument(
+        "sources",
+        nargs="+",
+        type=Path,
+        help="CR2/CR3 files or directories to search recursively.",
+    )
 
     p_dash = sub.add_parser("dashboard", help="Launch the Streamlit dashboard on a catalog.")
     p_dash.add_argument("drive", type=Path)
@@ -318,6 +331,10 @@ def _handle_export(args):
     logger.success(
         f"Exported {report.copied} of {report.matched} matched files to {args.dest}."
     )
+
+
+def _handle_convert_cr3(args):
+    convert_cr3(args.sources)
 
 
 def _handle_dashboard(args):
@@ -489,6 +506,8 @@ _HANDLERS = {
     "sync": _handle_sync,
     "compare": _handle_compare,
     "export": _handle_export,
+    "convert-raw": _handle_convert_cr3,
+    "convert-cr3": _handle_convert_cr3,
     "dashboard": _handle_dashboard,
     "report": _handle_report,
     "scan-faces": _handle_scan_faces,

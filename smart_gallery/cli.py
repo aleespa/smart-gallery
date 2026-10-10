@@ -1,7 +1,8 @@
-"""smart-gallery command-line interface.
+"""smart-gallery command-line and terminal interfaces.
 
-Verbs: init, import, sync, compare, export, dashboard, report. Filter flags are
-shared across import/export/report via a parent parser and compiled to a FilterOptions.
+Commands include init, import, sync, compare, export, dashboard, report, and ui.
+Filter flags are shared across import/export/report via a parent parser and
+compiled to a FilterOptions.
 """
 
 import argparse
@@ -121,7 +122,7 @@ def build_filter_query(args) -> FilterOptions:
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         prog="smart-gallery",
-        description="DB-centric photo & video catalog: init, import, sync, export, dashboard.",
+        description="DB-centric photo & video catalog: init, import, sync, export, dashboard, ui.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
     filt = _filter_parser()
@@ -177,6 +178,8 @@ def parse_args(argv=None):
 
     p_dash = sub.add_parser("dashboard", help="Launch the Streamlit dashboard on a catalog.")
     p_dash.add_argument("drive", type=Path)
+
+    sub.add_parser("ui", aliases=["tui"], help="Open the interactive Textual terminal interface.")
 
     p_report = sub.add_parser("report", parents=[filt], help="Write an Excel report (and optional figures).")
     p_report.add_argument("drive", type=Path)
@@ -500,6 +503,12 @@ def _handle_delete_person(args):
     )
 
 
+def _handle_ui(args):
+    from smart_gallery.tui import run
+
+    run()
+
+
 _HANDLERS = {
     "init": _handle_init,
     "import": _handle_import,
@@ -509,6 +518,8 @@ _HANDLERS = {
     "convert-raw": _handle_convert_cr3,
     "convert-cr3": _handle_convert_cr3,
     "dashboard": _handle_dashboard,
+    "ui": _handle_ui,
+    "tui": _handle_ui,
     "report": _handle_report,
     "scan-faces": _handle_scan_faces,
     "identify-faces": _handle_identify_faces,

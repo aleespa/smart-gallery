@@ -40,6 +40,7 @@ Commands:
   export        Copy a filtered subset out to another directory.
   convert-raw   Extract embedded JPEG previews from CR2/CR3 files.
   dashboard     Launch the Streamlit dashboard on a catalog.
+  ui            Open the interactive terminal interface.
   report        Write an Excel report (and optional figures).
   scan-faces    Detect & embed faces in every catalogued image (GPU).
   identify-faces Identify faces using person-named sample directories.
@@ -227,6 +228,18 @@ smart-gallery dashboard <drive>
 Launches Streamlit and opens it on the drive's catalog (read-only, queried
 directly from SQLite). The view refreshes automatically after an import or sync.
 You can also point the in-app sidebar at any other drive/`gallery.db`.
+
+### `ui` — interactive terminal interface
+
+```bash
+smart-gallery ui
+```
+
+Opens a Textual interface with the available commands, a usage/options pane,
+and a live output pane. Select a command to see its help and a form for its
+required paths and values. Add optional switches or filters in the extra
+options field; for example, select `sync`, enter `E:/` as the drive, and add
+`--dry-run` as an extra option. Paths containing spaces can be entered as-is.
 
 ### `report` — Excel report (and optional figures)
 

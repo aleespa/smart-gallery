@@ -13,6 +13,7 @@ dependencies = [
     "xlsxwriter>=3.2.9",
     "streamlit>=1.53",
     "plotly>=6.6.0",
+    "textual>=0.70",
 ]
 
 [project.optional-dependencies]

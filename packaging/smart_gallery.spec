@@ -100,10 +100,15 @@ def _analysis(script):
 gui_a = _analysis("entry_gui.py")
 cli_a = _analysis("entry_cli.py")
 
+# A frozen exe ignores PYTHONIOENCODING, so without UTF-8 mode the CLI writes
+# the console code page (cp1252) into the app's pipe and mangles or crashes on
+# non-ASCII names.
+utf8_mode = [("X utf8_mode=1", None, "OPTION")]
+
 gui_exe = EXE(  # noqa: F821
     PYZ(gui_a.pure),  # noqa: F821
     gui_a.scripts,
-    [],
+    utf8_mode,
     exclude_binaries=True,
     name="SmartGallery",
     console=False,
@@ -111,7 +116,7 @@ gui_exe = EXE(  # noqa: F821
 cli_exe = EXE(  # noqa: F821
     PYZ(cli_a.pure),  # noqa: F821
     cli_a.scripts,
-    [],
+    utf8_mode,
     exclude_binaries=True,
     name="smart-gallery",
     console=True,

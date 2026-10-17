@@ -84,3 +84,23 @@ def test_main_exits_130_when_cancelled(tmp_path, drive, repo, monkeypatch):
     with pytest.raises(SystemExit) as exc:
         cli.main(["sync", str(drive)])
     assert exc.value.code == 130
+
+
+@pytest.mark.parametrize("progress, expected", [("json", "utf-8"), (None, "cp1252")])
+def test_json_progress_pipes_are_utf8(monkeypatch, progress, expected):
+    """A GUI/TUI reads the CLI through a pipe; its output must be UTF-8 whatever
+    the console code page (a frozen exe ignores PYTHONIOENCODING)."""
+    import io
+
+    if progress:
+        monkeypatch.setenv("SG_PROGRESS", progress)
+    else:
+        monkeypatch.delenv("SG_PROGRESS", raising=False)
+    out = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    err = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    assert out.encoding == expected
+    assert err.encoding == expected

@@ -46,7 +46,13 @@ gui = ["PySide6>=6.8", "Pillow>=11"]
 smart-gallery = "smart_gallery.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=9.0.2", "ruff>=0.14", "black>=26.1", "pytest-qt>=4.4"]
+dev = [
+    "pytest>=9.0.2",
+    "ruff>=0.14",
+    "black>=26.1",
+    "pytest-qt>=4.4",
+    "pyinstaller>=6.11",
+]
 
 [tool.uv]
 # Keep the CPU `onnxruntime` (a transitive dep of insightface) out of the

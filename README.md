@@ -286,6 +286,39 @@ copied or skipped file) goes to a log file for the run,
 printed at the end. `export` no longer stops at the first file it can't read or
 write: such files are counted as failed and logged.
 
+## Installing the desktop app
+
+The Windows desktop app (`smart-gallery gui`) can be built into a per-user
+installer, so it runs without uv or Python.
+
+Prerequisites:
+
+- [ExifTool](https://exiftool.org/) on `PATH`. The installed app uses it the
+  same way the CLI does.
+- [Inno Setup 6](https://jrsoftware.org/isdl.php), to build the installer.
+  `build.ps1` finds `ISCC.exe` on `PATH` or in its default install folder.
+
+Build from the repository root:
+
+```powershell
+./packaging/build.ps1
+```
+
+The script runs `uv sync --extra faces --extra gui`, freezes the app with
+PyInstaller into `dist/SmartGallery/` (`SmartGallery.exe` for the window,
+`smart-gallery.exe` for the CLI), and packages that folder as
+`dist/SmartGallery-Setup-<version>.exe`. If `uv sync` fails because a file is in
+use, close any running `smart-gallery` windows first.
+
+The setup exe installs to `%LOCALAPPDATA%\Programs\SmartGallery` without admin
+rights, adds a Start-menu shortcut, and registers an uninstaller.
+
+Face recognition is bundled only when the faces stack is installed (via
+`uv sync --extra faces`) at build time. InsightFace models are not bundled; the
+app loads them from `~/.insightface/models`. The installed CLI does not include
+the Streamlit `dashboard` or the Textual `ui`; use the app's Dashboard area
+instead.
+
 ## Per-device import recipes
 
 `custom/import_canon.ps1` and `custom/import_phone.ps1` are thin PowerShell

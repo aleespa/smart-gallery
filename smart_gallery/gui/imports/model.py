@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import string
 import sys
 from collections.abc import Sequence
@@ -11,6 +12,11 @@ from smart_gallery.gui.jobspec import JobSpec
 from smart_gallery.import_profiles import ImportProfile, expand
 
 _DRIVE_REMOVABLE = 2
+_TITLE_PREFIX = "Import · "
+_DRY_RUN_SUFFIX = " (dry run)"
+_TITLE = re.compile(
+    "^" + re.escape(_TITLE_PREFIX) + "(.+?)(?:" + re.escape(_DRY_RUN_SUFFIX) + ")?$"
+)
 
 
 def list_removable_drives() -> list[str]:
@@ -47,5 +53,11 @@ def build_import_job(
     argvs = expand(profile, source, [str(g.root) for g in galleries])
     if dry_run:
         argvs = [[*argv, "--dry-run"] for argv in argvs]
-    title = f"Import · {profile.name}" + (" (dry run)" if dry_run else "")
+    title = _TITLE_PREFIX + profile.name + (_DRY_RUN_SUFFIX if dry_run else "")
     return JobSpec(title, tuple(map(tuple, argvs)), writes_catalog=not dry_run)
+
+
+def profile_name_from_title(title: str) -> str | None:
+    """The profile an import job ran with, read back from its title."""
+    match = _TITLE.match(title)
+    return match.group(1) if match else None

@@ -207,3 +207,18 @@ def test_new_profile_with_existing_name_refused(qtbot, tmp_path, monkeypatch):
     assert warned
     after = {p.name: p for p in load_profiles(app_data_dir() / "profiles")}
     assert after[existing.name].rules == existing.rules
+
+
+def test_select_profile_preselects_and_asks_to_pick_again(qtbot, tmp_path):
+    from smart_gallery.gui.imports.view import PICK_AGAIN
+
+    view, ctx, galleries = _view(qtbot, tmp_path)
+    assert view.profile_combo.currentText() == "Canon SD card"
+    assert view.note.text() == ""
+    ctx.open_in_import.emit("Pixel dump")
+    assert view.profile_combo.currentText() == "Pixel dump"
+    assert view.note.text() == PICK_AGAIN
+
+    ctx.open_in_import.emit("Deleted since")  # unknown: keep the selection
+    assert view.profile_combo.currentText() == "Pixel dump"
+    assert view.note.text() == PICK_AGAIN

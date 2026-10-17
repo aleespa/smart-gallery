@@ -61,3 +61,12 @@ def test_build_import_job_dry_run(tmp_path):
         assert build_parser().parse_args(list(argv)).dry_run is True
     real = build_import_job(profile, "card", [gallery])
     assert real.writes_catalog
+
+
+def test_profile_name_is_read_back_from_the_job_title():
+    from smart_gallery.gui.imports.model import profile_name_from_title
+
+    assert profile_name_from_title("Import · Canon SD card") == "Canon SD card"
+    assert profile_name_from_title("Import · Pixel (dry run)") == "Pixel"
+    assert profile_name_from_title("import") is None
+    assert profile_name_from_title("Sync") is None

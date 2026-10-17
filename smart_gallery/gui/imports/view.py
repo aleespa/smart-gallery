@@ -32,6 +32,10 @@ from smart_gallery.import_profiles import (
     seed_starter_profiles,
 )
 
+PICK_AGAIN = (
+    "Pick the source and target galleries again — drive letters may have changed."
+)
+
 
 class ImportView(QWidget):
     def __init__(self, ctx: AppContext):
@@ -55,6 +59,8 @@ class ImportView(QWidget):
         self.preview.setReadOnly(True)
         self.dry_run_box = QCheckBox("Dry run (plan only, copy nothing)")
         self.run_button = QPushButton("Run import")
+        self.note = QLabel()
+        self.note.setWordWrap(True)
 
         source_row = QHBoxLayout()
         source_row.addWidget(QLabel("Source"))
@@ -75,6 +81,7 @@ class ImportView(QWidget):
         layout.addWidget(QLabel("Commands"))
         layout.addWidget(self.preview, 2)
         layout.addWidget(self.dry_run_box)
+        layout.addWidget(self.note)
         layout.addWidget(self.run_button)
 
         self.browse_button.clicked.connect(self._browse)
@@ -88,6 +95,7 @@ class ImportView(QWidget):
         self.dry_run_box.toggled.connect(lambda _on: self._update())
         self.run_button.clicked.connect(self._run)
         ctx.gallery_changed.connect(lambda _g: self.refresh_galleries())
+        ctx.open_in_import.connect(self.select_profile)
         if ctx.jobs is not None:
             ctx.jobs.started.connect(lambda _s: self._update())
             ctx.jobs.finished.connect(lambda _r: self._update())
@@ -97,11 +105,22 @@ class ImportView(QWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self._load_profiles_once()
+        self.refresh_galleries()
+
+    def _load_profiles_once(self) -> None:
         if not self._seeded:
             self._seeded = True
             seed_starter_profiles(self._profiles_dir())
             self.reload_profiles()
-        self.refresh_galleries()
+
+    def select_profile(self, name: str | None) -> None:
+        """Preselect the profile ``name`` when it still exists (History's "Run
+        again"); the source and targets are left for the owner to pick."""
+        self._load_profiles_once()
+        if name and any(p.name == name for p in self._profiles):
+            self.profile_combo.setCurrentText(name)
+        self.note.setText(PICK_AGAIN)
 
     def _profiles_dir(self):
         return app_data_dir() / "profiles"
@@ -243,4 +262,5 @@ class ImportView(QWidget):
         except ValueError as error:
             self.preview.setPlainText(str(error))
             return
+        self.note.clear()
         self.ctx.jobs.start(spec)

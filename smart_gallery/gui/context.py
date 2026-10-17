@@ -18,6 +18,7 @@ class AppContext(QObject):
     filters_changed = Signal(object)  # FilterOptions
     navigate = Signal(str)  # area id
     open_in_actions = Signal(object)  # argv list for the Actions area
+    open_in_import = Signal(object)  # profile name (or None) for the Import area
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)

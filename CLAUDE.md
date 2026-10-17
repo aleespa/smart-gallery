@@ -166,7 +166,7 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   PySide6.
 - **`AppContext`** (`gui/context.py`) is the signal hub every area shares:
   `gallery_changed`, `catalog_updated`, `filters_changed`, `navigate`,
-  `open_in_actions`. It also holds the current gallery and filters, and
+  `open_in_actions`, `open_in_import`. It also holds the current gallery and filters, and
   `open_repo()` gives a read-only repository for the current gallery.
 - **Area registry.** `gui/areas.py:AREAS` lists the rail entries in order. Each
   `Area.factory(ctx)` imports its view module lazily and returns a QWidget.

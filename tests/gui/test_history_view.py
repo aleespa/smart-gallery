@@ -129,6 +129,63 @@ def test_run_again_sequence_confirms_then_starts(qtbot, tmp_path, monkeypatch):
     assert opened == []
 
 
+def _no_question(monkeypatch):
+    def fail(*args, **kwargs):
+        raise AssertionError("must not ask")
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(fail))
+
+
+def test_run_again_import_chain_opens_the_import_area(qtbot, tmp_path, monkeypatch):
+    argvs = [
+        ["import", "E:/", "--target", "F:/", "--file-types", "image", "--dry-run"],
+        ["import", "E:/", "--target", "F:/", "--file-types", "video", "--dry-run"],
+    ]
+    record = _record("Import · Canon SD card (dry run)", argvs=argvs)
+    view, ctx, _ = _view(qtbot, tmp_path, record)
+    _no_question(monkeypatch)
+    events = []
+    ctx.navigate.connect(lambda area: events.append(("navigate", area)))
+    ctx.open_in_import.connect(lambda name: events.append(("import", name)))
+    ctx.open_in_actions.connect(lambda argv: events.append(("actions", argv)))
+    view.table.selectRow(0)
+    view.run_button.click()
+    assert events == [("navigate", "import"), ("import", "Canon SD card")]
+    assert ctx.jobs.calls == []
+
+
+def test_run_again_single_import_from_a_profile_opens_the_import_area(
+    qtbot, tmp_path, monkeypatch
+):
+    record = _record("Import · Pixel dump", argvs=[["import", "E:/"]])
+    view, ctx, _ = _view(qtbot, tmp_path, record)
+    events = []
+    ctx.navigate.connect(lambda area: events.append(("navigate", area)))
+    ctx.open_in_import.connect(lambda name: events.append(("import", name)))
+    view.table.selectRow(0)
+    view.run_button.click()
+    assert events == [("navigate", "import"), ("import", "Pixel dump")]
+
+
+def test_run_again_import_preselects_the_profile_on_first_visit(qtbot, tmp_path):
+    from smart_gallery.gui.imports.view import PICK_AGAIN, ImportView
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    argvs = [["import", "E:/", "--file-types", "image"]] * 2
+    win.ctx.jobs.history.append(_record("Import · Pixel dump", argvs=argvs))
+    win.ctx.navigate.emit("history")
+    view = win._pages["history"]
+    view.refresh()
+    view.table.selectRow(0)
+    view.run_button.click()
+    page = win._pages["import"]
+    assert isinstance(page, ImportView)
+    assert win.stack.currentWidget() is page
+    assert page.profile_combo.currentText() == "Pixel dump"
+    assert page.note.text() == PICK_AGAIN
+
+
 def test_run_again_disabled_while_a_job_runs(qtbot, tmp_path):
     view, ctx, _ = _view(qtbot, tmp_path, _record("Sync"))
     view.table.selectRow(0)

@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.history.store import JobRecord
+from smart_gallery.gui.imports.model import profile_name_from_title
 from smart_gallery.gui.jobs import JobSpec
 
 COLUMNS = ("Job", "Started", "Duration", "Status", "Summary")
@@ -166,6 +167,14 @@ class HistoryView(QWidget):
         if record is None or not record.argvs:
             return
         self.note.clear()
+        if all(argv and argv[0] == "import" for argv in record.argvs):
+            # The drive letters in an import may belong to another card or
+            # drive by now, so the Import area asks for them again.
+            name = profile_name_from_title(record.title)
+            if name is not None or len(record.argvs) > 1:
+                self.ctx.navigate.emit("import")
+                self.ctx.open_in_import.emit(name)
+                return
         if len(record.argvs) == 1:
             # Actions is built on first visit, so it must exist before it is told
             # what to show.

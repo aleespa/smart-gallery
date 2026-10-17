@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import QProcess
+
 from smart_gallery.gui.history.store import HistoryStore
 from smart_gallery.gui.jobs import JobRunner, JobSpec
 from smart_gallery.progress import ProgressEvent
@@ -40,7 +42,8 @@ def test_runner_emits_progress_and_records_ok(qtbot, tmp_path):
     assert outputs and all("@sg-progress" not in line for line in outputs)
     assert record.log_path == str(Path("logs") / "progress.log")
     assert record.summary == ""  # the only non-progress line is "Details:"
-    assert record.output_tail == [f"Details: {record.log_path}"]
+    assert len(record.output_tail) == 1
+    assert record.output_tail[0].endswith(f" - Details: {record.log_path}")
     assert written == [True]
     assert not runner.running
     assert HistoryStore(tmp_path / "history.jsonl").load() == [record]
@@ -70,7 +73,10 @@ def test_sequence_stops_at_first_failure(qtbot, tmp_path):
     assert steps == [(1, 3), (2, 3)]
     assert record.status == "failed"
     assert record.exit_code == 1
+    # loguru prefix and ANSI colors are gone from the summary; log_path is parsed
     assert record.summary == "something broke"
+    assert record.log_path == str(Path("logs") / "fail.log")
+    assert "|" in record.output_tail[0]  # the full line is kept in the tail
 
 
 def test_cancel_cooperative(qtbot, tmp_path):
@@ -132,3 +138,35 @@ def test_ansi_codes_are_stripped_from_output(qtbot, tmp_path):
     record = _run(qtbot, runner, JobSpec("Ansi", ((),)))
     assert outputs == ["red"]
     assert record.output_tail == ["red"]
+
+
+def test_cancel_falls_back_to_kill_when_taskkill_cannot_start(
+    qtbot, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        QProcess, "startDetached", staticmethod(lambda *args: (False, -1))
+    )
+    runner = _runner(tmp_path, grace_ms=300)
+    with qtbot.waitSignal(runner.output, timeout=10000):
+        assert runner.start(JobSpec("Hang", (("hang",),)))
+    with qtbot.waitSignal(runner.finished, timeout=10000) as blocker:
+        runner.cancel()
+    assert blocker.args[0].status == "cancelled"
+
+
+def test_cancel_kills_when_taskkill_did_not_stop_the_process(
+    qtbot, tmp_path, monkeypatch
+):
+    launched = []
+    monkeypatch.setattr(
+        QProcess,
+        "startDetached",
+        staticmethod(lambda *args: (launched.append(args) or True, 1)),
+    )
+    runner = _runner(tmp_path, grace_ms=300)
+    with qtbot.waitSignal(runner.output, timeout=10000):
+        assert runner.start(JobSpec("Hang", (("hang",),)))
+    with qtbot.waitSignal(runner.finished, timeout=10000) as blocker:
+        runner.cancel()
+    assert blocker.args[0].status == "cancelled"
+    assert len(launched) == (1 if sys.platform == "win32" else 0)

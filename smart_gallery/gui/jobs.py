@@ -30,7 +30,10 @@ from smart_gallery.progress import (
 
 logger = logging.getLogger(__name__)
 
-DETAILS_PREFIX = "Details:"
+# The CLI logs through loguru, so the Details line arrives as
+# "2026-10-17 20:11:25.507 | INFO     | __main__:main:854 - Details: <path>".
+_DETAILS = re.compile(r"(?:^|\s-\s)Details:\s*(.+)$")
+_LOG_PREFIX = re.compile(r"^\S+ \S+ \| \w+\s*\| \S+ - ")
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 
@@ -69,6 +72,7 @@ class JobRunner(QObject):
         self._index = 0
         self._stop_file: Path | None = None
         self._cancel_requested = False
+        self._taskkill_sent = False
         self._buffer = b""
         self._tail: deque[str] = deque(maxlen=TAIL_LINES)
         self._summary = ""
@@ -80,7 +84,11 @@ class JobRunner(QObject):
         return self._spec is not None
 
     def start(self, spec: JobSpec) -> bool:
-        """Begin ``spec``; False when another job is still running."""
+        """Begin ``spec``; False when another job is still running.
+
+        ``finished`` may be emitted before this returns (e.g. the program
+        cannot start), so connect to it before calling.
+        """
         if self.running:
             return False
         jobs_dir = self._workdir / "jobs"
@@ -89,6 +97,7 @@ class JobRunner(QObject):
         self._index = 0
         self._stop_file = jobs_dir / f"{uuid.uuid4().hex}.stop"
         self._cancel_requested = False
+        self._taskkill_sent = False
         self._tail.clear()
         self._summary = ""
         self._log_path = None
@@ -153,10 +162,11 @@ class JobRunner(QObject):
         if not text.strip():
             return
         self._tail.append(text)
-        if text.startswith(DETAILS_PREFIX):
-            self._log_path = text[len(DETAILS_PREFIX) :].strip() or None
+        details = _DETAILS.search(text)
+        if details:
+            self._log_path = details.group(1).strip()
         else:
-            self._summary = text
+            self._summary = _LOG_PREFIX.sub("", text)
         self.output.emit(text)
 
     def _on_process_finished(self, exit_code: int, _status) -> None:
@@ -193,9 +203,14 @@ class JobRunner(QObject):
         if process is None or process.state() == QProcess.ProcessState.NotRunning:
             return
         pid = process.processId()
-        if sys.platform == "win32" and pid:
+        if sys.platform == "win32" and pid and not self._taskkill_sent:
             # /T takes the whole tree, so ExifTool children die with the CLI.
-            if QProcess.startDetached("taskkill", ["/PID", str(pid), "/T", "/F"]):
+            ok, _pid = QProcess.startDetached(
+                "taskkill", ["/PID", str(pid), "/T", "/F"]
+            )
+            if ok:
+                self._taskkill_sent = True
+                self._grace.start()  # still running after another grace: kill()
                 return
         process.kill()
 

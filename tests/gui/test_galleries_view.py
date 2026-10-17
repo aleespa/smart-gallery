@@ -188,3 +188,16 @@ def test_main_window_mounts_panel_and_store(qtbot):
     qtbot.addWidget(win)
     assert isinstance(win.ctx.galleries, GalleryStore)
     assert win.galleries_slot.itemAt(0).widget().__class__.__name__ == "GalleriesPanel"
+
+
+def test_failed_start_does_not_leave_a_stale_create(qtbot, tmp_path, monkeypatch):
+    stale = _catalog(tmp_path / "stale", "Stale")
+    panel, ctx, store, runner = _jobs_panel(qtbot, tmp_path, monkeypatch, stale)
+    runner._program = [str(tmp_path / "no-such-program.exe")]
+    with qtbot.waitSignal(runner.finished, timeout=15000):
+        panel.create_btn.click()  # finished fires before start() returns
+    assert panel._creating is None
+    runner._program = [sys.executable, "-c", "pass"]
+    with qtbot.waitSignal(runner.finished, timeout=15000):
+        assert runner.start(JobSpec("unrelated", (("x",),)))
+    assert store.all() == [] and ctx.current is None

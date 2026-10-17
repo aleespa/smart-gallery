@@ -1,7 +1,8 @@
 """Stand-in for the smart-gallery CLI used by the job runner tests.
 
 Usage: fake_cli.py progress N | echo TEXT | fail | wait | hang
-Prints ``Details: <path>`` last, like the real CLI does for long commands.
+Like the real CLI, it logs to stderr in loguru's format (``fail`` logs its
+message at ERROR) and ends with a ``Details: <path>`` log line.
 """
 
 import os
@@ -14,6 +15,16 @@ from smart_gallery.progress import ProgressEvent
 LIMIT = 60  # seconds; keeps a forgotten child from outliving the test run
 
 
+def log(level: str, message: str) -> None:
+    """A line as loguru writes it, colors included."""
+    print(
+        f"[32m2026-10-17 20:11:25.507[0m | [1m{level:<8}[0m | "
+        f"__main__:main:854 - {message}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def main(args: list[str]) -> int:
     code = 0
     command = args[0] if args else ""
@@ -24,7 +35,7 @@ def main(args: list[str]) -> int:
     elif command == "echo":
         print(" ".join(args[1:]))
     elif command == "fail":
-        print("something broke")
+        log("ERROR", "something broke")
         code = 1
     elif command == "wait":
         stop = Path(os.environ["SG_CANCEL_FILE"])
@@ -36,10 +47,11 @@ def main(args: list[str]) -> int:
     elif command == "hang":
         print("hanging", flush=True)
         time.sleep(LIMIT)
-    print(f"Details: {Path('logs') / (command + '.log')}")
+    log("INFO", f"Details: {Path('logs') / (command + '.log')}")
     return code
 
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     sys.exit(main(sys.argv[1:]))

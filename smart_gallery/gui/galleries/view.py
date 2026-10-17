@@ -126,10 +126,11 @@ class GalleriesPanel(QWidget):
         )
         if not folder:
             return
-        if not self.ctx.jobs.start(JobSpec("init", (("init", folder),))):
-            QMessageBox.information(self, "Create on drive", JOB_RUNNING)
-            return
+        # Set first: start() can emit ``finished`` before it returns.
         self._creating = folder
+        if not self.ctx.jobs.start(JobSpec("init", (("init", folder),))):
+            self._creating = None
+            QMessageBox.information(self, "Create on drive", JOB_RUNNING)
 
     def _on_job_finished(self, record) -> None:
         folder, self._creating = self._creating, None

@@ -19,7 +19,10 @@ from smart_gallery.gui.areas import AREAS
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.galleries.store import GalleryStore
 from smart_gallery.gui.galleries.view import GalleriesPanel
+from smart_gallery.gui.history.store import HistoryStore
+from smart_gallery.gui.jobs import JobRunner
 from smart_gallery.gui.paths import app_data_dir, exiftool_available
+from smart_gallery.gui.statusbar import JobStatusBar
 
 EXIFTOOL_BANNER = (
     "ExifTool not found. Install it from https://exiftool.org to read metadata."
@@ -33,6 +36,12 @@ class MainWindow(QMainWindow):
         self.ctx = ctx or AppContext(self)
         if self.ctx.galleries is None:
             self.ctx.galleries = GalleryStore(app_data_dir() / "galleries.json")
+        if self.ctx.jobs is None:
+            data = app_data_dir()
+            self.ctx.jobs = JobRunner(
+                HistoryStore(data / "history.jsonl"), workdir=data
+            )
+        self.ctx.jobs.catalog_written.connect(self.ctx.catalog_updated.emit)
         self._pages: dict[str, QWidget] = {}
 
         central = QWidget()
@@ -63,6 +72,8 @@ class MainWindow(QMainWindow):
 
         self.stack = QStackedWidget()
         body.addWidget(self.stack, 1)
+        self.job_bar = JobStatusBar(self.ctx.jobs)
+        outer.addWidget(self.job_bar)
         self.setCentralWidget(central)
 
         self.rail.currentRowChanged.connect(self._show_area)

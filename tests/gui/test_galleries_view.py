@@ -1,4 +1,5 @@
 import shutil
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -10,6 +11,9 @@ from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.galleries import view as galleries_view
 from smart_gallery.gui.galleries.store import GalleryStore
 from smart_gallery.gui.galleries.view import GalleriesPanel
+from smart_gallery.gui.history.store import HistoryStore
+from smart_gallery.gui.jobs import JobRunner, JobSpec
+from smart_gallery.gui.statusbar import JobStatusBar
 
 
 def _catalog(root, label):
@@ -108,6 +112,75 @@ def test_create_button_is_disabled_until_jobs_exist(qtbot, tmp_path):
     panel, ctx, store = _panel(qtbot, tmp_path)
     assert not panel.create_btn.isEnabled()
     assert panel.create_btn.toolTip() == "Available once jobs are wired"
+
+
+def _jobs_panel(qtbot, tmp_path, monkeypatch, folder):
+    # "python -c pass init <folder>" exits 0 like a successful init.
+    runner = JobRunner(
+        HistoryStore(tmp_path / "history.jsonl"),
+        workdir=tmp_path / "work",
+        program=[sys.executable, "-c", "pass"],
+        grace_ms=200,
+    )
+    store = GalleryStore(tmp_path / "galleries.json")
+    ctx = AppContext()
+    ctx.galleries = store
+    ctx.jobs = runner
+    panel = GalleriesPanel(ctx)
+    qtbot.addWidget(panel)
+    monkeypatch.setattr(
+        QFileDialog, "getExistingDirectory", lambda *a, **k: str(folder)
+    )
+    return panel, ctx, store, runner
+
+
+def test_create_on_drive_runs_init_then_opens_the_gallery(qtbot, tmp_path, monkeypatch):
+    root = _catalog(tmp_path / "new", "New")  # what a real init would leave behind
+    panel, ctx, store, runner = _jobs_panel(qtbot, tmp_path, monkeypatch, root)
+    assert panel.create_btn.isEnabled()
+    seen = []
+    runner.started.connect(seen.append)
+    with qtbot.waitSignal(runner.finished, timeout=15000):
+        panel.create_btn.click()
+    assert seen[0].argvs == (("init", str(root)),)
+    qtbot.waitUntil(lambda: ctx.current is not None, timeout=5000)
+    assert ctx.current.label == "New"
+    assert [g.label for g in store.all()] == ["New"]
+    assert panel.combo.itemText(0) == "New"
+
+
+def test_create_on_drive_ignores_failed_job(qtbot, tmp_path, monkeypatch):
+    root = _catalog(tmp_path / "new", "New")
+    panel, ctx, store, runner = _jobs_panel(qtbot, tmp_path, monkeypatch, root)
+    runner._program = [sys.executable, "-c", "raise SystemExit(1)"]
+    with qtbot.waitSignal(runner.finished, timeout=15000):
+        panel.create_btn.click()
+    assert store.all() == [] and ctx.current is None
+
+
+def test_create_on_drive_tells_when_a_job_is_running(qtbot, tmp_path, monkeypatch):
+    root = _catalog(tmp_path / "new", "New")
+    panel, ctx, store, runner = _jobs_panel(qtbot, tmp_path, monkeypatch, root)
+    runner._program = [sys.executable, "-c", "import time; time.sleep(30)"]
+    shown = []
+    monkeypatch.setattr(
+        QMessageBox, "information", lambda parent, title, text: shown.append(text)
+    )
+    assert runner.start(JobSpec("other", (("x",),)))
+    panel.create_btn.click()
+    assert shown == ["A job is already running."]
+    with qtbot.waitSignal(runner.finished, timeout=15000):
+        runner.cancel()
+
+
+def test_main_window_builds_job_runner_and_forwards_catalog_updates(qtbot):
+    win = MainWindow()
+    qtbot.addWidget(win)
+    assert isinstance(win.ctx.jobs, JobRunner)
+    assert isinstance(win.job_bar, JobStatusBar)
+    assert win.galleries_panel.create_btn.isEnabled()
+    with qtbot.waitSignal(win.ctx.catalog_updated):
+        win.ctx.jobs.catalog_written.emit()
 
 
 def test_main_window_mounts_panel_and_store(qtbot):

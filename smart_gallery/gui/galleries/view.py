@@ -22,9 +22,11 @@ from smart_gallery.gui.galleries.store import (
     is_connected,
     locate,
 )
+from smart_gallery.gui.jobs import JobSpec
 
 NOT_CONNECTED = " (not connected)"
 CREATE_DISABLED_TIP = "Available once jobs are wired"
+JOB_RUNNING = "A job is already running."
 
 
 class GalleriesPanel(QWidget):
@@ -36,9 +38,11 @@ class GalleriesPanel(QWidget):
         self.combo = QComboBox()
         self.add_btn = QPushButton("Add existing…")
         self.create_btn = QPushButton("Create on drive…")
-        # Task 6 wires this to an "init" job once ctx.jobs exists.
-        self.create_btn.setEnabled(False)
-        self.create_btn.setToolTip(CREATE_DISABLED_TIP)
+        # Creating a catalog is an "init" job, so it needs the job runner.
+        self.create_btn.setEnabled(ctx.jobs is not None)
+        if ctx.jobs is None:
+            self.create_btn.setToolTip(CREATE_DISABLED_TIP)
+        self._creating: str | None = None  # folder of the init job we started
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -48,6 +52,9 @@ class GalleriesPanel(QWidget):
 
         self.combo.currentIndexChanged.connect(self._on_index_changed)
         self.add_btn.clicked.connect(self._add_existing)
+        self.create_btn.clicked.connect(self._create_on_drive)
+        if ctx.jobs is not None:
+            ctx.jobs.finished.connect(self._on_job_finished)
 
         self._relocate_disconnected()
         self.refresh()
@@ -112,3 +119,27 @@ class GalleriesPanel(QWidget):
             QMessageBox.warning(self, "Add existing gallery", str(exc))
             return
         self.refresh(select=gallery.db_uuid)
+
+    def _create_on_drive(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self, "Choose a drive or folder for the new catalog"
+        )
+        if not folder:
+            return
+        if not self.ctx.jobs.start(JobSpec("init", (("init", folder),))):
+            QMessageBox.information(self, "Create on drive", JOB_RUNNING)
+            return
+        self._creating = folder
+
+    def _on_job_finished(self, record) -> None:
+        folder, self._creating = self._creating, None
+        if folder is None or record.status != "ok":
+            return
+        try:
+            gallery = self.store.add(folder)
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            QMessageBox.warning(self, "Create on drive", str(exc))
+            return
+        self.refresh(select=gallery.db_uuid)
+        if self.ctx.current != gallery:  # refresh opens it unless it is already open
+            self.ctx.set_gallery(gallery)

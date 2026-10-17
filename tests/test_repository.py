@@ -1,8 +1,10 @@
 from datetime import date
 
+from smart_gallery.config import SCHEMA_VERSION
+
 
 def test_create_and_meta(repo):
-    assert repo.schema_version == 2
+    assert repo.schema_version == SCHEMA_VERSION
     assert repo.get_meta("db_uuid")
     assert repo.get_meta("drive_label") == "test"
 

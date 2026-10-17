@@ -473,6 +473,9 @@ class LibraryView(QWidget):
                 self._thumb_retries += 1
                 self._thumb_timer.start()
             return
+        # Rows scrolled past are still queued; drop them so what is on screen
+        # now loads first, not after them.
+        thumbs.cancel_pending()
         for i in visible:
             row = self.grid_model.rows[i]
             if self.grid_model.needs_thumbnail(row):

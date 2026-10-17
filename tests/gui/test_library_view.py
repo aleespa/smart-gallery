@@ -15,12 +15,15 @@ class FakeThumbs(QObject):
         super().__init__()
         self.requests = []
         self.cancels = 0
+        self.log = []  # ("request", id) and ("cancel", None), in call order
 
     def request(self, root, media_id, mtime_ns, relpath, ext, media_type):
         self.requests.append((str(root), media_id))
+        self.log.append(("request", media_id))
 
     def cancel_pending(self):
         self.cancels += 1
+        self.log.append(("cancel", None))
 
 
 def _view(qtbot, db_path, label="test"):
@@ -122,6 +125,27 @@ def test_thumbnails_requested_for_visible_rows_only(qtbot, repo, make_item, tmp_
     pixmap = view.grid_model.data(index, Qt.ItemDataRole.DecorationRole)
     assert isinstance(pixmap, QPixmap) and pixmap is not placeholder
     assert pixmap.width() <= view.grid.iconSize().width()
+
+
+def test_scrolling_drops_queued_thumbnails_before_requesting_visible_ones(
+    qtbot, repo, make_item
+):
+    repo.upsert_many([make_item(f"a/{i:04}.jpg") for i in range(500)])
+    view, ctx = _view(qtbot, repo.db_path)
+    view.resize(900, 600)
+    view.show()
+    qtbot.waitUntil(lambda: len(view.grid_model.rows) == 500)
+    qtbot.waitUntil(lambda: bool(ctx.thumbs.requests))
+    ctx.thumbs.log.clear()
+
+    bar = view.grid.verticalScrollBar()
+    bar.setValue(bar.maximum())  # fling to the end: the top rows are stale
+    qtbot.waitUntil(lambda: ("cancel", None) in ctx.thumbs.log)
+    qtbot.waitUntil(lambda: ctx.thumbs.log[-1][0] == "request")
+    first_cancel = ctx.thumbs.log.index(("cancel", None))
+    assert first_cancel == 0  # nothing requested before the queue was cleared
+    last = view.grid_model.rows[-1].id
+    assert ("request", last) in ctx.thumbs.log
 
 
 def test_video_tile_placeholder_and_no_request(qtbot, repo, make_item):

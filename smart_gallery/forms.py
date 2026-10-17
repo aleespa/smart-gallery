@@ -70,6 +70,17 @@ LABELS = {
     "pca": "PCA dimensions",
 }
 
+# Hint text inside an empty input, by field kind.
+PLACEHOLDERS = {
+    "path": "path",
+    "path_list": "one or more paths; quote paths containing spaces",
+    "list": "values separated by spaces; quote values containing spaces",
+    "int_list": "numbers separated by spaces",
+    "int": "whole number",
+    "float": "number",
+    "date": "YYYY-MM-DD",
+}
+
 # Switches shown "on by default" are backed by a --no-... flag whose help text
 # is phrased negatively; describe what the switch itself does instead.
 HINTS = {

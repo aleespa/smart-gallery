@@ -41,6 +41,7 @@ from textual.widgets import (
 from smart_gallery.cli import build_parser
 from smart_gallery.progress import PROGRESS_ENV, ProgressEvent
 from smart_gallery.forms import (
+    PLACEHOLDERS,
     REQUIRED,
     BuildResult,
     CommandForm,
@@ -56,16 +57,6 @@ from smart_gallery.tui_progress import ProgressPanel
 
 # Carried from one command to the next so the drive is typed only once.
 DRIVE_KEY = "drive"
-
-PLACEHOLDERS = {
-    "path": "path",
-    "path_list": "one or more paths; quote paths containing spaces",
-    "list": "values separated by spaces; quote values containing spaces",
-    "int_list": "numbers separated by spaces",
-    "int": "whole number",
-    "float": "number",
-    "date": "YYYY-MM-DD",
-}
 
 SUPERSCRIPTS = "¹²³⁴⁵⁶⁷⁸⁹"
 

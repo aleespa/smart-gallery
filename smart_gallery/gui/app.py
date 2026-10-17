@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -89,6 +89,11 @@ class MainWindow(QMainWindow):
         self.ctx.navigate.connect(self._navigate)
         self.resize(1200, 800)
         self.rail.setCurrentRow(0)
+
+    def event(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.WindowActivate:
+            self.galleries_panel.on_window_activated()
+        return super().event(event)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         jobs = self.ctx.jobs

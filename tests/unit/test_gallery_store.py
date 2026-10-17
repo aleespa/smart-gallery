@@ -134,3 +134,12 @@ def test_locate_rejects_other_catalog(tmp_path, store):
     stranger = Gallery("f" * 32, g.db_path, "stranger")
     assert locate(stranger, [anchor]) is None
     assert locate(stranger, []) is None
+
+
+def test_existing_drives_uses_listdrives_when_available(monkeypatch):
+    import os
+
+    from smart_gallery.gui.galleries.store import existing_drives
+
+    monkeypatch.setattr(os, "listdrives", lambda: ["C:\\", "Q:\\"], raising=False)
+    assert existing_drives() == ["C:\\", "Q:\\"]

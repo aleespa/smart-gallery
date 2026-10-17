@@ -31,6 +31,12 @@ def is_connected(gallery: Gallery) -> bool:
 
 def existing_drives() -> list[str]:
     """Roots of the drive letters that exist right now."""
+    listdrives = getattr(os, "listdrives", None)  # Windows, Python 3.12+
+    if listdrives is not None:
+        try:
+            return listdrives()
+        except OSError:
+            pass
     return [f"{c}:\\" for c in string.ascii_uppercase if os.path.exists(f"{c}:\\")]
 
 

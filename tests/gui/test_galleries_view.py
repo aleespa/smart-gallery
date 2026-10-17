@@ -201,3 +201,60 @@ def test_failed_start_does_not_leave_a_stale_create(qtbot, tmp_path, monkeypatch
     with qtbot.waitSignal(runner.finished, timeout=15000):
         assert runner.start(JobSpec("unrelated", (("x",),)))
     assert store.all() == [] and ctx.current is None
+
+
+def test_refresh_reconnects_a_gallery_whose_drive_came_back(
+    qtbot, tmp_path, monkeypatch
+):
+    from smart_gallery.gui.galleries.store import is_connected
+
+    monkeypatch.setattr(galleries_view, "existing_drives", lambda: [])
+    root = _catalog(tmp_path / "card", "Card")
+    away = tmp_path / "away"
+    panel, ctx, store = _panel(qtbot, tmp_path, root)
+    root.rename(away)  # unplugged
+    panel.refresh()
+    assert not is_connected(ctx.current)
+    assert panel.combo.itemText(0) == "Card (not connected)"
+
+    away.rename(root)  # plugged back in
+    with qtbot.waitSignal(ctx.gallery_changed) as blocker:
+        panel.refresh_btn.click()
+    assert blocker.args[0].label == "Card"
+    assert is_connected(ctx.current)
+    assert panel.combo.itemText(0) == "Card"
+
+
+def test_refresh_without_changes_does_not_reload_areas(qtbot, tmp_path, monkeypatch):
+    monkeypatch.setattr(galleries_view, "existing_drives", lambda: [])
+    panel, ctx, store = _panel(qtbot, tmp_path, _catalog(tmp_path / "a", "A"))
+    changes = []
+    ctx.gallery_changed.connect(changes.append)
+    panel.refresh_btn.click()
+    assert changes == []
+
+
+def test_window_activation_rechecks_at_most_every_two_seconds(qtbot, tmp_path):
+    panel, ctx, store = _panel(qtbot, tmp_path)
+    rechecks = []
+    panel.recheck = lambda: rechecks.append(True)
+    panel.on_window_activated()  # right after startup's own check
+    assert rechecks == []
+    panel._last_check -= galleries_view.RECHECK_INTERVAL_S
+    panel.on_window_activated()
+    panel.on_window_activated()
+    assert rechecks == [True]
+
+
+def test_main_window_activation_rechecks_galleries(qtbot, monkeypatch):
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    activations = []
+    monkeypatch.setattr(
+        win.galleries_panel, "on_window_activated", lambda: activations.append(True)
+    )
+    QApplication.sendEvent(win, QEvent(QEvent.Type.WindowActivate))
+    assert activations == [True]

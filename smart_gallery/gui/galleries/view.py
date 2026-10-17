@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 
 from PySide6.QtGui import QPalette
 from PySide6.QtCore import Qt
@@ -27,6 +28,8 @@ from smart_gallery.gui.jobs import JobSpec
 NOT_CONNECTED = " (not connected)"
 CREATE_DISABLED_TIP = "Available once jobs are wired"
 JOB_RUNNING = "A job is already running."
+# Switching back to the window re-checks the drives at most this often.
+RECHECK_INTERVAL_S = 2.0
 
 
 class GalleriesPanel(QWidget):
@@ -36,6 +39,8 @@ class GalleriesPanel(QWidget):
         self.store = ctx.galleries
 
         self.combo = QComboBox()
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.setToolTip("Look again for drives plugged in or removed")
         self.add_btn = QPushButton("Add existing…")
         self.create_btn = QPushButton("Create on drive…")
         # Creating a catalog is an "init" job, so it needs the job runner.
@@ -43,14 +48,18 @@ class GalleriesPanel(QWidget):
         if ctx.jobs is None:
             self.create_btn.setToolTip(CREATE_DISABLED_TIP)
         self._creating: str | None = None  # folder of the init job we started
+        # db_uuid -> connected, as the combo last showed it.
+        self._connected: dict[str, bool] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.combo)
+        layout.addWidget(self.refresh_btn)
         layout.addWidget(self.add_btn)
         layout.addWidget(self.create_btn)
 
         self.combo.currentIndexChanged.connect(self._on_index_changed)
+        self.refresh_btn.clicked.connect(self.recheck)
         self.add_btn.clicked.connect(self._add_existing)
         self.create_btn.clicked.connect(self._create_on_drive)
         if ctx.jobs is not None:
@@ -58,6 +67,30 @@ class GalleriesPanel(QWidget):
 
         self._relocate_disconnected()
         self.refresh()
+        self._last_check = time.monotonic()
+
+    def recheck(self) -> None:
+        """Look again for drives that were plugged in, moved or removed, and
+        reload the areas if the open gallery came back or went away."""
+        self._last_check = time.monotonic()
+        current = self.ctx.current
+        was_connected = self._connected.get(current.db_uuid) if current else None
+        self._relocate_disconnected()
+        self.refresh(select=current.db_uuid if current else None)
+        now = self.ctx.current
+        # A new path already reloaded the areas through refresh(); a drive that
+        # came back (or went) at the same path did not.
+        if now is not None and now == current:
+            if self._connected.get(now.db_uuid) != was_connected:
+                self.ctx.set_gallery(now)
+
+    def on_window_activated(self) -> None:
+        """The main window was switched back to: the owner may have just
+        plugged a drive in."""
+        now = time.monotonic()
+        if now - self._last_check >= RECHECK_INTERVAL_S:
+            self._last_check = now
+            self.recheck()
 
     def refresh(self, select: str | None = None) -> None:
         """Reload the combo from the store.
@@ -72,8 +105,9 @@ class GalleriesPanel(QWidget):
         )
         self.combo.blockSignals(True)
         self.combo.clear()
+        self._connected.clear()
         for g in galleries:
-            connected = is_connected(g)
+            connected = self._connected[g.db_uuid] = is_connected(g)
             self.combo.addItem(g.label if connected else g.label + NOT_CONNECTED, g)
             if not connected:
                 self.combo.setItemData(

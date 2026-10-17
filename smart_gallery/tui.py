@@ -1,19 +1,31 @@
-"""Interactive terminal interface for running Smart Gallery commands."""
+"""Interactive terminal interface for running Smart Gallery commands.
+
+Each command's form is generated from the CLI parser (see ``tui_forms``):
+required arguments first, then one foldable section per option group, every
+option with a real control and its help text as a hint. A live preview shows
+the exact command line; Run executes it as a ``python -m smart_gallery.cli``
+subprocess and streams its output.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import os
-import shlex
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
+from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
+from textual.screen import ModalScreen
+from textual.widget import Widget
 from textual.widgets import (
     Button,
+    Checkbox,
+    Collapsible,
     Footer,
     Header,
     Input,
@@ -21,190 +33,191 @@ from textual.widgets import (
     ListItem,
     ListView,
     RichLog,
+    Select,
     Static,
+    Switch,
 )
 
-COMMANDS = (
-    ("init", "Create a catalog and scan a drive"),
-    ("import", "Copy media into a catalog"),
-    ("sync", "Reconcile a catalog with its drive"),
-    ("compare", "Compare two catalogs"),
-    ("export", "Export a filtered selection"),
-    ("convert-raw", "Extract JPEG previews from RAW files"),
-    ("dashboard", "Open the Streamlit dashboard"),
-    ("report", "Write an Excel report"),
-    ("scan-faces", "Detect and embed faces (GPU)"),
-    ("identify-faces", "Match faces against sample folders"),
-    ("cluster-faces", "Group unassigned faces"),
-    ("people", "List people and photo counts"),
-    ("name-person", "Name or clear a person cluster"),
-    ("merge-persons", "Merge person clusters"),
-    ("split-person", "Split an impure person cluster"),
-    ("delete-person", "Delete a person cluster"),
+from smart_gallery.cli import build_parser
+from smart_gallery.progress import PROGRESS_ENV, ProgressEvent
+from smart_gallery.tui_forms import (
+    REQUIRED,
+    BuildResult,
+    CommandForm,
+    Field,
+    Row,
+    build_argv,
+    command_forms,
+    default_values,
+    field_rows,
+    format_command,
 )
+from smart_gallery.tui_progress import ProgressPanel
 
+# Carried from one command to the next so the drive is typed only once.
+DRIVE_KEY = "drive"
 
-@dataclass(frozen=True)
-class FormField:
-    label: str
-    argument: str
-    placeholder: str
-    required: bool = False
-    multiple: bool = False
-
-
-COMMAND_FORMS = {
-    "init": (FormField("Drive or catalog path", "drive", "E:/ or /photos", True),),
-    "import": (
-        FormField(
-            "Source files or folders",
-            "sources",
-            "One or more paths; quote paths containing spaces",
-            True,
-            True,
-        ),
-        FormField("Target drive", "--to", "Drive or catalog path", True),
-        FormField("Output folder", "--output", "Optional folder on the drive"),
-    ),
-    "sync": (FormField("Drive or catalog path", "drive", "E:/ or /photos", True),),
-    "compare": (
-        FormField("First gallery", "gallery_a", "Drive path or gallery.db", True),
-        FormField("Second gallery", "gallery_b", "Drive path or gallery.db", True),
-        FormField("Report output file", "--output", "Optional output file"),
-    ),
-    "export": (
-        FormField("Source drive", "--from", "Drive or catalog path", True),
-        FormField("Destination folder", "--to", "Folder to receive the export", True),
-    ),
-    "convert-raw": (
-        FormField(
-            "RAW files or folders",
-            "sources",
-            "One or more paths; quote paths containing spaces",
-            True,
-            True,
-        ),
-    ),
-    "dashboard": (FormField("Drive or catalog path", "drive", "E:/ or /photos", True),),
-    "report": (
-        FormField("Drive or catalog path", "drive", "E:/ or /photos", True),
-        FormField("Excel output file", "--to", "Path ending in .xlsx", True),
-    ),
-    "scan-faces": (
-        FormField("Drive or catalog path", "drive", "E:/ or /photos", True),
-    ),
-    "identify-faces": (
-        FormField("Drive or catalog path", "drive", "E:/ or /photos", True),
-        FormField(
-            "Sample photos folder",
-            "--samples",
-            "Folder containing person folders",
-            True,
-        ),
-    ),
-    "cluster-faces": (
-        FormField("Drive or catalog path", "drive", "E:/ or /photos", True),
-    ),
-    "people": (FormField("Drive or catalog path", "drive", "E:/ or /photos", True),),
-    "name-person": (
-        FormField("Drive or catalog path", "drive", "E:/ or /photos", True),
-        FormField("Person ID", "person_id", "Numeric person ID", True),
-        FormField("Name", "name", "Optional name; leave blank to clear"),
-    ),
-    "merge-persons": (
-        FormField("Drive or catalog path", "drive", "E:/ or /photos", True),
-        FormField("Destination person ID", "dest", "Numeric person ID to keep", True),
-        FormField(
-            "Source person IDs", "sources", "IDs separated by spaces", True, True
-        ),
-    ),
-    "split-person": (
-        FormField("Drive or catalog path", "drive", "E:/ or /photos", True),
-        FormField("Person ID", "person_id", "Numeric person ID", True),
-    ),
-    "delete-person": (
-        FormField("Drive or catalog path", "drive", "E:/ or /photos", True),
-        FormField("Person ID", "person_id", "Numeric person ID", True),
-    ),
+PLACEHOLDERS = {
+    "path": "path",
+    "path_list": "one or more paths; quote paths containing spaces",
+    "list": "values separated by spaces; quote values containing spaces",
+    "int_list": "numbers separated by spaces",
+    "int": "whole number",
+    "float": "number",
+    "date": "YYYY-MM-DD",
 }
+
+SUPERSCRIPTS = "¹²³⁴⁵⁶⁷⁸⁹"
+
+
+def _section_id(title: str) -> str:
+    return "section-" + title.replace(" ", "-")
+
+
+class ChoiceRow(Horizontal):
+    """Checkboxes for a multi-choice option. When ``ordered``, the order boxes
+    are ticked in is the value order, and each label shows its position."""
+
+    def __init__(
+        self, choices: tuple[str, ...], value: tuple[str, ...], ordered: bool, id: str
+    ) -> None:
+        super().__init__(id=id, classes="choice-row")
+        self.choices = choices
+        self.ordered = ordered
+        self._picked = [c for c in value if c in choices]
+
+    def compose(self) -> ComposeResult:
+        for choice in self.choices:
+            yield Checkbox(
+                self._label(choice),
+                value=choice in self._picked,
+                id=f"{self.id}-{choice}",
+                compact=True,
+            )
+
+    @property
+    def value(self) -> tuple[str, ...]:
+        if self.ordered:
+            return tuple(self._picked)
+        return tuple(c for c in self.choices if c in self._picked)
+
+    def _label(self, choice: str) -> str:
+        if self.ordered and choice in self._picked:
+            return f"{choice} {SUPERSCRIPTS[self._picked.index(choice)]}"
+        return choice
+
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        # Runs before the event bubbles on to the app, which then rebuilds the
+        # preview from ``value``.
+        choice = event.checkbox.id.removeprefix(f"{self.id}-")
+        if event.value and choice not in self._picked:
+            self._picked.append(choice)
+        elif not event.value and choice in self._picked:
+            self._picked.remove(choice)
+        if self.ordered:
+            for checkbox in self.query(Checkbox):
+                checkbox.label = self._label(checkbox.id.removeprefix(f"{self.id}-"))
+
+
+class HelpScreen(ModalScreen[None]):
+    """The command's full ``--help`` text."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close"),
+        Binding("f1", "dismiss", "Close"),
+    ]
+    DEFAULT_CSS = """
+    HelpScreen { align: center middle; }
+    #help-box { width: 90%; height: 85%; border: round $primary; background: $surface; }
+    #help-title { text-style: bold; padding: 0 1; }
+    """
+
+    def __init__(self, title: str, text: str) -> None:
+        super().__init__()
+        self.help_title = title
+        self.help_text = text
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="help-box"):
+            yield Label(self.help_title, id="help-title")
+            with VerticalScroll():
+                yield Static(self.help_text, id="help-text", markup=False)
 
 
 class SmartGalleryApp(App):
-    """Command launcher with an output pane and access to every CLI option."""
+    """Command launcher: generated option forms, live preview, streamed output."""
 
     TITLE = "Smart Gallery"
     SUB_TITLE = "Terminal command center"
     CSS = """
     Screen { layout: vertical; }
     #body { height: 1fr; }
-    #sidebar { width: 38; border: round $primary; padding: 0 1; }
-    #main { width: 1fr; padding: 0 1; }
+    #sidebar { width: 22; border: round $primary; padding: 0 1; }
     #commands { height: 1fr; }
-    #form-fields { height: auto; max-height: 12; border: round $primary; }
-    .field-label { width: 24; }
-    #run { width: 14; }
-    #stop { width: 14; }
-    #help { height: 1fr; border: round $primary; }
-    #output { height: 1fr; border: round $primary; }
+    #main { width: 1fr; padding: 0 1; }
+    #command-title { height: auto; text-style: bold; color: $accent; }
+    #preview-bar { height: auto; }
+    #preview { width: 1fr; height: auto; min-height: 3; padding: 0 1;
+               border: round $success; color: $success; }
+    #run, #stop { width: 10; min-width: 10; margin-left: 1; }
+    #problems { height: 1; color: $warning; }
+    #form { height: 3fr; border: round $primary; }
+    #progress { border: round $primary; padding: 0 1; }
+    #output { height: 1fr; min-height: 6; border: round $primary; }
     #status { height: 1; color: $text-muted; }
-    .hint { color: $text-muted; height: auto; padding-bottom: 1; }
+    .field { height: auto; }
+    .field-row { height: auto; }
+    .field-label { width: 24; }
+    .field-row Input, .field-row Select, .field-row .choice-row { width: 1fr; }
+    .field-row Input { background: $boost; }
+    .field-row Switch { border: none; height: 1; padding: 0; width: 8; }
+    .choice-row { height: auto; }
+    .choice-row Checkbox { width: auto; margin-right: 2; }
+    .range-sep { width: 3; content-align: center middle; }
+    .hint { height: auto; padding-left: 24; color: $text-muted; }
+    .field-error { height: auto; padding-left: 24; color: $error; display: none; }
     """
 
     BINDINGS = [
-        ("ctrl+c", "quit", "Quit"),
-        ("escape", "clear_command", "Clear fields"),
+        Binding("ctrl+c", "quit", "Quit"),
+        Binding("f1", "show_help", "Full help"),
+        Binding("escape", "reset_form", "Reset fields"),
     ]
 
     def __init__(self) -> None:
         super().__init__()
+        self.forms = command_forms(build_parser())
+        self.form: CommandForm | None = None
+        self.result: BuildResult | None = None
         self.process: asyncio.subprocess.Process | None = None
-        self.help_process: asyncio.subprocess.Process | None = None
-        self.selected_command: str | None = None
+        self.saved: dict[str, tuple[dict, str]] = {}
+        self.last_drive = ""
+        self.show_missing = False
 
+    # ── layout ───────────────────────────────────────────────────────────────
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="body"):
             with Vertical(id="sidebar"):
-                yield Label("COMMANDS", classes="section-title")
-                yield Static(
-                    "Select a command, then add its required arguments.", classes="hint"
-                )
+                yield Label("COMMANDS")
                 yield ListView(
                     *(
-                        ListItem(
-                            Label(f"{name:<15} {description}"), id=f"command-{name}"
-                        )
-                        for name, description in COMMANDS
+                        ListItem(Label(name), id=f"command-{name}")
+                        for name in self.forms
                     ),
                     id="commands",
                 )
             with Vertical(id="main"):
-                yield Label("Command setup")
-                with Horizontal():
-                    yield Input(
-                        placeholder="Extra CLI options, e.g. --dry-run or --structure Year Month",
-                        id="extra-options",
-                    )
+                yield Static(
+                    "Select a command on the left.", id="command-title", markup=False
+                )
+                with Horizontal(id="preview-bar"):
+                    yield Static("", id="preview", markup=False)
                     yield Button("Run", id="run", variant="primary")
                     yield Button("Stop", id="stop", variant="error", disabled=True)
-                yield Static(
-                    "Select a command to fill its required fields. Add optional CLI flags above.",
-                    classes="hint",
-                )
-                yield Label("Required paths and values")
-                with VerticalScroll(id="form-fields"):
-                    yield Static(
-                        "Choose a command to create its form.", id="form-placeholder"
-                    )
-                yield Label("Usage and options")
-                yield RichLog(
-                    id="help",
-                    highlight=False,
-                    markup=False,
-                    wrap=True,
-                    auto_scroll=True,
-                )
-                yield Label("Command output")
+                yield Static("", id="problems", markup=False)
+                yield VerticalScroll(id="form")
+                yield ProgressPanel(id="progress")
                 yield RichLog(
                     id="output",
                     highlight=False,
@@ -212,192 +225,291 @@ class SmartGalleryApp(App):
                     wrap=True,
                     auto_scroll=True,
                 )
-                yield Static("Ready", id="status")
+                yield Static("Ready", id="status", markup=False)
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#help", RichLog).write(
-            "Select a command on the left to see its usage and available options."
-        )
-        output = self.query_one("#output", RichLog)
-        output.write("Select a command, complete its fields, and press Run.")
+        self.query_one("#output").border_title = "Output"
+        self.query_one("#progress").border_title = "Progress"
 
-    @on(ListView.Selected)
-    async def select_command(self, event: ListView.Selected) -> None:
-        command = event.item.id.removeprefix("command-")
-        self.selected_command = command
-        fields = self.query_one("#form-fields", VerticalScroll)
-        await fields.remove_children()
-        for index, field in enumerate(COMMAND_FORMS[command]):
-            label = field.label + (" *" if field.required else "")
-            await fields.mount(
+    def _form_widgets(self, form: CommandForm, values: dict, extra: str):
+        for section in form.sections:
+            yield Collapsible(
+                *(self._row(row, values) for row in field_rows(section.fields)),
+                title=section.title,
+                collapsed=section.collapsed,
+                id=_section_id(section.title),
+            )
+        yield Collapsible(
+            Vertical(
                 Horizontal(
-                    Label(label, classes="field-label"),
-                    Input(placeholder=field.placeholder, id=f"form-field-{index}"),
+                    Label("Extra flags", classes="field-label"),
+                    Input(
+                        extra,
+                        placeholder="e.g. --min-iso 100",
+                        id="extra-options",
+                        compact=True,
+                    ),
                     classes="field-row",
+                ),
+                Static(
+                    "Anything not covered above, appended to the command as typed.",
+                    classes="hint",
+                ),
+                Static("", id="error-extra", classes="field-error", markup=False),
+                classes="field",
+            ),
+            title="More CLI options",
+            collapsed=False,
+            id="section-extra",
+        )
+
+    def _row(self, row: Row, values: dict) -> Vertical:
+        controls: list[Widget] = []
+        for index, f in enumerate(row.fields):
+            if index:
+                controls.append(Static("→", classes="range-sep"))
+            controls.append(self._control(f, values.get(f.key)))
+        label = row.label + (" *" if any(f.required for f in row.fields) else "")
+        return Vertical(
+            Horizontal(
+                Label(label, classes="field-label"), *controls, classes="field-row"
+            ),
+            Static(row.hint, classes="hint", markup=False),
+            *(
+                Static("", id=f"error-{f.key}", classes="field-error", markup=False)
+                for f in row.fields
+            ),
+            classes="field",
+        )
+
+    @staticmethod
+    def _control(f: Field, value) -> Widget:
+        widget_id = f"field-{f.key}"
+        if f.kind == "switch":
+            return Switch(value=bool(value), id=widget_id)
+        if f.kind == "choice":
+            return Select(
+                [(c, c) for c in f.choices],
+                value=Select.NULL if value is None else value,
+                allow_blank=f.default is None,
+                compact=True,
+                id=widget_id,
+            )
+        if f.kind == "mode":
+            return Select(
+                [(c.lstrip("-"), c) for c in f.choices],
+                value=value or Select.NULL,
+                prompt="default",
+                compact=True,
+                id=widget_id,
+            )
+        if f.kind in ("multi", "ordered"):
+            return ChoiceRow(
+                f.choices, tuple(value or ()), ordered=f.kind == "ordered", id=widget_id
+            )
+        return Input(
+            str(value or ""),
+            placeholder=PLACEHOLDERS.get(f.kind, ""),
+            compact=True,
+            id=widget_id,
+        )
+
+    # ── form state ───────────────────────────────────────────────────────────
+    @on(ListView.Selected, "#commands")
+    async def select_command(self, event: ListView.Selected) -> None:
+        name = event.item.id.removeprefix("command-")
+        if self.form is not None:
+            self.saved[self.form.name] = (self._values(), self._extra())
+        values, extra = self.saved.get(name, (None, ""))
+        if values is None:
+            values = default_values(self.forms[name])
+            if DRIVE_KEY in values and self.last_drive:
+                values[DRIVE_KEY] = self.last_drive
+        await self._mount_form(name, values, extra)
+
+    async def _mount_form(self, name: str, values: dict, extra: str) -> None:
+        self.form = self.forms[name]
+        self.show_missing = False
+        container = self.query_one("#form", VerticalScroll)
+        await container.remove_children()
+        await container.mount_all(self._form_widgets(self.form, values, extra))
+        container.scroll_home(animate=False)
+        container.border_title = name
+        self.query_one("#command-title", Static).update(
+            f"{name} — {self.form.description}  (F1: full help)"
+        )
+        self.refresh_preview()
+
+    def _values(self) -> dict:
+        values = {}
+        for key, f in self.form.fields.items():
+            value = self.query_one(f"#field-{key}").value
+            if f.kind in ("choice", "mode") and not isinstance(value, str):
+                value = None  # Select.NULL: nothing picked
+            values[key] = value
+        return values
+
+    def _extra(self) -> str:
+        return self.query_one("#extra-options", Input).value
+
+    @on(Input.Changed)
+    @on(Switch.Changed)
+    @on(Select.Changed)
+    @on(Checkbox.Changed)
+    def _form_changed(self, event) -> None:
+        if isinstance(event, Input.Changed) and event.input.id == f"field-{DRIVE_KEY}":
+            self.last_drive = event.value.strip()
+        self.refresh_preview()
+
+    def refresh_preview(self) -> None:
+        """Rebuild the command line from the form and show what's wrong with it."""
+        if self.form is None:
+            return
+        try:
+            result = build_argv(self.form, self._values(), self._extra())
+        except NoMatches:  # the form is still being mounted
+            return
+        self.result = result
+        self.query_one("#preview", Static).update("$ " + format_command(result.argv))
+
+        for key in [*self.form.fields, "extra"]:
+            message = result.errors.get(key)
+            if message is None and self.show_missing and key in result.missing:
+                message = "Required."
+            error = self.query_one(f"#error-{key}", Static)
+            error.update(message or "")
+            error.display = bool(message)
+
+        self.query_one("#problems", Static).update(self._problems(result))
+
+        for section in self.form.sections:
+            if section.title == REQUIRED:
+                continue
+            count = sum(1 for f in section.fields if f.key in result.changed)
+            collapsible = self.query_one(f"#{_section_id(section.title)}", Collapsible)
+            collapsible.title = (
+                f"{section.title}  ({count} set)" if count else section.title
+            )
+
+    def _problems(self, result: BuildResult) -> str:
+        parts = []
+        if result.missing:
+            labels = [self.form.fields[k].label for k in result.missing]
+            parts.append("Needs: " + ", ".join(labels))
+        if result.errors:
+            labels = [
+                (
+                    self.form.fields[k].label
+                    if k in self.form.fields
+                    else "More CLI options"
+                )
+                for k in result.errors
+            ]
+            parts.append("Fix: " + ", ".join(labels))
+        return "   ".join(parts)
+
+    def _unfold_problem_sections(self, result: BuildResult) -> None:
+        """Open folded sections that hold a field needing attention."""
+        flagged = set(result.errors) | set(result.missing)
+        for section in self.form.sections:
+            if any(f.key in flagged for f in section.fields):
+                self.query_one(
+                    f"#{_section_id(section.title)}", Collapsible
+                ).collapsed = False
+
+    async def action_reset_form(self) -> None:
+        if self.form is None or self._command_running():
+            return
+        self.saved.pop(self.form.name, None)
+        await self._mount_form(self.form.name, default_values(self.form), "")
+
+    def action_show_help(self) -> None:
+        if self.form is not None:
+            self.push_screen(
+                HelpScreen(
+                    f"smart-gallery {self.form.name} --help", self.form.help_text
                 )
             )
-        await fields.mount(
-            Static(
-                "Fields marked * are required. Paths with spaces can be entered as-is."
-            )
-        )
-        help_log = self.query_one("#help", RichLog)
-        help_log.clear()
-        help_log.write(f"Loading `smart-gallery {command} --help`…")
-        self.run_worker(self._load_help(command), group="command-help", exclusive=True)
+
+    # ── running ──────────────────────────────────────────────────────────────
+    def _command_running(self) -> bool:
+        return self.process is not None and self.process.returncode is None
 
     @on(Button.Pressed, "#run")
-    def run_button(self) -> None:
-        self.run_command()
-
     @on(Input.Submitted, "#extra-options")
-    def submit_command(self) -> None:
-        self.run_command()
+    def run_command(self) -> None:
+        if self._command_running():
+            return
+        status = self.query_one("#status", Static)
+        if self.form is None:
+            status.update("Select a command first.")
+            return
+        self.show_missing = True
+        self.refresh_preview()
+        if self.result is None or not self.result.ok:
+            status.update(self._problems(self.result))
+            self._unfold_problem_sections(self.result)
+            return
+        argv = self.result.argv
+        self.query_one("#output", RichLog).write(f"\n$ {format_command(argv)}")
+        status.update("Running…")
+        self.query_one("#run", Button).disabled = True
+        self.query_one("#stop", Button).disabled = False
+        self.run_worker(self._execute(argv), exclusive=True)
 
     @on(Button.Pressed, "#stop")
-    async def stop_button(self) -> None:
-        if self.process and self.process.returncode is None:
+    def stop_command(self) -> None:
+        if self._command_running():
             self.process.terminate()
             self.query_one("#status", Static).update("Stopping command…")
 
-    def run_command(self) -> None:
-        if self.process and self.process.returncode is None:
-            return
-        if not self.selected_command:
-            self.query_one("#status", Static).update("Select a command first.")
-            return
-        try:
-            parts = self._build_command()
-        except ValueError as exc:
-            self.query_one("#status", Static).update(str(exc))
-            return
+    async def _execute(self, argv: list[str]) -> None:
         output = self.query_one("#output", RichLog)
-        output.write(f"\n$ smart-gallery {' '.join(shlex.quote(arg) for arg in parts)}")
-        self.query_one("#status", Static).update("Running…")
-        self.query_one("#run", Button).disabled = True
-        self.query_one("#stop", Button).disabled = False
-        self.run_worker(self._execute(parts), exclusive=True)
-
-    @staticmethod
-    def _split_command(command_text: str) -> list[str]:
-        lexer = shlex.shlex(command_text, posix=os.name != "nt")
-        lexer.whitespace_split = True
-        lexer.commenters = ""
-        parts = list(lexer)
-        if os.name == "nt":
-            parts = [
-                (
-                    token[1:-1]
-                    if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'"
-                    else token
-                )
-                for token in parts
-            ]
-        return parts
-
-    def _build_command(self) -> list[str]:
-        assert self.selected_command is not None
-        command = self.selected_command
-        parts = [command]
-        for index, field in enumerate(COMMAND_FORMS[command]):
-            value = self.query_one(f"#form-field-{index}", Input).value.strip()
-            if not value:
-                if field.required:
-                    raise ValueError(f"{field.label} is required.")
-                continue
-            if field.multiple:
-                values = self._split_command(value)
-                if not values:
-                    if field.required:
-                        raise ValueError(f"{field.label} is required.")
-                    continue
-            else:
-                values = [self._single_value(value)]
-            if field.argument.startswith("-"):
-                parts.append(field.argument)
-            parts.extend(values)
-        extra = self.query_one("#extra-options", Input).value.strip()
-        if extra:
-            parts.extend(self._split_command(extra))
-        return parts
-
-    @staticmethod
-    def _single_value(value: str) -> str:
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            return value[1:-1]
-        return value
-
-    async def _load_help(self, command: str) -> None:
-        help_log = self.query_one("#help", RichLog)
-        process = None
-        try:
-            process = await asyncio.create_subprocess_exec(
-                sys.executable,
-                "-m",
-                "smart_gallery.cli",
-                command,
-                "--help",
-                cwd=Path.cwd(),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            self.help_process = process
-            stdout, _ = await process.communicate()
-            help_log.clear()
-            help_text = stdout.decode(errors="replace").strip()
-            for line in help_text.splitlines():
-                help_log.write(line)
-            if not help_text:
-                help_log.write("No help text was returned for this command.")
-        except asyncio.CancelledError:
-            if process and process.returncode is None:
-                process.terminate()
-                await process.wait()
-            raise
-        except Exception as exc:  # noqa: BLE001
-            help_log.clear()
-            help_log.write(f"Could not load command help: {exc}")
-        finally:
-            if self.help_process is process:
-                self.help_process = None
-
-    async def _execute(self, parts: list[str]) -> None:
-        output = self.query_one("#output", RichLog)
+        status = self.query_one("#status", Static)
+        panel = self.query_one(ProgressPanel)
+        await panel.reset()
+        return_code = None
         try:
             self.process = await asyncio.create_subprocess_exec(
                 sys.executable,
                 "-m",
                 "smart_gallery.cli",
-                *parts,
+                *argv,
                 cwd=Path.cwd(),
+                env={
+                    **os.environ,
+                    # The child writes to a pipe, which would use the locale
+                    # code page (cp1252 on Windows) and garble "—" and the like.
+                    "PYTHONIOENCODING": "utf-8",
+                    # Report progress as tagged lines for the panel, not a bar.
+                    PROGRESS_ENV: "json",
+                },
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
             assert self.process.stdout is not None
             while line := await self.process.stdout.readline():
-                output.write(line.decode(errors="replace").rstrip("\r\n"))
+                text = line.decode("utf-8", errors="replace").rstrip("\r\n")
+                event = ProgressEvent.from_line(text)
+                if event is not None:
+                    await panel.show_event(event)
+                else:
+                    # Log lines may carry ANSI colors; render them, not the codes.
+                    output.write(Text.from_ansi(text))
             return_code = await self.process.wait()
             if return_code == 0:
-                self.query_one("#status", Static).update("Completed successfully.")
+                status.update("Completed successfully.")
             else:
-                self.query_one("#status", Static).update(
-                    f"Command exited with status {return_code}."
-                )
+                status.update(f"Command exited with status {return_code}.")
         except Exception as exc:  # noqa: BLE001
             output.write(f"Could not run command: {exc}")
-            self.query_one("#status", Static).update("Command failed to start.")
+            status.update("Command failed to start.")
         finally:
+            panel.finish(ok=return_code == 0)
             self.process = None
             self.query_one("#run", Button).disabled = False
             self.query_one("#stop", Button).disabled = True
-
-    def action_clear_command(self) -> None:
-        if not (self.process and self.process.returncode is None):
-            self.query_one("#extra-options", Input).value = ""
-            if self.selected_command:
-                for index in range(len(COMMAND_FORMS[self.selected_command])):
-                    self.query_one(f"#form-field-{index}", Input).value = ""
 
 
 def run() -> None:

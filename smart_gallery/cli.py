@@ -9,14 +9,16 @@ import argparse
 import os
 import subprocess
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
+from typing import Optional
 
 from loguru import logger
 
 from smart_gallery.config import resolve_db_path
 from smart_gallery.db import GalleryRepository
 from smart_gallery.organize import FilterOptions, Options, normalize_extensions
+from smart_gallery.progress import progress_reporter
 from smart_gallery.services import (
     cluster_faces,
     compare_galleries,
@@ -32,64 +34,138 @@ from smart_gallery.services import (
     write_compare_report,
 )
 
-
-class TqdmProgress:
-    def __init__(self, desc="Processing"):
-        try:
-            from tqdm import tqdm
-
-            self.pbar = tqdm(total=100, desc=desc)
-        except ImportError:
-            self.pbar = None
-        self.last = 0
-
-    def __call__(self, progress: float):
-        val = int(progress * 100)
-        if val > self.last and self.pbar:
-            self.pbar.update(val - self.last)
-            self.last = val
-
-    def close(self):
-        if self.pbar:
-            if self.last < 100:
-                self.pbar.update(100 - self.last)
-            self.pbar.close()
+# Long-running commands whose per-file details (copied/skipped files, ExifTool
+# chatter) go to a log file for the run instead of the terminal.
+DETAIL_LOG_COMMANDS = {"init", "import", "sync", "export", "scan-faces"}
+LOG_DIR = Path("logs")
 
 
-def _filter_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(add_help=False)
-    p.add_argument("--file-types", nargs="+", choices=["image", "video", "other"])
-    p.add_argument("--extensions", nargs="+")
-    p.add_argument("--date-start", type=date.fromisoformat)
-    p.add_argument("--date-end", type=date.fromisoformat)
-    p.add_argument("--cameras", nargs="+")
-    p.add_argument("--lenses", nargs="+")
-    p.add_argument("--min-aperture", type=float)
-    p.add_argument("--max-aperture", type=float)
-    p.add_argument("--min-iso", type=int)
-    p.add_argument("--max-iso", type=int)
-    p.add_argument("--min-shutter-speed")
-    p.add_argument("--max-shutter-speed")
-    p.add_argument(
-        "--people", nargs="+", metavar="NAME",
+def _configure_logging(command: str) -> Optional[Path]:
+    """INFO and above on the terminal; for long-running commands, everything
+    (DEBUG) also goes to ``logs/<command>-<timestamp>.log``. Returns that path."""
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
+    if command not in DETAIL_LOG_COMMANDS:
+        return None
+    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    path = LOG_DIR.resolve() / f"{command}-{stamp}.log"
+    try:
+        LOG_DIR.mkdir(exist_ok=True)
+        logger.add(path, level="DEBUG", encoding="utf-8")
+    except OSError as exc:
+        logger.warning(f"Could not open a log file in {LOG_DIR.resolve()}: {exc}")
+        return None
+    return path
+
+
+DRIVE_HELP = "Drive root (e.g. E:/), any folder on it, or a gallery.db path."
+PERSON_ID_HELP = "Numeric person id, as listed by `people`."
+STRUCTURE_HELP = "Folder levels to create, in order (default: Year Month)."
+ON_EXIST_HELP = "On a name clash: rename (append _1, _2, ...) or skip the copy."
+
+
+def _add_filter_args(parser: argparse.ArgumentParser) -> None:
+    """The shared query flags (import/export/report), as a "Filters" group."""
+    g = parser.add_argument_group("Filters")
+    g.add_argument(
+        "--file-types",
+        nargs="+",
+        choices=["image", "video", "other"],
+        help="Keep only these media types.",
+    )
+    g.add_argument(
+        "--extensions", nargs="+", help="Keep only these extensions, e.g. .jpg .cr3."
+    )
+    g.add_argument(
+        "--date-start",
+        type=date.fromisoformat,
+        help="Taken on or after this date (YYYY-MM-DD).",
+    )
+    g.add_argument(
+        "--date-end",
+        type=date.fromisoformat,
+        help="Taken on or before this date (YYYY-MM-DD).",
+    )
+    g.add_argument(
+        "--cameras", nargs="+", help="Camera models to keep (exact, case-sensitive)."
+    )
+    g.add_argument(
+        "--lenses", nargs="+", help="Lens models to keep (exact, case-sensitive)."
+    )
+    g.add_argument("--min-aperture", type=float, help="Smallest f-number to keep.")
+    g.add_argument("--max-aperture", type=float, help="Largest f-number to keep.")
+    g.add_argument("--min-iso", type=int, help="Lowest ISO to keep.")
+    g.add_argument("--max-iso", type=int, help="Highest ISO to keep.")
+    g.add_argument("--min-shutter-speed", help="Fastest shutter to keep, e.g. 1/250.")
+    g.add_argument("--max-shutter-speed", help="Slowest shutter to keep, e.g. 2s.")
+    g.add_argument(
+        "--people",
+        nargs="+",
+        metavar="NAME",
         help="Only media containing these named people (face recognition).",
     )
-    p.add_argument(
-        "--person-ids", nargs="+", type=int, metavar="ID", dest="person_ids",
+    g.add_argument(
+        "--person-ids",
+        nargs="+",
+        type=int,
+        metavar="ID",
+        dest="person_ids",
         help="Only media containing these person cluster ids (works before naming).",
     )
-    return p
 
 
-def _organize_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--by-media-type", action="store_true", default=True)
-    p.add_argument("--no-by-media-type", action="store_false", dest="by_media_type")
-    p.add_argument(
-        "--structure", nargs="+", default=["Year", "Month"],
-        choices=["Year", "Month", "Model", "Lens"],
+def _organize_args(g) -> None:
+    g.add_argument(
+        "--by-media-type",
+        action="store_true",
+        default=True,
+        help="Put images under Photos/ and videos under Videos/ (default).",
     )
-    p.add_argument("--on-exist", choices=["rename", "skip"], default="rename")
-    p.add_argument("--dry-run", action="store_true")
+    g.add_argument(
+        "--no-by-media-type",
+        action="store_false",
+        dest="by_media_type",
+        help="Don't split images and videos into Photos/ and Videos/.",
+    )
+    g.add_argument(
+        "--structure",
+        nargs="+",
+        default=["Year", "Month"],
+        choices=["Year", "Month", "Model", "Lens"],
+        help=STRUCTURE_HELP,
+    )
+    g.add_argument(
+        "--on-exist", choices=["rename", "skip"], default="rename", help=ON_EXIST_HELP
+    )
+
+
+def _clustering_args(g, *, eps: float, min_samples: int, min_cluster_size: int):
+    g.add_argument(
+        "--algo",
+        choices=["hdbscan", "dbscan"],
+        default="hdbscan",
+        help="Clustering algorithm.",
+    )
+    g.add_argument(
+        "--eps", type=float, default=eps, help="DBSCAN cosine epsilon (radius)."
+    )
+    g.add_argument(
+        "--min-samples", type=int, default=min_samples, help="DBSCAN min samples."
+    )
+    g.add_argument(
+        "--min-cluster-size",
+        type=int,
+        default=min_cluster_size,
+        help="HDBSCAN min cluster size.",
+    )
+    g.add_argument(
+        "--pca",
+        type=int,
+        default=0,
+        metavar="DIMS",
+        help="Reduce embeddings to DIMS via PCA before clustering "
+        "(big speedup for large libraries; try 128). 0 = off.",
+    )
 
 
 def build_filter_query(args) -> FilterOptions:
@@ -119,50 +195,160 @@ def build_filter_query(args) -> FilterOptions:
     )
 
 
-def parse_args(argv=None):
+def build_parser() -> argparse.ArgumentParser:
+    """The full CLI definition. Argument groups double as the TUI's form
+    sections, and every option's help text is shown there as its hint."""
     parser = argparse.ArgumentParser(
         prog="smart-gallery",
         description="DB-centric photo & video catalog: init, import, sync, export, dashboard, ui.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
-    filt = _filter_parser()
 
     p_init = sub.add_parser("init", help="Create a catalog on a drive and scan it.")
-    p_init.add_argument("drive", type=Path, help="Drive/root, e.g. E:/")
-    p_init.add_argument("--label")
-    p_init.add_argument("--hashing", action="store_true")
-    p_init.add_argument("--overwrite", action="store_true")
+    p_init.add_argument("drive", type=Path, help=DRIVE_HELP)
+    p_init.add_argument("--label", help="Human-readable name stored in the catalog.")
+    p_init.add_argument(
+        "--hashing",
+        action="store_true",
+        help="Record a content-hash column (reserved for future dedup).",
+    )
+    p_init.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Re-create the catalog if one already exists.",
+    )
 
-    p_import = sub.add_parser("import", parents=[filt], help="Copy media into the drive and update the catalog.")
-    p_import.add_argument("sources", nargs="+", type=Path)
-    p_import.add_argument("--to", required=True, type=Path, dest="drive", help="Target drive/root, e.g. E:/")
-    p_import.add_argument("--output", type=Path, default=None, help="Subdirectory on the drive to place files (default: drive root).")
-    _organize_args(p_import)
+    p_import = sub.add_parser(
+        "import",
+        help="Copy media into the drive and update the catalog.",
+    )
+    p_import.add_argument(
+        "sources",
+        nargs="+",
+        type=Path,
+        help="Source files or folders (SD card, dump folder).",
+    )
+    p_import.add_argument(
+        "--to",
+        required=True,
+        type=Path,
+        dest="drive",
+        help="Target drive/root, e.g. E:/",
+    )
+    import_layout = p_import.add_argument_group("Layout")
+    import_layout.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Subdirectory on the drive to place files (default: drive root).",
+    )
+    _organize_args(import_layout)
+    _add_filter_args(p_import)
+    p_import.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Plan the placement without copying or writing to the catalog.",
+    )
 
     p_sync = sub.add_parser("sync", help="Reconcile the catalog with the live drive.")
-    p_sync.add_argument("drive", type=Path)
-    p_sync.add_argument("--dry-run", action="store_true")
+    p_sync.add_argument("drive", type=Path, help=DRIVE_HELP)
+    p_sync.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report the add/update/delete plan without changing the catalog.",
+    )
 
     p_compare = sub.add_parser(
         "compare", help="Compare the contents of two gallery catalogs."
     )
-    p_compare.add_argument("gallery_a", type=Path, metavar="GALLERY_A")
-    p_compare.add_argument("gallery_b", type=Path, metavar="GALLERY_B")
-    p_compare.add_argument("--match-by", choices=["path", "name", "hash"], default="path")
-    p_compare.add_argument("--format", choices=["text", "json", "csv"], default="text")
-    p_compare.add_argument("--output", type=Path, help="Write the report to this file.")
-    p_compare.add_argument("--details", action="store_true", help="Include individual records in text output.")
+    p_compare.add_argument(
+        "gallery_a", type=Path, metavar="GALLERY_A", help="First drive or gallery.db."
+    )
+    p_compare.add_argument(
+        "gallery_b", type=Path, metavar="GALLERY_B", help="Second drive or gallery.db."
+    )
+    p_compare.add_argument(
+        "--match-by",
+        choices=["path", "name", "hash"],
+        default="path",
+        help="Pair records by relative path, unique file name, or stored content hash.",
+    )
+    compare_out = p_compare.add_argument_group("Report output")
+    compare_out.add_argument(
+        "--format",
+        choices=["text", "json", "csv"],
+        default="text",
+        help="Report format.",
+    )
+    compare_out.add_argument(
+        "--output", type=Path, help="Write the report to this file."
+    )
+    compare_out.add_argument(
+        "--details",
+        action="store_true",
+        help="Include individual records in text output.",
+    )
 
-    p_export = sub.add_parser("export", parents=[filt], help="Copy a filtered subset out to another directory.")
-    p_export.add_argument("--from", required=True, type=Path, dest="drive")
-    p_export.add_argument("--to", required=True, type=Path, dest="dest")
-    p_export.add_argument("--structure", nargs="+", choices=["Year", "Month", "Model", "Lens"], default=["Year", "Month"])
-    p_export.add_argument("--mirror", action="store_true", help="Preserve the drive's relative structure instead of reorganizing.")
-    p_export.add_argument("--no-by-media-type", action="store_false", dest="by_media_type", default=True)
-    p_export.add_argument("--on-exist", choices=["rename", "skip"], default="rename")
-    p_export.add_argument("--no-manifest", action="store_false", dest="manifest", default=True)
-    p_export.add_argument("--portable-db", action="store_true")
-    p_export.add_argument("--dry-run", action="store_true")
+    p_export = sub.add_parser(
+        "export",
+        help="Copy a filtered subset out to another directory.",
+    )
+    p_export.add_argument(
+        "--from",
+        required=True,
+        type=Path,
+        dest="drive",
+        help="Source drive or gallery.db (opened read-only).",
+    )
+    p_export.add_argument(
+        "--to",
+        required=True,
+        type=Path,
+        dest="dest",
+        help="Folder that receives the exported files.",
+    )
+    export_layout = p_export.add_argument_group("Layout")
+    export_layout.add_argument(
+        "--structure",
+        nargs="+",
+        choices=["Year", "Month", "Model", "Lens"],
+        default=["Year", "Month"],
+        help=STRUCTURE_HELP,
+    )
+    export_layout.add_argument(
+        "--mirror",
+        action="store_true",
+        help="Preserve the drive's relative structure instead of reorganizing.",
+    )
+    export_layout.add_argument(
+        "--no-by-media-type",
+        action="store_false",
+        dest="by_media_type",
+        default=True,
+        help="Don't split images and videos into Photos/ and Videos/.",
+    )
+    export_layout.add_argument(
+        "--on-exist", choices=["rename", "skip"], default="rename", help=ON_EXIST_HELP
+    )
+    _add_filter_args(p_export)
+    export_extras = p_export.add_argument_group("Extras")
+    export_extras.add_argument(
+        "--no-manifest",
+        action="store_false",
+        dest="manifest",
+        default=True,
+        help="Don't write _smart_gallery_manifest.csv at the destination.",
+    )
+    export_extras.add_argument(
+        "--portable-db",
+        action="store_true",
+        help="Also write a self-contained catalog at the destination.",
+    )
+    p_export.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List what would be copied without copying.",
+    )
 
     p_convert = sub.add_parser(
         "convert-raw",
@@ -176,100 +362,162 @@ def parse_args(argv=None):
         help="CR2/CR3 files or directories to search recursively.",
     )
 
-    p_dash = sub.add_parser("dashboard", help="Launch the Streamlit dashboard on a catalog.")
-    p_dash.add_argument("drive", type=Path)
+    p_dash = sub.add_parser(
+        "dashboard", help="Launch the Streamlit dashboard on a catalog."
+    )
+    p_dash.add_argument("drive", type=Path, help=DRIVE_HELP)
 
-    sub.add_parser("ui", aliases=["tui"], help="Open the interactive Textual terminal interface.")
+    sub.add_parser(
+        "ui", aliases=["tui"], help="Open the interactive Textual terminal interface."
+    )
 
-    p_report = sub.add_parser("report", parents=[filt], help="Write an Excel report (and optional figures).")
-    p_report.add_argument("drive", type=Path)
-    p_report.add_argument("--to", required=True, type=Path, dest="output")
-    p_report.add_argument("--figures", action="store_true")
+    p_report = sub.add_parser(
+        "report", help="Write an Excel report (and optional figures)."
+    )
+    p_report.add_argument("drive", type=Path, help=DRIVE_HELP)
+    p_report.add_argument(
+        "--to",
+        required=True,
+        type=Path,
+        dest="output",
+        help="Excel workbook to write (.xlsx).",
+    )
+    _add_filter_args(p_report)
+    p_report.add_argument(
+        "--figures",
+        action="store_true",
+        help="Also render PNG charts into a Figures/ folder (needs the 'figures' extra).",
+    )
 
     # ── face recognition ─────────────────────────────────────────────────────
-    p_scan = sub.add_parser("scan-faces", help="Detect & embed faces in every catalogued image (GPU).")
-    p_scan.add_argument("drive", type=Path)
-    p_scan.add_argument("--rescan", action="store_true", help="Clear all face data and scan everything again.")
-    p_scan.add_argument("--limit", type=int, default=None, help="Scan at most N images (testing).")
+    p_scan = sub.add_parser(
+        "scan-faces", help="Detect & embed faces in every catalogued image (GPU)."
+    )
+    p_scan.add_argument("drive", type=Path, help=DRIVE_HELP)
+    p_scan.add_argument(
+        "--rescan",
+        action="store_true",
+        help="Clear all face data and scan everything again.",
+    )
+    p_scan.add_argument(
+        "--limit", type=int, default=None, help="Scan at most N images (testing)."
+    )
 
     p_identify = sub.add_parser(
         "identify-faces", help="Identify faces using person-named sample directories."
     )
-    p_identify.add_argument("drive", type=Path)
+    p_identify.add_argument("drive", type=Path, help=DRIVE_HELP)
     p_identify.add_argument(
         "--samples",
         required=True,
         type=Path,
         help="Root directory containing one sample-photo directory per person.",
     )
-    p_identify.add_argument(
+    matching = p_identify.add_argument_group("Matching")
+    matching.add_argument(
         "--threshold",
         type=float,
         default=0.5,
         help="Minimum cosine similarity for a match (default: 0.5).",
     )
-    p_identify.add_argument(
+    matching.add_argument(
         "--margin",
         type=float,
         default=0.05,
         help="Minimum lead over the second-best match (default: 0.05).",
     )
-    p_identify.add_argument(
+    matching.add_argument(
         "--reassign",
         action="store_true",
         help="Reconsider all faces assigned to people in the sample set.",
     )
 
-    p_cluster = sub.add_parser("cluster-faces", help="Optionally cluster faces without sample photos.")
-    p_cluster.add_argument("drive", type=Path)
-    p_cluster.add_argument("--algo", choices=["hdbscan", "dbscan"], default="hdbscan")
-    p_cluster.add_argument("--eps", type=float, default=0.45, help="DBSCAN cosine epsilon.")
-    p_cluster.add_argument("--min-samples", type=int, default=4, help="DBSCAN min samples.")
-    p_cluster.add_argument("--min-cluster-size", type=int, default=5, help="HDBSCAN min cluster size.")
-    p_cluster.add_argument("--pca", type=int, default=0, metavar="DIMS",
-                           help="Reduce embeddings to DIMS via PCA before clustering "
-                                "(big speedup for large libraries; try 128). 0 = off.")
+    p_cluster = sub.add_parser(
+        "cluster-faces", help="Optionally cluster faces without sample photos."
+    )
+    p_cluster.add_argument("drive", type=Path, help=DRIVE_HELP)
+    _clustering_args(
+        p_cluster.add_argument_group("Clustering"),
+        eps=0.45,
+        min_samples=4,
+        min_cluster_size=5,
+    )
     g_mode = p_cluster.add_mutually_exclusive_group()
-    g_mode.add_argument("--rebuild", action="store_true", help="Drop all people and re-cluster from scratch.")
-    g_mode.add_argument("--incremental", action="store_true", help="Match new faces to existing people (fast).")
+    g_mode.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Drop all people and re-cluster from scratch.",
+    )
+    g_mode.add_argument(
+        "--incremental",
+        action="store_true",
+        help="Match new faces to existing people (fast).",
+    )
 
-    p_people = sub.add_parser("people", help="List detected people and their photo counts.")
-    p_people.add_argument("drive", type=Path)
-    p_people.add_argument("--samples", type=int, default=3, metavar="N",
-                          help="Clickable sample photos to show per person (default 3).")
+    p_people = sub.add_parser(
+        "people", help="List detected people and their photo counts."
+    )
+    p_people.add_argument("drive", type=Path, help=DRIVE_HELP)
+    p_people.add_argument(
+        "--samples",
+        type=int,
+        default=3,
+        metavar="N",
+        help="Clickable sample photos to show per person (default 3).",
+    )
 
-    p_name = sub.add_parser("name-person", help="Set (or clear) the name of a person cluster.")
-    p_name.add_argument("drive", type=Path)
-    p_name.add_argument("person_id", type=int)
-    p_name.add_argument("name", nargs="?", default=None, help="Name to assign; omit to clear.")
+    p_name = sub.add_parser(
+        "name-person", help="Set (or clear) the name of a person cluster."
+    )
+    p_name.add_argument("drive", type=Path, help=DRIVE_HELP)
+    p_name.add_argument("person_id", type=int, help=PERSON_ID_HELP)
+    p_name.add_argument(
+        "name", nargs="?", default=None, help="Name to assign; omit to clear."
+    )
 
-    p_merge = sub.add_parser("merge-persons", help="Merge several person clusters into one.")
-    p_merge.add_argument("drive", type=Path)
+    p_merge = sub.add_parser(
+        "merge-persons", help="Merge several person clusters into one."
+    )
+    p_merge.add_argument("drive", type=Path, help=DRIVE_HELP)
     p_merge.add_argument("dest", type=int, help="Destination person id (kept).")
-    p_merge.add_argument("sources", type=int, nargs="+", help="Person ids merged into dest.")
+    p_merge.add_argument(
+        "sources", type=int, nargs="+", help="Person ids merged into dest."
+    )
 
-    p_split = sub.add_parser("split-person", help="Re-cluster one impure person into tighter sub-clusters.")
-    p_split.add_argument("drive", type=Path)
-    p_split.add_argument("person_id", type=int)
-    p_split.add_argument("--algo", choices=["hdbscan", "dbscan"], default="hdbscan")
-    p_split.add_argument("--eps", type=float, default=0.30, help="DBSCAN cosine epsilon (tighter than a full run).")
-    p_split.add_argument("--min-samples", type=int, default=3)
-    p_split.add_argument("--min-cluster-size", type=int, default=3, help="HDBSCAN min cluster size.")
-    p_split.add_argument("--pca", type=int, default=0, metavar="DIMS")
+    p_split = sub.add_parser(
+        "split-person", help="Re-cluster one impure person into tighter sub-clusters."
+    )
+    p_split.add_argument("drive", type=Path, help=DRIVE_HELP)
+    p_split.add_argument("person_id", type=int, help=PERSON_ID_HELP)
+    _clustering_args(
+        p_split.add_argument_group("Clustering"),
+        eps=0.30,
+        min_samples=3,
+        min_cluster_size=3,
+    )
 
-    p_del = sub.add_parser("delete-person", help="Delete a person cluster (its faces become unassigned).")
-    p_del.add_argument("drive", type=Path)
-    p_del.add_argument("person_id", type=int)
+    p_del = sub.add_parser(
+        "delete-person", help="Delete a person cluster (its faces become unassigned)."
+    )
+    p_del.add_argument("drive", type=Path, help=DRIVE_HELP)
+    p_del.add_argument("person_id", type=int, help=PERSON_ID_HELP)
 
-    return parser.parse_args(argv)
+    return parser
+
+
+def parse_args(argv=None):
+    return build_parser().parse_args(argv)
 
 
 def _handle_init(args):
-    cb = TqdmProgress("Indexing")
+    cb = progress_reporter()
     try:
         report = init_drive(
-            args.drive, label=args.label, hashing=args.hashing,
-            overwrite=args.overwrite, progress_callback=cb,
+            args.drive,
+            label=args.label,
+            hashing=args.hashing,
+            overwrite=args.overwrite,
+            progress_callback=cb,
         )
     finally:
         cb.close()
@@ -278,15 +526,21 @@ def _handle_init(args):
 
 def _handle_import(args):
     options = Options(
-        by_media_type=args.by_media_type, structure=args.structure,
-        on_exist=args.on_exist, dry_run=args.dry_run,
+        by_media_type=args.by_media_type,
+        structure=args.structure,
+        on_exist=args.on_exist,
+        dry_run=args.dry_run,
     )
-    cb = TqdmProgress("Importing")
+    cb = progress_reporter()
     with GalleryRepository.open(args.drive) as repo:
         try:
             report = import_media(
-                repo, args.sources, output_dir=args.output, options=options,
-                query=build_filter_query(args), progress_callback=cb,
+                repo,
+                args.sources,
+                output_dir=args.output,
+                options=options,
+                query=build_filter_query(args),
+                progress_callback=cb,
             )
         finally:
             cb.close()
@@ -296,7 +550,7 @@ def _handle_import(args):
 
 
 def _handle_sync(args):
-    cb = TqdmProgress("Syncing")
+    cb = progress_reporter()
     with GalleryRepository.open(args.drive) as repo:
         try:
             report = sync_drive(repo, dry_run=args.dry_run, progress_callback=cb)
@@ -312,25 +566,49 @@ def _handle_compare(args):
     report = compare_galleries(args.gallery_a, args.gallery_b, match_by=args.match_by)
     if args.output:
         output_path = write_compare_report(
-            report, args.output, output_format=args.format, details=args.details,
+            report,
+            args.output,
+            output_format=args.format,
+            details=args.details,
         )
         logger.success(f"Comparison written to {output_path}")
     else:
-        print(format_compare_report(
-            report, output_format=args.format, details=args.details,
-        ))
+        print(
+            format_compare_report(
+                report,
+                output_format=args.format,
+                details=args.details,
+            )
+        )
 
 
 def _handle_export(args):
-    options = None if args.mirror else Options(
-        by_media_type=args.by_media_type, structure=args.structure, on_exist=args.on_exist,
-    )
-    with GalleryRepository.open(args.drive, read_only=True) as repo:
-        report = export_media(
-            repo, args.dest, filters=build_filter_query(args), options=options,
-            mirror=args.mirror, on_exist=args.on_exist, dry_run=args.dry_run,
-            manifest=args.manifest, portable_db=args.portable_db,
+    options = (
+        None
+        if args.mirror
+        else Options(
+            by_media_type=args.by_media_type,
+            structure=args.structure,
+            on_exist=args.on_exist,
         )
+    )
+    cb = progress_reporter()
+    with GalleryRepository.open(args.drive, read_only=True) as repo:
+        try:
+            report = export_media(
+                repo,
+                args.dest,
+                filters=build_filter_query(args),
+                options=options,
+                mirror=args.mirror,
+                on_exist=args.on_exist,
+                dry_run=args.dry_run,
+                manifest=args.manifest,
+                portable_db=args.portable_db,
+                progress_callback=cb,
+            )
+        finally:
+            cb.close()
     logger.success(
         f"Exported {report.copied} of {report.matched} matched files to {args.dest}."
     )
@@ -367,14 +645,18 @@ def _handle_report(args):
                 figures_dir = generate_plots(repo, args.output.parent / "Figures")
                 logger.success(f"Figures written to {figures_dir}")
             except Exception as exc:
-                logger.error(f"Figure generation failed (install the 'figures' extra?): {exc}")
+                logger.error(
+                    f"Figure generation failed (install the 'figures' extra?): {exc}"
+                )
 
 
 def _handle_scan_faces(args):
-    cb = TqdmProgress("Scanning faces")
+    cb = progress_reporter()
     with GalleryRepository.open(args.drive) as repo:
         try:
-            report = scan_faces(repo, rescan=args.rescan, limit=args.limit, progress_callback=cb)
+            report = scan_faces(
+                repo, rescan=args.rescan, limit=args.limit, progress_callback=cb
+            )
         finally:
             cb.close()
     logger.success(
@@ -386,9 +668,14 @@ def _handle_scan_faces(args):
 def _handle_cluster_faces(args):
     with GalleryRepository.open(args.drive) as repo:
         report = cluster_faces(
-            repo, algo=args.algo, eps=args.eps, min_samples=args.min_samples,
-            min_cluster_size=args.min_cluster_size, rebuild=args.rebuild,
-            incremental=args.incremental, pca=args.pca,
+            repo,
+            algo=args.algo,
+            eps=args.eps,
+            min_samples=args.min_samples,
+            min_cluster_size=args.min_cluster_size,
+            rebuild=args.rebuild,
+            incremental=args.incremental,
+            pca=args.pca,
         )
     if args.incremental:
         logger.success(
@@ -479,8 +766,12 @@ def _handle_split_person(args):
     with GalleryRepository.open(args.drive) as repo:
         try:
             report = split_person(
-                repo, args.person_id, algo=args.algo, eps=args.eps,
-                min_samples=args.min_samples, min_cluster_size=args.min_cluster_size,
+                repo,
+                args.person_id,
+                algo=args.algo,
+                eps=args.eps,
+                min_samples=args.min_samples,
+                min_cluster_size=args.min_cluster_size,
                 pca=args.pca,
             )
         except ValueError as exc:
@@ -534,6 +825,7 @@ _HANDLERS = {
 
 def main(argv=None):
     args = parse_args(argv)
+    log_path = _configure_logging(args.command)
     try:
         _HANDLERS[args.command](args)
     except (FileNotFoundError, FileExistsError) as exc:
@@ -545,6 +837,9 @@ def main(argv=None):
     except Exception as exc:  # noqa: BLE001
         logger.exception(f"Unexpected error: {exc}")
         sys.exit(1)
+    finally:
+        if log_path is not None:
+            logger.info(f"Details: {log_path}")
 
 
 if __name__ == "__main__":

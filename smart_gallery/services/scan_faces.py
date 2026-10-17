@@ -9,7 +9,7 @@ GPU inference — decode/IO is the real bottleneck, not the GPU.
 import os
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Optional
 
 from loguru import logger
 
@@ -17,6 +17,7 @@ from smart_gallery.analysis.faces import FaceScanner
 from smart_gallery.config import FACE_DET_VERSION
 from smart_gallery.db import GalleryRepository
 from smart_gallery.models import Face
+from smart_gallery.progress import SCANNING, ProgressCallback, ProgressEvent
 
 _COMMIT_CHUNK = 500
 
@@ -43,7 +44,7 @@ def scan_faces(
     *,
     rescan: bool = False,
     limit: Optional[int] = None,
-    progress_callback: Optional[Callable[[float], None]] = None,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> ScanFacesReport:
     if rescan:
         logger.info("--rescan: clearing all existing face data first")
@@ -100,7 +101,11 @@ def scan_faces(
                     repo.add_scan_results(buffer, FACE_DET_VERSION)
                     buffer.clear()
                 if progress_callback:
-                    progress_callback(report.images_scanned / total)
+                    progress_callback(
+                        ProgressEvent(
+                            SCANNING, report.images_scanned, total, unit="images"
+                        )
+                    )
 
     if buffer:
         repo.add_scan_results(buffer, FACE_DET_VERSION)

@@ -7,7 +7,7 @@ for the catalog row; only path/size/mtime are taken from the destination.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, List, Optional, Sequence
+from typing import List, Optional, Sequence
 
 from loguru import logger
 
@@ -19,6 +19,7 @@ from smart_gallery.organize import (
     matches,
     organize_items,
 )
+from smart_gallery.progress import ProgressCallback
 
 
 @dataclass
@@ -48,7 +49,7 @@ def import_media(
     output_dir=None,
     options: Optional[Options] = None,
     query: Optional[FilterOptions] = None,
-    progress_callback: Optional[Callable[[float], None]] = None,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> ImportReport:
     """Import files from ``sources`` into ``output_dir`` (default: the drive root)."""
     options = options or Options()
@@ -64,7 +65,7 @@ def import_media(
         items = [it for it in items if matches(it, query)]
 
     report = ImportReport(analyzed=len(items))
-    org = organize_items(items, output_dir, repo.drive_root, options)
+    org = organize_items(items, output_dir, repo.drive_root, options, progress_callback)
     report.copied = org.copied
     report.skipped = org.skipped
     report.excluded = len(org.excluded)

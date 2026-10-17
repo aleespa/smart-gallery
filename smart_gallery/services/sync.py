@@ -7,13 +7,14 @@ Unchanged files are never re-read.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from loguru import logger
 
 from smart_gallery.analysis import analyze_paths
 from smart_gallery.config import FACE_DET_VERSION, iter_files, to_relpath
 from smart_gallery.db import GalleryRepository
+from smart_gallery.progress import FINDING, ProgressCallback, counted
 
 # relpath -> (absolute path, size_bytes, mtime_ns)
 LiveIndex = Dict[str, Tuple[Path, int, int]]
@@ -31,9 +32,11 @@ class SyncReport:
         return self.added + self.updated + self.deleted
 
 
-def _scan_live(drive_root: Path) -> LiveIndex:
+def _scan_live(
+    drive_root: Path, progress_callback: Optional[ProgressCallback] = None
+) -> LiveIndex:
     live: LiveIndex = {}
-    for path in iter_files(drive_root):
+    for path in counted(iter_files(drive_root), FINDING, progress_callback):
         try:
             st = path.stat()
         except OSError:
@@ -44,9 +47,10 @@ def _scan_live(drive_root: Path) -> LiveIndex:
 
 def diff_drive(
     repo: GalleryRepository,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> Tuple[Set[str], Set[str], Set[str], LiveIndex]:
     """Return (to_delete, to_add, to_update, live_index)."""
-    live = _scan_live(repo.drive_root)
+    live = _scan_live(repo.drive_root, progress_callback)
     db_index = repo.index_for_sync()
 
     live_keys = set(live)
@@ -65,9 +69,9 @@ def sync_drive(
     repo: GalleryRepository,
     *,
     dry_run: bool = False,
-    progress_callback: Optional[Callable[[float], None]] = None,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> SyncReport:
-    to_delete, to_add, to_update, live = diff_drive(repo)
+    to_delete, to_add, to_update, live = diff_drive(repo, progress_callback)
     report = SyncReport(
         added=len(to_add),
         updated=len(to_update),

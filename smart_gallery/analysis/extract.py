@@ -14,12 +14,13 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from loguru import logger
 
 from smart_gallery.config import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from smart_gallery.models import MediaItem
+from smart_gallery.progress import READING, ProgressCallback, ProgressEvent
 
 EXIFTOOL_IMAGE_TAG_ARGS = [
     "-Model",
@@ -147,9 +148,7 @@ def run_exiftool_batch(file_paths: List[Path], tag_profile: str = "all") -> List
             return []
         return json.loads(process.stdout)
     except FileNotFoundError:
-        logger.error(
-            "ExifTool not found. Install it and ensure 'exiftool' is on PATH."
-        )
+        logger.error("ExifTool not found. Install it and ensure 'exiftool' is on PATH.")
         raise
     except Exception as exc:
         logger.error(f"Error running ExifTool: {exc}")
@@ -166,7 +165,7 @@ def analyze_paths(
     file_paths: List[Path],
     drive_root: Optional[Path] = None,
     stop_event: Optional[threading.Event] = None,
-    progress_callback: Optional[Callable[[float], None]] = None,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> List[MediaItem]:
     """Extract metadata for ``file_paths`` and return a flat list of MediaItems.
 
@@ -194,7 +193,7 @@ def analyze_paths(
 
     processed = len(items)
     if progress_callback:
-        progress_callback(processed / total)
+        progress_callback(ProgressEvent(READING, processed, total))
 
     def _run(file_list: List[Path], tag_profile: str) -> None:
         nonlocal processed
@@ -202,8 +201,7 @@ def analyze_paths(
             return
         num_workers, batch_size = _choose_exiftool_plan(len(file_list))
         batches = [
-            file_list[i : i + batch_size]
-            for i in range(0, len(file_list), batch_size)
+            file_list[i : i + batch_size] for i in range(0, len(file_list), batch_size)
         ]
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as ex:
             futures = {
@@ -220,7 +218,9 @@ def analyze_paths(
                         items.append(item)
                 processed += futures[future]
                 if progress_callback:
-                    progress_callback(min(processed / total, 1.0))
+                    progress_callback(
+                        ProgressEvent(READING, min(processed, total), total)
+                    )
 
     _run(image_files, "image")
     _run(video_files, "video")

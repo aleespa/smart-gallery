@@ -235,11 +235,25 @@ You can also point the in-app sidebar at any other drive/`gallery.db`.
 smart-gallery ui
 ```
 
-Opens a Textual interface with the available commands, a usage/options pane,
-and a live output pane. Select a command to see its help and a form for its
-required paths and values. Add optional switches or filters in the extra
-options field; for example, select `sync`, enter `E:/` as the drive, and add
-`--dry-run` as an extra option. Paths containing spaces can be entered as-is.
+Opens a Textual interface listing the commands. Selecting one builds a form
+with a control for every option: required values first, then foldable sections
+(for example Layout, Filters, Extras) with a one-line hint under each option.
+Switches, dropdowns, and checklists cover the flags with fixed choices; for
+`--structure`, the order you tick the levels is the folder order. A preview
+above the form shows the exact `smart-gallery …` command, updated as you type.
+Invalid values are flagged next to their field, and Run waits until required
+values are filled in.
+
+While a command runs, a Progress panel shows each step (finding files, reading
+metadata, copying, scanning faces) with live counts, elapsed time and an
+estimate of what's left. Copy steps (`import`, `export`) show one bar split
+into copied / skipped / failed. The Output pane keeps the summary and any
+errors.
+
+The drive you enter carries over to the next command, and each command keeps
+its values while you switch between them. `F1` shows the command's full
+`--help`; `Esc` resets the form to the defaults. A "More CLI options" box
+appends anything else as typed. Paths containing spaces can be entered as-is.
 
 ### `report` — Excel report (and optional figures)
 
@@ -260,6 +274,16 @@ The filter flags scope the report, e.g. `--file-types image --date-start 2026-01
 Commands exit non-zero on error (missing catalog, a catalog that already exists
 on `init` without `--overwrite`, ExifTool not found, etc.) and log the reason.
 Run `smart-gallery <command> --help` for the authoritative flag list.
+
+### Progress and log files
+
+Long-running commands (`init`, `import`, `sync`, `export`, `scan-faces`) show a
+progress bar per step with counts; copy steps add copied / skipped / failed
+counts. The terminal shows the summary and errors. Every per-file detail (each
+copied or skipped file) goes to a log file for the run,
+`logs/<command>-<date>_<time>.log` under the current directory, whose path is
+printed at the end. `export` no longer stops at the first file it can't read or
+write: such files are counted as failed and logged.
 
 ## Per-device import recipes
 

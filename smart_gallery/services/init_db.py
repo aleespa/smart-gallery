@@ -2,13 +2,14 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 from loguru import logger
 
 from smart_gallery.analysis import analyze_paths
 from smart_gallery.config import iter_files, resolve_db_path
 from smart_gallery.db import GalleryRepository
+from smart_gallery.progress import FINDING, ProgressCallback, counted
 
 
 @dataclass
@@ -23,7 +24,7 @@ def init_drive(
     label: Optional[str] = None,
     hashing: bool = False,
     overwrite: bool = False,
-    progress_callback: Optional[Callable[[float], None]] = None,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> InitReport:
     """Create ``<target>/.smart_gallery/gallery.db`` and index every file under it."""
     db_path = resolve_db_path(target)
@@ -37,7 +38,7 @@ def init_drive(
 
     repo = GalleryRepository.create(target, label=label, hashing=hashing)
     try:
-        files = list(iter_files(repo.drive_root))
+        files = list(counted(iter_files(repo.drive_root), FINDING, progress_callback))
         logger.info(f"Indexing {len(files):,} files under {repo.drive_root}...")
         items = analyze_paths(
             files, drive_root=repo.drive_root, progress_callback=progress_callback

@@ -14,6 +14,7 @@ from typing import List, Literal, Optional
 from loguru import logger
 
 from smart_gallery.models import MediaItem
+from smart_gallery.progress import COPYING, ProgressCallback, ProgressEvent
 
 StructurePart = Literal["Year", "Month", "Model", "Lens"]
 
@@ -66,7 +67,9 @@ def target_dir_for(output: Path, options: Options, item: MediaItem) -> Path:
     return target
 
 
-def _unique_destination(target_dir: Path, filename: str, on_exist: str) -> Optional[Path]:
+def _unique_destination(
+    target_dir: Path, filename: str, on_exist: str
+) -> Optional[Path]:
     """Resolve the final destination path, applying the on_exist policy.
     Returns None when the policy is 'skip' and the file already exists."""
     destination = target_dir / filename
@@ -87,51 +90,77 @@ def organize_items(
     output: Path,
     drive_root: Path,
     options: Options,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> OrganizeReport:
     """Place each item under ``output`` and return them anchored to ``drive_root``."""
     report = OrganizeReport()
     output = Path(output)
 
-    for item in items:
-        if not item.abspath:
-            report.excluded.append(item.relpath or item.name or "<unknown>")
-            continue
-        source = Path(item.abspath)
-        try:
-            target_dir = target_dir_for(output, options, item)
-            filename = source.name
-
-            if options.dry_run:
-                destination = target_dir / filename
-                item.relocate(destination, drive_root)
-                report.placed.append(item)
-                report.copied += 1
-                continue
-
-            target_dir.mkdir(parents=True, exist_ok=True)
-            destination = _unique_destination(target_dir, filename, options.on_exist)
-
-            if destination is None:  # skip: already present on the drive
-                destination = target_dir / filename
-                item.relocate(destination, drive_root)
-                report.placed.append(item)
-                report.skipped += 1
-                if options.verbose:
-                    logger.debug(f"Skipped (already exists): {destination}")
-                continue
-
-            shutil.copy2(source, destination)
-            item.relocate(destination, drive_root)
-            report.placed.append(item)
-            report.copied += 1
-            if options.verbose:
-                logger.debug(f"Copied: {destination}")
-        except OSError as exc:
-            logger.error(f"Failed to place {source}: {exc}")
-            report.excluded.append(str(source))
+    for done, item in enumerate(items, 1):
+        _place(item, output, drive_root, options, report)
+        if progress_callback:
+            progress_callback(
+                copy_progress(done, len(items), report.copied, report.skipped)
+            )
 
     logger.info(
         f"Organize report — copied={report.copied} skipped={report.skipped} "
         f"excluded={len(report.excluded)} into {output}"
     )
     return report
+
+
+def copy_progress(done: int, total: int, copied: int, skipped: int) -> ProgressEvent:
+    """A copy step's progress; whatever was neither copied nor skipped failed."""
+    failed = done - copied - skipped
+    return ProgressEvent(
+        COPYING,
+        done,
+        total,
+        outcomes=(("copied", copied), ("skipped", skipped), ("failed", failed)),
+    )
+
+
+def _place(
+    item: MediaItem,
+    output: Path,
+    drive_root: Path,
+    options: Options,
+    report: OrganizeReport,
+) -> None:
+    if not item.abspath:
+        report.excluded.append(item.relpath or item.name or "<unknown>")
+        return
+    source = Path(item.abspath)
+    try:
+        target_dir = target_dir_for(output, options, item)
+        filename = source.name
+
+        if options.dry_run:
+            destination = target_dir / filename
+            item.relocate(destination, drive_root)
+            report.placed.append(item)
+            report.copied += 1
+            return
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+        destination = _unique_destination(target_dir, filename, options.on_exist)
+
+        if destination is None:  # skip: already present on the drive
+            destination = target_dir / filename
+            item.relocate(destination, drive_root)
+            report.placed.append(item)
+            report.skipped += 1
+            if options.verbose:
+                logger.debug(f"Skipped (already exists): {destination}")
+            return
+
+        shutil.copy2(source, destination)
+        item.relocate(destination, drive_root)
+        report.placed.append(item)
+        report.copied += 1
+        if options.verbose:
+            logger.debug(f"Copied: {destination}")
+    except OSError as exc:
+        logger.error(f"Failed to place {source}: {exc}")
+        report.excluded.append(str(source))

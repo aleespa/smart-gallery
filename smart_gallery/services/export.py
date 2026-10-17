@@ -7,6 +7,7 @@ preserve each file's relative path on the drive.
 """
 
 import csv
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -17,7 +18,8 @@ from smart_gallery.config import resolve_db_path, to_abspath
 from smart_gallery.db import GalleryRepository
 from smart_gallery.models import MediaItem
 from smart_gallery.organize import FilterOptions, Options, target_dir_for
-from smart_gallery.organize.organize import _unique_destination
+from smart_gallery.organize.organize import _unique_destination, copy_progress
+from smart_gallery.progress import ProgressCallback
 
 MANIFEST_NAME = "_smart_gallery_manifest.csv"
 _MANIFEST_FIELDS = [
@@ -59,38 +61,21 @@ def export_media(
     dry_run: bool = False,
     manifest: bool = True,
     portable_db: bool = False,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> ExportReport:
     dest = Path(dest)
     items = repo.query(filters)
     report = ExportReport(matched=len(items))
     placed: List[MediaItem] = []
 
-    for item in items:
-        src = Path(item.abspath) if item.abspath else to_abspath(item.relpath, repo.drive_root)
-        if not src.exists():
-            report.excluded.append(str(src))
-            continue
-
-        target_dir, filename = _destination(dest, item, options, mirror)
-
-        if dry_run:
-            item.relocate(target_dir / filename, dest)
-            placed.append(item)
-            report.copied += 1
-            continue
-
-        target_dir.mkdir(parents=True, exist_ok=True)
-        final = _unique_destination(target_dir, filename, on_exist)
-        if final is None:  # skip
-            report.skipped += 1
-            continue
-
-        import shutil
-
-        shutil.copy2(src, final)
-        item.relocate(final, dest)
-        placed.append(item)
-        report.copied += 1
+    for done, item in enumerate(items, 1):
+        _export_one(
+            repo, item, dest, options, mirror, on_exist, dry_run, report, placed
+        )
+        if progress_callback:
+            progress_callback(
+                copy_progress(done, len(items), report.copied, report.skipped)
+            )
 
     if not dry_run and placed:
         if manifest:
@@ -103,6 +88,44 @@ def export_media(
         f"skipped={report.skipped} excluded={len(report.excluded)} -> {dest}"
     )
     return report
+
+
+def _export_one(repo, item, dest, options, mirror, on_exist, dry_run, report, placed):
+    """Copy one item; a file that can't be read or written counts as excluded
+    (failed) instead of stopping the whole export."""
+    src = (
+        Path(item.abspath)
+        if item.abspath
+        else to_abspath(item.relpath, repo.drive_root)
+    )
+    if not src.exists():
+        logger.error(f"Missing on the drive, not exported: {src}")
+        report.excluded.append(str(src))
+        return
+
+    target_dir, filename = _destination(dest, item, options, mirror)
+    if dry_run:
+        item.relocate(target_dir / filename, dest)
+        placed.append(item)
+        report.copied += 1
+        return
+
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        final = _unique_destination(target_dir, filename, on_exist)
+        if final is None:  # skip
+            logger.debug(f"Skipped (already exists): {target_dir / filename}")
+            report.skipped += 1
+            return
+        shutil.copy2(src, final)
+    except OSError as exc:
+        logger.error(f"Failed to export {src}: {exc}")
+        report.excluded.append(str(src))
+        return
+    logger.debug(f"Copied: {final}")
+    item.relocate(final, dest)
+    placed.append(item)
+    report.copied += 1
 
 
 def _write_manifest(dest: Path, placed: List[MediaItem]) -> Path:

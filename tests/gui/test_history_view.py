@@ -221,3 +221,44 @@ def test_close_while_running_cancels_then_closes(qtbot, tmp_path, monkeypatch):
     qtbot.waitUntil(lambda: not win.isVisible(), timeout=15000)
     assert not runner.running
     assert HistoryStore(tmp_path / "history.jsonl").load()[0].status == "cancelled"
+
+
+def test_job_finishing_during_the_question_closes_without_stale_hook(
+    qtbot, tmp_path, monkeypatch
+):
+    win, runner = _busy_window(qtbot, tmp_path)
+    assert runner.start(JobSpec("Wait", (("wait",),), writes_catalog=False))
+
+    def question(*args, **kwargs):
+        with qtbot.waitSignal(runner.finished, timeout=15000):
+            runner.cancel()  # the job ends while the dialog is still open
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(question))
+    assert win.close()
+    assert not win.isVisible()
+
+    closes = []
+    monkeypatch.setattr(win, "close", lambda: closes.append(True))
+    with qtbot.waitSignal(runner.finished, timeout=15000):
+        assert runner.start(JobSpec("Echo", (("echo", "x"),), writes_catalog=False))
+    assert closes == []
+
+
+def test_second_close_while_question_is_open_is_ignored(qtbot, tmp_path, monkeypatch):
+    win, runner = _busy_window(qtbot, tmp_path)
+    assert runner.start(JobSpec("Wait", (("wait",),), writes_catalog=False))
+    asked = []
+
+    def question(parent, title, text, buttons, default):
+        asked.append(default)
+        win.close()  # re-entrant request while the dialog is open
+        return QMessageBox.StandardButton.No
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(question))
+    try:
+        assert not win.close()
+        assert asked == [QMessageBox.StandardButton.No]  # asked once, default No
+    finally:
+        with qtbot.waitSignal(runner.finished, timeout=15000):
+            runner.cancel()

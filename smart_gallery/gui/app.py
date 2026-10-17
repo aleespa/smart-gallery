@@ -48,6 +48,7 @@ class MainWindow(QMainWindow):
         self.ctx.jobs.catalog_written.connect(self.ctx.catalog_updated.emit)
         self._pages: dict[str, QWidget] = {}
         self._closing = False  # waiting for a cancelled job before closing
+        self._prompting = False  # the quit question is open
 
         central = QWidget()
         outer = QVBoxLayout(central)
@@ -92,10 +93,23 @@ class MainWindow(QMainWindow):
             event.accept()
             return
         event.ignore()  # never wait for the job here: that would freeze the GUI
-        if self._closing:
+        if self._closing or self._prompting:
             return
-        answer = QMessageBox.question(self, "Quit", QUIT_WHILE_RUNNING)
+        self._prompting = True
+        try:
+            answer = QMessageBox.question(
+                self,
+                "Quit",
+                QUIT_WHILE_RUNNING,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+        finally:
+            self._prompting = False
         if answer != QMessageBox.StandardButton.Yes:
+            return
+        if not jobs.running:
+            event.accept()  # the job finished while the question was open
             return
         self._closing = True
         jobs.finished.connect(

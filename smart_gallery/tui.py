@@ -1,6 +1,6 @@
 """Interactive terminal interface for running Smart Gallery commands.
 
-Each command's form is generated from the CLI parser (see ``tui_forms``):
+Each command's form is generated from the CLI parser (see ``forms``):
 required arguments first, then one foldable section per option group, every
 option with a real control and its help text as a hint. A live preview shows
 the exact command line; Run executes it as a ``python -m smart_gallery.cli``
@@ -40,7 +40,7 @@ from textual.widgets import (
 
 from smart_gallery.cli import build_parser
 from smart_gallery.progress import PROGRESS_ENV, ProgressEvent
-from smart_gallery.tui_forms import (
+from smart_gallery.forms import (
     REQUIRED,
     BuildResult,
     CommandForm,

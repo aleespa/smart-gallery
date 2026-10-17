@@ -133,7 +133,7 @@ Progress and logging:
   the DB path in the `SG_DB_PATH` environment variable.
 - **ui** (`tui.py`, Textual) runs commands as `python -m smart_gallery.cli ...`
   subprocesses. Its forms are generated from `cli.build_parser()` by
-  `tui_forms.py`:
+  `forms.py` (shared with the desktop app):
   - each argparse argument group becomes a form section
   - each option's `help=` text becomes its on-screen hint
   - an option's type, `choices`, and `nargs` pick the widget
@@ -142,7 +142,7 @@ Progress and logging:
 
   So when you add or change a CLI option, put it in the right argument group
   and give it help text (`test_every_field_has_a_hint` enforces the help text).
-  Only display labels live in `tui_forms.LABELS`/`HINTS`.
+  Only display labels live in `forms.LABELS`/`HINTS`.
 
 ### Optional extras are imported lazily
 

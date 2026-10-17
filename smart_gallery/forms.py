@@ -1,4 +1,4 @@
-"""Forms for the terminal UI, generated from the CLI's argparse definition.
+"""Forms for the terminal and desktop UIs, generated from the CLI's argparse definition.
 
 Each subcommand becomes a ``CommandForm``. Its argument groups become form
 sections, and each option becomes a ``Field`` whose ``kind`` picks the widget.
@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import shlex
 from collections import defaultdict
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -19,8 +20,11 @@ from pathlib import Path
 REQUIRED = "Required"
 OPTIONS = "Options"
 
-# Commands not offered in the UI (the UI itself).
-HIDDEN_COMMANDS = {"ui"}
+# Commands not offered in the terminal UI (the launchers themselves).
+HIDDEN_COMMANDS = {"ui", "gui"}
+
+# The desktop app also hides the dashboard, which is a browser launcher.
+GUI_HIDDEN_COMMANDS = {"ui", "gui", "dashboard"}
 
 # Sections with more fields than this start folded.
 COLLAPSE_OVER = 6
@@ -104,7 +108,9 @@ class CommandForm:
     fields: dict[str, Field]
 
 
-def command_forms(parser: argparse.ArgumentParser) -> dict[str, CommandForm]:
+def command_forms(
+    parser: argparse.ArgumentParser, hidden: Collection[str] = HIDDEN_COMMANDS
+) -> dict[str, CommandForm]:
     """One form per subcommand, in CLI order, without aliases or hidden commands."""
     subparsers = next(
         a for a in parser._actions if isinstance(a, argparse._SubParsersAction)
@@ -112,7 +118,7 @@ def command_forms(parser: argparse.ArgumentParser) -> dict[str, CommandForm]:
     forms = {}
     for choice in subparsers._choices_actions:  # primary names only
         name = choice.dest
-        if name in HIDDEN_COMMANDS:
+        if name in hidden:
             continue
         forms[name] = _command_form(name, choice.help or "", subparsers.choices[name])
     return forms

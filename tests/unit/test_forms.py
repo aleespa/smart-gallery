@@ -1,13 +1,15 @@
-"""The TUI's forms are generated from the CLI parser; these tests pin how options
+"""The app forms are generated from the CLI parser; these tests pin how options
 become fields and how filled-in fields become a command line."""
 
+import argparse
 from datetime import date
 from pathlib import Path
 
 import pytest
 
 from smart_gallery.cli import build_parser, parse_args
-from smart_gallery.tui_forms import (
+from smart_gallery.forms import (
+    GUI_HIDDEN_COMMANDS,
     build_argv,
     command_forms,
     default_values,
@@ -283,3 +285,18 @@ def test_unpaired_fields_keep_their_own_row_and_label():
     required = FORMS["export"].sections[0]
     rows = field_rows(required.fields)
     assert [r.label for r in rows] == ["Source drive", "Destination folder"]
+
+
+def test_gui_hides_launchers():
+    forms = command_forms(build_parser(), hidden=GUI_HIDDEN_COMMANDS)
+    assert not {"ui", "gui", "dashboard"} & forms.keys()
+
+
+def test_every_visible_command_has_a_form():
+    parser = build_parser()
+    sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    primary = {c.dest for c in sub._choices_actions}
+    assert (
+        command_forms(parser, hidden=GUI_HIDDEN_COMMANDS).keys()
+        == primary - GUI_HIDDEN_COMMANDS
+    )

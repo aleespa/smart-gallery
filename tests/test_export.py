@@ -91,3 +91,35 @@ def test_export_cancel_writes_manifest_for_placed(repo, drive, tmp_path, make_it
     )
     with GalleryRepository.open(dest, read_only=True) as portable:
         assert sorted(Path(r).name for r in portable.query_relpaths()) == copied
+
+
+def test_resumed_export_describes_the_whole_export(repo, drive, tmp_path, make_item):
+    import pytest
+
+    from smart_gallery.progress import COPYING, Cancelled
+
+    for i in range(5):
+        _seed(repo, drive, make_item, f"Photos/f{i}.jpg")
+    dest = tmp_path / "out"
+
+    def cancel_on_third_copy(event):
+        if event.step == COPYING and event.done == 3:
+            raise Cancelled()
+
+    with pytest.raises(Cancelled):
+        export_media(
+            repo,
+            dest,
+            mirror=True,
+            on_exist="skip",
+            portable_db=True,
+            progress_callback=cancel_on_third_copy,
+        )
+    report = export_media(repo, dest, mirror=True, on_exist="skip", portable_db=True)
+    assert (report.copied, report.skipped) == (2, 3)
+
+    every = [f"Photos/f{i}.jpg" for i in range(5)]
+    manifest = (dest / "_smart_gallery_manifest.csv").read_text(encoding="utf-8")
+    assert sorted(line.split(",")[0] for line in manifest.splitlines()[1:]) == every
+    with GalleryRepository.open(dest, read_only=True) as portable:
+        assert sorted(portable.query_relpaths()) == every

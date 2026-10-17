@@ -127,7 +127,11 @@ def _export_one(repo, item, dest, options, mirror, on_exist, dry_run, report, pl
         target_dir.mkdir(parents=True, exist_ok=True)
         final = _unique_destination(target_dir, filename, on_exist)
         if final is None:  # skip
+            # Already there (e.g. a resumed export): still part of the export,
+            # so the manifest and portable catalog describe all of it.
             logger.debug(f"Skipped (already exists): {target_dir / filename}")
+            item.relocate(target_dir / filename, dest)
+            placed.append(item)
             report.skipped += 1
             return
         copy_atomic(src, final)

@@ -149,3 +149,61 @@ def test_delete_profile_asks_confirmation(qtbot, tmp_path, monkeypatch):
     )
     view.delete_button.click()
     assert view.profile_combo.count() == before - 1
+
+
+def test_dry_run_box_changes_job(qtbot, tmp_path):
+    view, ctx, galleries = _view(qtbot, tmp_path)
+    view.set_source("card")
+    _tick(view)
+    view.dry_run_box.setChecked(True)
+    assert "--dry-run" in view.preview.toPlainText()
+    view.run_button.click()
+    (spec,) = ctx.jobs.calls
+    assert spec.title.endswith("(dry run)") and not spec.writes_catalog
+    assert all(a[-1] == "--dry-run" for a in spec.argvs)
+
+
+class _FakeEditor:
+    result = None
+
+    def __init__(self, *a, **k):
+        pass
+
+    def exec(self):
+        return True
+
+    def profile(self):
+        return _FakeEditor.result
+
+
+def test_rename_keeps_profile_if_save_fails(qtbot, tmp_path, monkeypatch):
+    import smart_gallery.gui.imports.view as v
+
+    view, ctx, galleries = _view(qtbot, tmp_path)
+    old = view._profile()
+    _FakeEditor.result = ImportProfile("Renamed", old.rules)
+    monkeypatch.setattr(v, "ProfileEditor", _FakeEditor)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(v, "save_profile", boom)
+    view._edit(old)
+    names = [p.name for p in load_profiles(app_data_dir() / "profiles")]
+    assert old.name in names and "Renamed" not in names
+
+
+def test_new_profile_with_existing_name_refused(qtbot, tmp_path, monkeypatch):
+    import smart_gallery.gui.imports.view as v
+
+    view, ctx, galleries = _view(qtbot, tmp_path)
+    existing = view._profile()
+    _FakeEditor.result = ImportProfile(existing.name, [])
+    monkeypatch.setattr(v, "ProfileEditor", _FakeEditor)
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warned.append(a))
+    view._edit(None)
+    assert warned
+    after = {p.name: p for p in load_profiles(app_data_dir() / "profiles")}
+    assert after[existing.name].rules == existing.rules

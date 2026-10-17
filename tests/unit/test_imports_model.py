@@ -46,3 +46,18 @@ def test_list_removable_drives_never_raises():
     assert isinstance(drives, list)
     if sys.platform != "win32":
         assert drives == []
+
+
+def test_build_import_job_dry_run(tmp_path):
+    from smart_gallery.cli import build_parser
+
+    profile = starter_profiles()[0]
+    gallery = _gallery(tmp_path, "a")
+    job = build_import_job(profile, "card", [gallery], dry_run=True)
+    assert job.title == "Import · Canon SD card (dry run)"
+    assert not job.writes_catalog
+    for argv in job.argvs:
+        assert argv[-1] == "--dry-run"
+        assert build_parser().parse_args(list(argv)).dry_run is True
+    real = build_import_job(profile, "card", [gallery])
+    assert real.writes_catalog

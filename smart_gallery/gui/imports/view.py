@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QDir, Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
@@ -52,6 +53,7 @@ class ImportView(QWidget):
         self.gallery_list = QListWidget()
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
+        self.dry_run_box = QCheckBox("Dry run (plan only, copy nothing)")
         self.run_button = QPushButton("Run import")
 
         source_row = QHBoxLayout()
@@ -72,6 +74,7 @@ class ImportView(QWidget):
         layout.addWidget(self.gallery_list, 1)
         layout.addWidget(QLabel("Commands"))
         layout.addWidget(self.preview, 2)
+        layout.addWidget(self.dry_run_box)
         layout.addWidget(self.run_button)
 
         self.browse_button.clicked.connect(self._browse)
@@ -82,6 +85,7 @@ class ImportView(QWidget):
         self.new_button.clicked.connect(lambda: self._edit(None))
         self.edit_button.clicked.connect(lambda: self._edit(self._profile()))
         self.delete_button.clicked.connect(self._delete)
+        self.dry_run_box.toggled.connect(lambda _on: self._update())
         self.run_button.clicked.connect(self._run)
         ctx.gallery_changed.connect(lambda _g: self.refresh_galleries())
         if ctx.jobs is not None:
@@ -171,9 +175,20 @@ class ImportView(QWidget):
         if not dialog.exec():
             return
         edited = dialog.profile()
-        if profile is not None and profile.name != edited.name:
-            delete_profile(self._profiles_dir(), profile.name)  # a rename
-        save_profile(self._profiles_dir(), edited)
+        renamed = profile is None or profile.name != edited.name
+        if renamed and any(p.name == edited.name for p in self._profiles):
+            QMessageBox.warning(
+                self,
+                "Profile exists",
+                f"A profile named “{edited.name}” already exists.",
+            )
+            return
+        try:
+            save_profile(self._profiles_dir(), edited)
+            if profile is not None and renamed:
+                delete_profile(self._profiles_dir(), profile.name)
+        except OSError as error:
+            QMessageBox.warning(self, "Could not save profile", str(error))
         self.reload_profiles(select=edited.name)
 
     def _delete(self) -> None:
@@ -188,14 +203,22 @@ class ImportView(QWidget):
             QMessageBox.StandardButton.No,
         )
         if answer == QMessageBox.StandardButton.Yes:
-            delete_profile(self._profiles_dir(), profile.name)
+            try:
+                delete_profile(self._profiles_dir(), profile.name)
+            except OSError as error:
+                QMessageBox.warning(self, "Could not delete profile", str(error))
             self.reload_profiles()
 
     def _spec(self):
         profile = self._profile()
         if profile is None:
             raise ValueError("Choose or create an import profile.")
-        return build_import_job(profile, self.source(), self.selected_galleries())
+        return build_import_job(
+            profile,
+            self.source(),
+            self.selected_galleries(),
+            dry_run=self.dry_run_box.isChecked(),
+        )
 
     def _update(self) -> None:
         jobs = self.ctx.jobs

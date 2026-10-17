@@ -28,9 +28,15 @@ def list_removable_drives() -> list[str]:
 
 
 def build_import_job(
-    profile: ImportProfile, source: str, galleries: Sequence[Gallery]
+    profile: ImportProfile,
+    source: str,
+    galleries: Sequence[Gallery],
+    dry_run: bool = False,
 ) -> JobSpec:
-    """The job that imports ``source`` into every gallery, rule by rule."""
+    """The job that imports ``source`` into every gallery, rule by rule.
+
+    A dry run only plans (copies nothing), so it never writes the catalog.
+    """
     if not source.strip():
         raise ValueError("Choose a source to import from.")
     if not galleries:
@@ -39,4 +45,7 @@ def build_import_job(
         if not is_connected(gallery):
             raise ValueError(f"{gallery.label} is not connected.")
     argvs = expand(profile, source, [str(g.root) for g in galleries])
-    return JobSpec(f"Import · {profile.name}", tuple(map(tuple, argvs)))
+    if dry_run:
+        argvs = [[*argv, "--dry-run"] for argv in argvs]
+    title = f"Import · {profile.name}" + (" (dry run)" if dry_run else "")
+    return JobSpec(title, tuple(map(tuple, argvs)), writes_catalog=not dry_run)

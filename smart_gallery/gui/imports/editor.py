@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QListWidget,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QStackedWidget,
@@ -145,5 +146,8 @@ class ProfileEditor(QDialog):
     def _accept(self) -> None:
         if not self.name_edit.text().strip() or not self.rule_editors:
             self.name_edit.setFocus()
+            QMessageBox.warning(
+                self, "Import profile", "Give the profile a name and at least one rule."
+            )
             return
         self.accept()

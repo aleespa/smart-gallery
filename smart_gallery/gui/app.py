@@ -17,7 +17,9 @@ from PySide6.QtWidgets import (
 
 from smart_gallery.gui.areas import AREAS
 from smart_gallery.gui.context import AppContext
-from smart_gallery.gui.paths import exiftool_available
+from smart_gallery.gui.galleries.store import GalleryStore
+from smart_gallery.gui.galleries.view import GalleriesPanel
+from smart_gallery.gui.paths import app_data_dir, exiftool_available
 
 EXIFTOOL_BANNER = (
     "ExifTool not found. Install it from https://exiftool.org to read metadata."
@@ -29,6 +31,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Smart Gallery")
         self.ctx = ctx or AppContext(self)
+        if self.ctx.galleries is None:
+            self.ctx.galleries = GalleryStore(app_data_dir() / "galleries.json")
         self._pages: dict[str, QWidget] = {}
 
         central = QWidget()
@@ -47,6 +51,9 @@ class MainWindow(QMainWindow):
         # Top of the rail; the Galleries panel is mounted here.
         self.galleries_slot = QVBoxLayout()
         left.addLayout(self.galleries_slot)
+        self.galleries_panel = GalleriesPanel(self.ctx)
+        self.galleries_panel.setFixedWidth(180)
+        self.galleries_slot.addWidget(self.galleries_panel)
         self.rail = QListWidget()
         self.rail.setFixedWidth(180)
         for area in AREAS:

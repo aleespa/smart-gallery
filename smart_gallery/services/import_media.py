@@ -12,6 +12,7 @@ from typing import List, Optional, Sequence
 from loguru import logger
 
 from smart_gallery.analysis import analyze_paths
+from smart_gallery.config import PARTIAL_SUFFIX, iter_files
 from smart_gallery.db import GalleryRepository
 from smart_gallery.organize import (
     FilterOptions,
@@ -32,12 +33,15 @@ class ImportReport:
 
 
 def _gather_files(sources: Sequence) -> List[Path]:
+    """Files to import. Folders are walked like ``sync`` walks a drive, so a
+    source holding a gallery never imports its catalog folder (thumbnails
+    included) or a leftover partial copy."""
     files: List[Path] = []
     for source in sources:
         source = Path(source)
         if source.is_dir():
-            files.extend(f for f in source.rglob("*") if f.is_file())
-        elif source.is_file():
+            files.extend(iter_files(source))
+        elif source.is_file() and not source.name.lower().endswith(PARTIAL_SUFFIX):
             files.append(source)
     return files
 

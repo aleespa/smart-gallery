@@ -132,3 +132,18 @@ def test_import_cancel_mid_copy_keeps_catalog_consistent(drive, tmp_path, monkey
         assert {Path(r).name for r in repo.query_relpaths()} == {
             f"f{i}.txt" for i in range(5)
         }
+
+
+def test_gather_files_skips_catalog_folder_and_partials(tmp_path):
+    from smart_gallery.services.import_media import _gather_files
+
+    source = tmp_path / "card"
+    thumbs = source / ".smart_gallery" / "thumbs" / "0"
+    thumbs.mkdir(parents=True)
+    (thumbs / "12-1697.jpg").write_bytes(b"thumb")
+    (source / "IMG_2.jpg.sg-partial").write_bytes(b"half")
+    (source / "IMG_1.jpg").write_bytes(b"photo")
+
+    assert [p.name for p in _gather_files([source])] == ["IMG_1.jpg"]
+    # An explicitly named leftover partial is skipped too.
+    assert _gather_files([source / "IMG_2.jpg.sg-partial"]) == []

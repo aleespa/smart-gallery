@@ -80,6 +80,10 @@ class JobRunner(QObject):
         self._started_at = ""
 
     @property
+    def history(self) -> HistoryStore:
+        return self._history
+
+    @property
     def running(self) -> bool:
         return self._spec is not None
 

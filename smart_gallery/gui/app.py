@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import sys
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QMainWindow,
+    QMessageBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -24,6 +27,7 @@ from smart_gallery.gui.jobs import JobRunner
 from smart_gallery.gui.paths import app_data_dir, exiftool_available
 from smart_gallery.gui.statusbar import JobStatusBar
 
+QUIT_WHILE_RUNNING = "A job is still running. Cancel it and quit?"
 EXIFTOOL_BANNER = (
     "ExifTool not found. Install it from https://exiftool.org to read metadata."
 )
@@ -43,6 +47,7 @@ class MainWindow(QMainWindow):
             )
         self.ctx.jobs.catalog_written.connect(self.ctx.catalog_updated.emit)
         self._pages: dict[str, QWidget] = {}
+        self._closing = False  # waiting for a cancelled job before closing
 
         central = QWidget()
         outer = QVBoxLayout(central)
@@ -80,6 +85,27 @@ class MainWindow(QMainWindow):
         self.ctx.navigate.connect(self._navigate)
         self.resize(1200, 800)
         self.rail.setCurrentRow(0)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        jobs = self.ctx.jobs
+        if jobs is None or not jobs.running:
+            event.accept()
+            return
+        event.ignore()  # never wait for the job here: that would freeze the GUI
+        if self._closing:
+            return
+        answer = QMessageBox.question(self, "Quit", QUIT_WHILE_RUNNING)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._closing = True
+        jobs.finished.connect(
+            self._close_after_job, Qt.ConnectionType.SingleShotConnection
+        )
+        jobs.cancel()
+
+    def _close_after_job(self, _record) -> None:
+        self._closing = False
+        self.close()
 
     def _show_area(self, row: int) -> None:
         if row < 0:

@@ -118,15 +118,18 @@ class DashboardView(QWidget):
         filters = None if is_query_empty(filters) else filters
 
         def load(repo):
-            return figures.load_catalog_df(repo.db_path, filters)
+            # Everything heavy happens here, off the GUI thread.
+            df = figures.load_catalog_df(repo.db_path, filters)
+            split = figures.split_media(df)
+            sections = build_sections(df, split)
+            write_dashboard(self.out_dir, figures.metrics(*split), sections)
+            return split
 
         self._query.run(load)
 
-    def _on_df(self, df: pd.DataFrame) -> None:
-        fi, fv, fo = figures.split_media(df)
-        for name, frame in zip(TABS, (fi, fv, fo)):
+    def _on_df(self, split) -> None:
+        for name, frame in zip(TABS, split):
             self.tables[name].model().set_frame(frame)
-        write_dashboard(self.out_dir, figures.metrics(fi, fv, fo), build_sections(df))
         self.web.load(QUrl.fromLocalFile(str(self.index_path)))
         self.stack.setCurrentIndex(0)
 

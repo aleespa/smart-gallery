@@ -66,6 +66,8 @@ def test_corrupt_file_records_failure_once(drive, monkeypatch):
 
 def test_missing_file_returns_none(drive):
     assert _ensure(drive, "nope.jpg") is None
+    # A missing source is a genuine failure: it is recorded.
+    assert thumb_path(drive, 1, 100).with_suffix(".none").is_file()
 
 
 def test_video_returns_none(drive):
@@ -123,6 +125,37 @@ def test_raw_falls_through_exiftool_tags(drive, monkeypatch):
     assert calls == ["-PreviewImage", "-JpgFromRaw"]
     with Image.open(out) as im:
         assert max(im.size) == THUMB_EDGE
+
+
+def test_raw_exiftool_not_found_leaves_no_marker(drive, monkeypatch):
+    def not_found(args, **kwargs):
+        raise FileNotFoundError("exiftool")
+
+    monkeypatch.setattr(cache.subprocess, "run", not_found)
+    (drive / "x.cr3").write_bytes(b"raw")
+    assert _ensure(drive, "x.cr3", ext=".cr3") is None
+    assert not thumb_path(drive, 1, 100).with_suffix(".none").exists()
+
+
+def test_raw_exiftool_timeout_leaves_no_marker(drive, monkeypatch):
+    def timed_out(args, **kwargs):
+        raise cache.subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    monkeypatch.setattr(cache.subprocess, "run", timed_out)
+    (drive / "x.cr3").write_bytes(b"raw")
+    assert _ensure(drive, "x.cr3", ext=".cr3") is None
+    assert not thumb_path(drive, 1, 100).with_suffix(".none").exists()
+
+
+def test_raw_with_no_preview_in_any_tag_records_failure(drive, monkeypatch):
+    class Empty:
+        returncode = 0
+        stdout = b""
+
+    monkeypatch.setattr(cache.subprocess, "run", lambda args, **kw: Empty())
+    (drive / "x.cr3").write_bytes(b"raw")
+    assert _ensure(drive, "x.cr3", ext=".cr3") is None
+    assert thumb_path(drive, 1, 100).with_suffix(".none").is_file()
 
 
 @pytest.mark.exiftool

@@ -22,30 +22,31 @@ class _Task(QRunnable):
 
     def run(self) -> None:
         loader = self._loader
-        media_id = self._job[1]
-        if not loader._start(media_id, self._generation):
+        root, media_id = str(self._job[0]), self._job[1]
+        if not loader._start((root, media_id), self._generation):
             return  # cancelled while queued
         path = ensure_thumbnail(*self._job)
-        loader._finished.emit(media_id, str(path) if path else "")
+        loader._finished.emit(root, media_id, str(path) if path else "")
 
 
 class ThumbnailLoader(QObject):
     """Loads thumbnails off the GUI thread.
 
-    ``ready(media_id, path)`` is emitted on the GUI thread; ``path`` is ""
-    when the item has no thumbnail.
+    ``ready(root, media_id, path)`` is emitted on the GUI thread; ``root`` is
+    the drive root as given to ``request`` (as a str) and ``path`` is "" when
+    the item has no thumbnail.
     """
 
-    ready = Signal(int, str)
-    _finished = Signal(int, str)  # worker threads -> GUI thread
+    ready = Signal(str, int, str)
+    _finished = Signal(str, int, str)  # worker threads -> GUI thread
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(MAX_THREADS)
-        self._inflight: set[int] = set()  # GUI thread only
+        self._inflight: set[tuple[str, int]] = set()  # GUI thread only
         self._lock = threading.Lock()
-        self._queued: set[int] = set()  # guarded by _lock
+        self._queued: set[tuple[str, int]] = set()  # guarded by _lock
         self._generation = 0  # guarded by _lock
         # The loader lives in the GUI thread, so a signal emitted from a pool
         # thread reaches this slot through a queued connection.
@@ -60,12 +61,13 @@ class ThumbnailLoader(QObject):
         ext: str,
         media_type: str,
     ) -> None:
-        if media_id in self._inflight:
+        key = (str(root), media_id)
+        if key in self._inflight:
             return
-        self._inflight.add(media_id)
+        self._inflight.add(key)
         job = (root, media_id, mtime_ns, to_abspath(relpath, root), ext, media_type)
         with self._lock:
-            self._queued.add(media_id)
+            self._queued.add(key)
             generation = self._generation
         self._pool.start(_Task(self, generation, job))
 
@@ -77,13 +79,13 @@ class ThumbnailLoader(QObject):
         self._inflight -= dropped
         self._pool.clear()
 
-    def _start(self, media_id: int, generation: int) -> bool:
+    def _start(self, key: tuple[str, int], generation: int) -> bool:
         with self._lock:
             if generation != self._generation:
                 return False
-            self._queued.discard(media_id)
+            self._queued.discard(key)
             return True
 
-    def _on_finished(self, media_id: int, path: str) -> None:
-        self._inflight.discard(media_id)
-        self.ready.emit(media_id, path)
+    def _on_finished(self, root: str, media_id: int, path: str) -> None:
+        self._inflight.discard((root, media_id))
+        self.ready.emit(root, media_id, path)

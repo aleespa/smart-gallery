@@ -29,6 +29,10 @@ RAW_PREVIEW_TAGS = ("-PreviewImage", "-JpgFromRaw", "-ThumbnailImage")
 JPEG_EXTENSIONS = frozenset({".jpg", ".jpeg", ".jpe"})
 
 
+class _Unavailable(Exception):
+    """ExifTool could not run (missing, timed out): retry later, no marker."""
+
+
 def thumb_path(root: Path, media_id: int, mtime_ns: int | None) -> Path:
     name = f"{media_id}-{mtime_ns or 0}.jpg"
     return Path(root) / ".smart_gallery" / "thumbs" / str(media_id // 1000) / name
@@ -70,6 +74,8 @@ def _ensure(root, media_id, mtime_ns, abspath, ext, media_type) -> Path | None:
         if media_type == "video":
             raise ValueError("videos have no thumbnail")
         data = _render_jpeg(abspath, ext.lower())
+    except _Unavailable:
+        return None  # environmental, not a property of the file
     except Exception:
         _write_marker(marker)
         return None
@@ -118,7 +124,11 @@ def _to_thumbnail_bytes(image) -> bytes:
 
 
 def _open_raw_preview(abspath: Path):
-    """First decodable embedded image of a RAW file, as an open Pillow image."""
+    """First decodable embedded image of a RAW file, as an open Pillow image.
+
+    Raises _Unavailable when ExifTool cannot run, ValueError when it ran but
+    no tag yielded a usable image.
+    """
     from PIL import Image
 
     for tag in RAW_PREVIEW_TAGS:
@@ -145,6 +155,6 @@ def _exiftool_bytes(tag: str, abspath: Path) -> bytes:
             timeout=EXIFTOOL_TIMEOUT_S,
             **kwargs,
         )
-    except (OSError, subprocess.SubprocessError):
-        return b""
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise _Unavailable(str(exc)) from exc
     return result.stdout if result.returncode == 0 else b""

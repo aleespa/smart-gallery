@@ -73,42 +73,44 @@ def scan_faces(
             media_id, abspath = item
             inflight[ex.submit(scanner.decode, abspath)] = media_id
 
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        for _ in range(workers * 2):  # prime the decode pipeline
-            _submit_next(ex)
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for _ in range(workers * 2):  # prime the decode pipeline
+                _submit_next(ex)
 
-        while inflight:
-            done_set, _ = wait(inflight, return_when=FIRST_COMPLETED)
-            for fut in done_set:
-                media_id = inflight.pop(fut)
-                try:
-                    img = fut.result()
-                except Exception as exc:  # pragma: no cover - decode safety net
-                    logger.debug(f"decode worker error for media {media_id}: {exc}")
-                    img = None
-                faces = scanner.detect(img)
-                face_rows = [
-                    Face.from_detection(media_id, d.bbox, d.det_score, d.embedding)
-                    for d in faces
-                ]
-                buffer.append((media_id, face_rows))
-                report.images_scanned += 1
-                report.faces_found += len(face_rows)
+            while inflight:
+                done_set, _ = wait(inflight, return_when=FIRST_COMPLETED)
+                for fut in done_set:
+                    media_id = inflight.pop(fut)
+                    try:
+                        img = fut.result()
+                    except Exception as exc:  # pragma: no cover - decode safety net
+                        logger.debug(f"decode worker error for media {media_id}: {exc}")
+                        img = None
+                    faces = scanner.detect(img)
+                    face_rows = [
+                        Face.from_detection(media_id, d.bbox, d.det_score, d.embedding)
+                        for d in faces
+                    ]
+                    buffer.append((media_id, face_rows))
+                    report.images_scanned += 1
+                    report.faces_found += len(face_rows)
 
-                _submit_next(ex)  # keep the pipeline full
+                    _submit_next(ex)  # keep the pipeline full
 
-                if len(buffer) >= _COMMIT_CHUNK:
-                    repo.add_scan_results(buffer, FACE_DET_VERSION)
-                    buffer.clear()
-                if progress_callback:
-                    progress_callback(
-                        ProgressEvent(
-                            SCANNING, report.images_scanned, total, unit="images"
+                    if len(buffer) >= _COMMIT_CHUNK:
+                        repo.add_scan_results(buffer, FACE_DET_VERSION)
+                        buffer.clear()
+                    if progress_callback:
+                        progress_callback(
+                            ProgressEvent(
+                                SCANNING, report.images_scanned, total, unit="images"
+                            )
                         )
-                    )
-
-    if buffer:
-        repo.add_scan_results(buffer, FACE_DET_VERSION)
+    finally:
+        # Keep what was scanned even when the run is cancelled part way.
+        if buffer:
+            repo.add_scan_results(buffer, FACE_DET_VERSION)
 
     logger.success(
         f"Face scan complete — {report.images_scanned:,} images, "

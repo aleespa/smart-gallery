@@ -19,7 +19,7 @@ from smart_gallery.organize import (
     matches,
     organize_items,
 )
-from smart_gallery.progress import ProgressCallback
+from smart_gallery.progress import Cancelled, ProgressCallback
 
 
 @dataclass
@@ -72,6 +72,11 @@ def import_media(
 
     if not options.dry_run and org.placed:
         report.inserted = repo.insert_many(org.placed)
+
+    if org.cancelled:
+        # Everything copied is catalogued; now let the cancel through.
+        logger.warning(f"Import cancelled — copied={report.copied}")
+        raise Cancelled()
 
     logger.success(
         f"Import complete — copied={report.copied} skipped={report.skipped} "

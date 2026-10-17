@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from smart_gallery.db import GalleryRepository
 from smart_gallery.organize import FilterOptions, Options
 from smart_gallery.services import export_media
@@ -16,7 +18,8 @@ def test_export_filtered_reorganized(repo, drive, tmp_path, make_item):
 
     dest = tmp_path / "out"
     report = export_media(
-        repo, dest,
+        repo,
+        dest,
         filters=FilterOptions(cameras=["Canon EOS R6"]),
         options=Options(by_media_type=True, structure=["Year", "Month"]),
     )
@@ -49,3 +52,42 @@ def test_export_portable_db(repo, drive, tmp_path, make_item):
         rels = portable.query_relpaths()
         # relpath is now relative to the export destination, reorganized by date
         assert rels == ["Photos/2026/06/a.jpg"]
+
+
+def test_export_cancel_writes_manifest_for_placed(repo, drive, tmp_path, make_item):
+    import pytest
+
+    from smart_gallery.progress import COPYING, Cancelled
+
+    for i in range(5):
+        _seed(repo, drive, make_item, f"Photos/f{i}.jpg")
+    dest = tmp_path / "out"
+
+    events = []
+
+    def cancel_on_third_copy(event):
+        if event.step == COPYING:
+            events.append(event)
+            if len(events) == 3:
+                raise Cancelled()
+
+    with pytest.raises(Cancelled):
+        export_media(
+            repo,
+            dest,
+            mirror=True,
+            portable_db=True,
+            progress_callback=cancel_on_third_copy,
+        )
+    copied = sorted(p.name for p in (dest / "Photos").iterdir())
+    assert len(copied) == 3
+    assert not list(dest.rglob("*.sg-partial"))
+    manifest = (dest / "_smart_gallery_manifest.csv").read_text(encoding="utf-8")
+    assert (
+        sorted(
+            line.split(",")[0].rsplit("/", 1)[-1] for line in manifest.splitlines()[1:]
+        )
+        == copied
+    )
+    with GalleryRepository.open(dest, read_only=True) as portable:
+        assert sorted(Path(r).name for r in portable.query_relpaths()) == copied

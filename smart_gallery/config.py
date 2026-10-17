@@ -15,6 +15,10 @@ DB_DIRNAME = ".smart_gallery"
 DB_FILENAME = "gallery.db"
 SCHEMA_VERSION = 3
 
+# A copy in progress lives beside its destination under this extra suffix and is
+# renamed into place when complete, so a cancel never leaves a truncated photo.
+PARTIAL_SUFFIX = ".sg-partial"
+
 # Face recognition. ``FACE_DET_VERSION`` tags every scanned row so a model change
 # can invalidate and re-scan. Bump it if the model pack or detector changes.
 FACE_MODEL_NAME = "buffalo_l"
@@ -79,10 +83,12 @@ def to_abspath(relpath: str, drive_root) -> Path:
 
 
 def iter_files(root, ignore_dirs: Set[str] = IGNORE_DIRS) -> Iterator[Path]:
-    """Yield every file under ``root``, pruning ignored directories. Walk only —
-    no metadata is read here."""
+    """Yield every file under ``root``, pruning ignored directories and leftover
+    partial copies. Walk only — no metadata is read here."""
     root = Path(root)
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d.lower() not in ignore_dirs]
         for filename in filenames:
+            if filename.lower().endswith(PARTIAL_SUFFIX):
+                continue
             yield Path(dirpath) / filename

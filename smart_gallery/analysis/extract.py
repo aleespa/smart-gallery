@@ -20,7 +20,7 @@ from loguru import logger
 
 from smart_gallery.config import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from smart_gallery.models import MediaItem
-from smart_gallery.progress import READING, ProgressCallback, ProgressEvent
+from smart_gallery.progress import READING, Cancelled, ProgressCallback, ProgressEvent
 
 EXIFTOOL_IMAGE_TAG_ARGS = [
     "-Model",
@@ -208,19 +208,24 @@ def analyze_paths(
                 ex.submit(run_exiftool_batch, batch, tag_profile): len(batch)
                 for batch in batches
             }
-            for future in concurrent.futures.as_completed(futures):
-                if stop_event and stop_event.is_set():
-                    ex.shutdown(wait=False, cancel_futures=True)
-                    break
-                for record in future.result():
-                    item = MediaItem.from_exiftool(record, drive_root)
-                    if item is not None:
-                        items.append(item)
-                processed += futures[future]
-                if progress_callback:
-                    progress_callback(
-                        ProgressEvent(READING, min(processed, total), total)
-                    )
+            try:
+                for future in concurrent.futures.as_completed(futures):
+                    if stop_event and stop_event.is_set():
+                        ex.shutdown(wait=False, cancel_futures=True)
+                        break
+                    for record in future.result():
+                        item = MediaItem.from_exiftool(record, drive_root)
+                        if item is not None:
+                            items.append(item)
+                    processed += futures[future]
+                    if progress_callback:
+                        progress_callback(
+                            ProgressEvent(READING, min(processed, total), total)
+                        )
+            except Cancelled:
+                # Don't let the pool's exit wait for every queued batch.
+                ex.shutdown(wait=False, cancel_futures=True)
+                raise
 
     _run(image_files, "image")
     _run(video_files, "video")

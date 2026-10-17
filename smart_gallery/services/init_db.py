@@ -9,7 +9,7 @@ from loguru import logger
 from smart_gallery.analysis import analyze_paths
 from smart_gallery.config import iter_files, resolve_db_path
 from smart_gallery.db import GalleryRepository
-from smart_gallery.progress import FINDING, ProgressCallback, counted
+from smart_gallery.progress import Cancelled, FINDING, ProgressCallback, counted
 
 
 @dataclass
@@ -46,5 +46,11 @@ def init_drive(
         repo.upsert_many(items)
         logger.success(f"Catalog initialized: {db_path} ({len(items):,} items)")
         return InitReport(db_path=db_path, indexed=len(items))
+    except Cancelled:
+        # A half-made catalog would block a re-run; leave nothing behind.
+        repo.close()
+        for suffix in ("", "-wal", "-shm"):
+            db_path.with_name(db_path.name + suffix).unlink(missing_ok=True)
+        raise
     finally:
         repo.close()

@@ -119,3 +119,63 @@ def test_import_reads_metadata_then_copies(tmp_path, repo):
     assert events[-1] == ProgressEvent(
         COPYING, 2, 2, outcomes=(("copied", 2), ("skipped", 0), ("failed", 0))
     )
+
+
+def test_init_cancel_removes_catalog(drive, drive_file, monkeypatch):
+    import pytest
+
+    import smart_gallery.services.init_db as initmod
+    from smart_gallery.config import resolve_db_path
+    from smart_gallery.progress import Cancelled
+
+    def fake_analyze(paths, drive_root=None, progress_callback=None, **_):
+        items = [MediaItem.from_path(p, drive_root) for p in paths]
+        if progress_callback:
+            progress_callback(ProgressEvent(READING, 0, len(items)))
+        return items
+
+    monkeypatch.setattr(initmod, "analyze_paths", fake_analyze)
+    for name in ("a.txt", "b.txt"):
+        drive_file(drive, name)
+
+    def cancel_on_reading(event):
+        if event.step == READING:
+            raise Cancelled()
+
+    with pytest.raises(Cancelled):
+        initmod.init_drive(drive, progress_callback=cancel_on_reading)
+    db_path = resolve_db_path(drive)
+    assert not db_path.exists()
+    assert not db_path.with_name(db_path.name + "-wal").exists()
+    assert not db_path.with_name(db_path.name + "-shm").exists()
+
+    report = initmod.init_drive(drive)  # no overwrite needed
+    assert report.indexed == 2
+
+
+def test_analyze_cancel_stops_queued_exiftool_batches(tmp_path, monkeypatch):
+    import pytest
+
+    from smart_gallery.progress import Cancelled
+
+    files = [tmp_path / f"{i}.jpg" for i in range(10)]
+    for f in files:
+        f.write_bytes(b"x")
+    # One worker, one file per batch: nine batches are still queued after the first.
+    monkeypatch.setattr(extract, "_choose_exiftool_plan", lambda n: (1, 1))
+
+    calls = []
+
+    def fake_batch(batch, profile):
+        calls.append(batch)
+        return []
+
+    monkeypatch.setattr(extract, "run_exiftool_batch", fake_batch)
+
+    def cancel_once_a_batch_finished(event):
+        if calls:  # the opening event comes before the pool exists
+            raise Cancelled()
+
+    with pytest.raises(Cancelled):
+        extract.analyze_paths(files, progress_callback=cancel_once_a_batch_finished)
+    assert len(calls) < len(files)

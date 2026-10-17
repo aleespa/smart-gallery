@@ -6,6 +6,7 @@ return the placed items re-anchored to the drive. Copy-only — never moves or
 deletes the source. Shared by the import and export services.
 """
 
+import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,8 +14,14 @@ from typing import List, Literal, Optional
 
 from loguru import logger
 
+from smart_gallery.config import PARTIAL_SUFFIX
 from smart_gallery.models import MediaItem
-from smart_gallery.progress import COPYING, ProgressCallback, ProgressEvent
+from smart_gallery.progress import (
+    COPYING,
+    Cancelled,
+    ProgressCallback,
+    ProgressEvent,
+)
 
 StructurePart = Literal["Year", "Month", "Model", "Lens"]
 
@@ -34,6 +41,7 @@ class OrganizeReport:
     copied: int = 0
     skipped: int = 0
     excluded: List[str] = field(default_factory=list)
+    cancelled: bool = False
 
     @property
     def total(self) -> int:
@@ -99,15 +107,33 @@ def organize_items(
     for done, item in enumerate(items, 1):
         _place(item, output, drive_root, options, report)
         if progress_callback:
-            progress_callback(
-                copy_progress(done, len(items), report.copied, report.skipped)
-            )
+            try:
+                progress_callback(
+                    copy_progress(done, len(items), report.copied, report.skipped)
+                )
+            except Cancelled:
+                # The item just placed is complete; report it, then stop.
+                report.cancelled = True
+                break
 
     logger.info(
         f"Organize report — copied={report.copied} skipped={report.skipped} "
         f"excluded={len(report.excluded)} into {output}"
     )
     return report
+
+
+def copy_atomic(source: Path, destination: Path) -> None:
+    """Copy like ``shutil.copy2`` but never leave a truncated ``destination``:
+    copy to a partial file beside it, then rename into place."""
+    source, destination = Path(source), Path(destination)
+    partial = destination.with_name(destination.name + PARTIAL_SUFFIX)
+    try:
+        shutil.copy2(source, partial)
+        os.replace(partial, destination)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
 
 
 def copy_progress(done: int, total: int, copied: int, skipped: int) -> ProgressEvent:
@@ -155,7 +181,7 @@ def _place(
                 logger.debug(f"Skipped (already exists): {destination}")
             return
 
-        shutil.copy2(source, destination)
+        copy_atomic(source, destination)
         item.relocate(destination, drive_root)
         report.placed.append(item)
         report.copied += 1

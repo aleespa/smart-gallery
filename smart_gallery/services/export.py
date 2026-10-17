@@ -7,7 +7,6 @@ preserve each file's relative path on the drive.
 """
 
 import csv
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -18,8 +17,12 @@ from smart_gallery.config import resolve_db_path, to_abspath
 from smart_gallery.db import GalleryRepository
 from smart_gallery.models import MediaItem
 from smart_gallery.organize import FilterOptions, Options, target_dir_for
-from smart_gallery.organize.organize import _unique_destination, copy_progress
-from smart_gallery.progress import ProgressCallback
+from smart_gallery.organize.organize import (
+    _unique_destination,
+    copy_atomic,
+    copy_progress,
+)
+from smart_gallery.progress import Cancelled, ProgressCallback
 
 MANIFEST_NAME = "_smart_gallery_manifest.csv"
 _MANIFEST_FIELDS = [
@@ -68,20 +71,30 @@ def export_media(
     report = ExportReport(matched=len(items))
     placed: List[MediaItem] = []
 
+    cancelled = False
     for done, item in enumerate(items, 1):
         _export_one(
             repo, item, dest, options, mirror, on_exist, dry_run, report, placed
         )
         if progress_callback:
-            progress_callback(
-                copy_progress(done, len(items), report.copied, report.skipped)
-            )
+            try:
+                progress_callback(
+                    copy_progress(done, len(items), report.copied, report.skipped)
+                )
+            except Cancelled:
+                cancelled = True
+                break
 
     if not dry_run and placed:
         if manifest:
             report.manifest_path = _write_manifest(dest, placed)
         if portable_db:
             report.portable_db_path = _write_portable_db(dest, placed)
+
+    if cancelled:
+        # What was copied is described on disk; now let the cancel through.
+        logger.warning(f"Export cancelled — copied={report.copied} into {dest}")
+        raise Cancelled()
 
     logger.success(
         f"Export complete — matched={report.matched} copied={report.copied} "
@@ -117,7 +130,7 @@ def _export_one(repo, item, dest, options, mirror, on_exist, dry_run, report, pl
             logger.debug(f"Skipped (already exists): {target_dir / filename}")
             report.skipped += 1
             return
-        shutil.copy2(src, final)
+        copy_atomic(src, final)
     except OSError as exc:
         logger.error(f"Failed to export {src}: {exc}")
         report.excluded.append(str(src))

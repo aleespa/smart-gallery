@@ -103,7 +103,7 @@ cli_a = _analysis("entry_cli.py")
 # A frozen exe ignores PYTHONIOENCODING, so without UTF-8 mode the CLI writes
 # the console code page (cp1252) into the app's pipe and mangles or crashes on
 # non-ASCII names.
-utf8_mode = [("X utf8_mode=1", None, "OPTION")]
+utf8_mode = [("X utf8", None, "OPTION")]
 
 gui_exe = EXE(  # noqa: F821
     PYZ(gui_a.pure),  # noqa: F821

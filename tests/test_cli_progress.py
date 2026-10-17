@@ -6,8 +6,9 @@ import sys
 
 import pytest
 
+from smart_gallery import cli
 from smart_gallery.db import GalleryRepository
-from smart_gallery.progress import COPYING, ProgressEvent
+from smart_gallery.progress import COPYING, Cancelled, ProgressEvent
 
 
 def run_cli(args, cwd, progress=None):
@@ -71,3 +72,15 @@ def test_quick_commands_do_not_write_log_files(tmp_path, card_and_drive):
     result = run_cli(["people", str(drive)], cwd=tmp_path)
     assert result.returncode == 0, result.stderr
     assert not (tmp_path / "logs").exists()
+
+
+def test_main_exits_130_when_cancelled(tmp_path, drive, repo, monkeypatch):
+    monkeypatch.chdir(tmp_path)  # sync writes ./logs/ into the cwd
+
+    def cancelled(*args, **kwargs):
+        raise Cancelled()
+
+    monkeypatch.setattr(cli, "sync_drive", cancelled)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["sync", str(drive)])
+    assert exc.value.code == 130

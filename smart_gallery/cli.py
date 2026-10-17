@@ -18,7 +18,7 @@ from loguru import logger
 from smart_gallery.config import resolve_db_path
 from smart_gallery.db import GalleryRepository
 from smart_gallery.organize import FilterOptions, Options, normalize_extensions
-from smart_gallery.progress import progress_reporter
+from smart_gallery.progress import CANCELLED_EXIT, Cancelled, progress_reporter
 from smart_gallery.services import (
     cluster_faces,
     compare_galleries,
@@ -828,6 +828,9 @@ def main(argv=None):
     log_path = _configure_logging(args.command)
     try:
         _HANDLERS[args.command](args)
+    except Cancelled:
+        logger.warning("Cancelled.")
+        sys.exit(CANCELLED_EXIT)
     except (FileNotFoundError, FileExistsError) as exc:
         logger.error(str(exc))
         sys.exit(1)

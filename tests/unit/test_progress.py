@@ -2,11 +2,17 @@
 
 import io
 
+import pytest
+
 from smart_gallery.progress import (
+    CANCEL_ENV,
+    Cancelled,
+    CancellableProgress,
     JsonProgress,
     ProgressEvent,
     TerminalProgress,
     counted,
+    progress_reporter,
 )
 
 COPY = ProgressEvent(
@@ -102,3 +108,18 @@ def test_counted_reports_every_n_items_and_a_final_total():
 
 def test_counted_without_a_callback_just_yields():
     assert list(counted(["a", "b"], "Finding files", None)) == ["a", "b"]
+
+
+def test_cancellable_raises_once_stop_file_exists(tmp_path):
+    seen = []
+    cb = CancellableProgress(seen.append, tmp_path / "stop")
+    cb(ProgressEvent("x", 1, 3))
+    (tmp_path / "stop").touch()
+    with pytest.raises(Cancelled):
+        cb(ProgressEvent("x", 2, 3))
+    assert [e.done for e in seen] == [1]
+
+
+def test_reporter_is_cancellable_when_env_set(tmp_path, monkeypatch):
+    monkeypatch.setenv(CANCEL_ENV, str(tmp_path / "stop"))
+    assert isinstance(progress_reporter(), CancellableProgress)

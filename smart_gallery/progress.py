@@ -4,7 +4,9 @@ Services report ``ProgressEvent``s: a named step, how far along it is, and, for
 steps whose items can turn out differently (copying), how the finished items
 split into outcomes. The CLI renders them as a terminal bar, or, when the
 terminal UI runs it with ``SG_PROGRESS=json``, writes them as tagged JSON lines
-that the UI turns into its progress panel instead of printing.
+that the UI turns into its progress panel instead of printing. When the desktop
+app sets ``SG_CANCEL_FILE``, creating that file asks the running command to stop
+at its next progress event.
 """
 
 from __future__ import annotations
@@ -14,12 +16,15 @@ import os
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Iterable, Iterator, Optional, TextIO, TypeVar
 
 from tqdm import tqdm
 
 PROGRESS_ENV = "SG_PROGRESS"
 PROGRESS_PREFIX = "@sg-progress "
+CANCEL_ENV = "SG_CANCEL_FILE"
+CANCELLED_EXIT = 130  # the conventional exit code for an interrupted command
 
 # Step names, shown as-is in the terminal and the UI.
 FINDING = "Finding files"
@@ -169,8 +174,37 @@ class TerminalProgress:
             self._step = None
 
 
-def progress_reporter() -> JsonProgress | TerminalProgress:
-    """JSON lines when the terminal UI is listening, a terminal bar otherwise."""
+class Cancelled(Exception):
+    """Raised from a progress callback once cancellation has been requested."""
+
+
+class CancellableProgress:
+    """Wraps a reporter and raises ``Cancelled`` at the first event after the
+    stop file appears, so services stop between items, never mid-item."""
+
+    def __init__(self, inner: ProgressCallback, stop_file: Path) -> None:
+        self._inner = inner
+        self._stop_file = stop_file
+
+    def __call__(self, event: ProgressEvent) -> None:
+        if self._stop_file.exists():
+            raise Cancelled()
+        self._inner(event)
+
+    def close(self) -> None:
+        close = getattr(self._inner, "close", None)
+        if close is not None:
+            close()
+
+
+def progress_reporter() -> JsonProgress | TerminalProgress | CancellableProgress:
+    """JSON lines when the terminal UI is listening, a terminal bar otherwise;
+    cancellable when the app has named a stop file."""
     if os.environ.get(PROGRESS_ENV) == "json":
-        return JsonProgress()
-    return TerminalProgress()
+        reporter = JsonProgress()
+    else:
+        reporter = TerminalProgress()
+    stop_file = os.environ.get(CANCEL_ENV)
+    if stop_file:
+        return CancellableProgress(reporter, Path(stop_file))
+    return reporter

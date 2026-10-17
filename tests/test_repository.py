@@ -44,10 +44,12 @@ def test_index_for_sync(repo, make_item):
 
 
 def test_date_bounds_and_distinct(repo, make_item):
-    repo.upsert_many([
-        make_item("a.jpg", date_taken="2026-01-01", camera="Canon"),
-        make_item("b.jpg", date_taken="2026-12-31", camera="Sony"),
-    ])
+    repo.upsert_many(
+        [
+            make_item("a.jpg", date_taken="2026-01-01", camera="Canon"),
+            make_item("b.jpg", date_taken="2026-12-31", camera="Sony"),
+        ]
+    )
     assert repo.date_bounds() == (date(2026, 1, 1), date(2026, 12, 31))
     assert repo.distinct_values("camera") == ["Canon", "Sony"]
 
@@ -72,3 +74,30 @@ def test_get_by_id(repo, make_item):
     assert item.iso == 123
     assert item.abspath == str(repo.drive_root / "Photos" / "a.jpg")
     assert repo.get_by_id(media_id + 1000) is None
+
+
+def test_read_only_open_with_uri_characters_in_the_path(tmp_path, make_item):
+    import sqlite3
+
+    import pytest
+
+    from smart_gallery.db import GalleryRepository
+
+    root = tmp_path / "Trip #2 100%" / "Mamá"
+    root.mkdir(parents=True)
+    with GalleryRepository.create(root, label="trip") as repo:
+        repo.upsert_many([make_item("a.jpg")])
+    with GalleryRepository.open(root, read_only=True) as repo:
+        assert repo.get_meta("drive_label") == "trip"
+        assert repo.query_relpaths() == ["a.jpg"]
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            repo.set_meta("drive_label", "changed")
+
+
+def test_read_only_uri_keeps_a_unc_host_out_of_the_authority():
+    from pathlib import PureWindowsPath
+
+    from smart_gallery.db.repository import _read_only_uri
+
+    uri = _read_only_uri(PureWindowsPath(r"\\nas\photos\Trip #2\gallery.db"))
+    assert uri == "file:////nas/photos/Trip%20%232/gallery.db?mode=ro"

@@ -9,8 +9,9 @@ from __future__ import annotations
 import sqlite3
 import uuid
 from datetime import date, datetime
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Dict, Iterable, List, Optional, Tuple
+from urllib.parse import quote
 
 from loguru import logger
 
@@ -70,6 +71,16 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def _read_only_uri(db_path: PurePath) -> str:
+    """SQLite URI opening ``db_path`` read-only. The path is percent-encoded so
+    a ``#``, ``%`` or ``?`` in a folder name stays part of it; a UNC path
+    (``//host/share``) gets an empty authority in front (``file:////host/...``)."""
+    path = quote(db_path.as_posix(), safe="/:")
+    if path.startswith("//"):
+        path = "//" + path
+    return f"file:{path}?mode=ro"
+
+
 class GalleryRepository:
     def __init__(self, conn: sqlite3.Connection, drive_root: Path, db_path: Path):
         self.conn = conn
@@ -80,9 +91,7 @@ class GalleryRepository:
     @staticmethod
     def _connect(db_path: Path, read_only: bool) -> sqlite3.Connection:
         if read_only:
-            conn = sqlite3.connect(
-                f"file:{db_path.as_posix()}?mode=ro", uri=True, timeout=5.0
-            )
+            conn = sqlite3.connect(_read_only_uri(db_path), uri=True, timeout=5.0)
         else:
             conn = sqlite3.connect(str(db_path), timeout=5.0)
         conn.row_factory = sqlite3.Row
@@ -211,7 +220,9 @@ class GalleryRepository:
         return {r["relpath"]: (r["size_bytes"], r["mtime_ns"]) for r in cur}
 
     def all_relpaths(self) -> set:
-        return {r["relpath"] for r in self.conn.execute("SELECT relpath FROM media_items")}
+        return {
+            r["relpath"] for r in self.conn.execute("SELECT relpath FROM media_items")
+        }
 
     # ── reads / queries ─────────────────────────────────────────────────────
     def query(
@@ -241,9 +252,7 @@ class GalleryRepository:
 
     def query_relpaths(self, filters: Optional[FilterOptions] = None) -> List[str]:
         where, params = build_where(filters) if filters else ("", [])
-        cur = self.conn.execute(
-            f"SELECT relpath FROM media_items{where}", params
-        )
+        cur = self.conn.execute(f"SELECT relpath FROM media_items{where}", params)
         return [r["relpath"] for r in cur]
 
     def query_df(self, filters: Optional[FilterOptions] = None):
@@ -319,9 +328,7 @@ class GalleryRepository:
             "ORDER BY id",
             (det_version,),
         )
-        return [
-            (r["id"], str(to_abspath(r["relpath"], self.drive_root))) for r in cur
-        ]
+        return [(r["id"], str(to_abspath(r["relpath"], self.drive_root))) for r in cur]
 
     def add_scan_results(self, results, det_version: str) -> int:
         """Persist a chunk of scan results in one transaction. ``results`` is an
@@ -351,9 +358,7 @@ class GalleryRepository:
             chunk = ids[i : i + _DELETE_CHUNK]
             ph = ", ".join("?" for _ in chunk)
             cur.execute(f"DELETE FROM faces WHERE media_id IN ({ph})", chunk)
-            cur.execute(
-                f"DELETE FROM face_scan_state WHERE media_id IN ({ph})", chunk
-            )
+            cur.execute(f"DELETE FROM face_scan_state WHERE media_id IN ({ph})", chunk)
         self.conn.commit()
         return len(ids)
 
@@ -382,9 +387,7 @@ class GalleryRepository:
 
     # ── faces: clustering / persons (schema v2) ──────────────────────────────
     def faces_count(self) -> int:
-        return int(
-            self.conn.execute("SELECT COUNT(*) AS n FROM faces").fetchone()["n"]
-        )
+        return int(self.conn.execute("SELECT COUNT(*) AS n FROM faces").fetchone()["n"])
 
     def load_embeddings(self, *, only_unassigned: bool = False):
         """Return ``(face_ids[int64 N], embeddings[float32 N×D], person_ids[object N])``."""
@@ -417,9 +420,7 @@ class GalleryRepository:
         ids = np.array([r["id"] for r in rows], dtype=np.int64)
         if not rows:
             return ids, np.empty((0, FACE_EMBEDDING_DIM), dtype=np.float32)
-        mat = np.stack(
-            [np.frombuffer(r["centroid"], dtype=np.float32) for r in rows]
-        )
+        mat = np.stack([np.frombuffer(r["centroid"], dtype=np.float32) for r in rows])
         return ids, mat
 
     def identify_faces_from_samples(
@@ -487,7 +488,9 @@ class GalleryRepository:
                     already_assigned += 1
 
             names = list(references)
-            centroids = np.stack([references[name] for name in names]).astype(np.float32)
+            centroids = np.stack([references[name] for name in names]).astype(
+                np.float32
+            )
             person_ids = [target_ids[name] for name in names]
             for row in eligible:
                 embedding = np.frombuffer(row["embedding"], dtype=np.float32)
@@ -495,7 +498,9 @@ class GalleryRepository:
                 order = np.argsort(similarities)
                 best_index = int(order[-1])
                 best_score = float(similarities[best_index])
-                second_score = float(similarities[order[-2]]) if len(order) > 1 else -1.0
+                second_score = (
+                    float(similarities[order[-2]]) if len(order) > 1 else -1.0
+                )
                 if best_score < threshold:
                     unmatched += 1
                 elif len(order) > 1 and best_score - second_score < margin:
@@ -589,9 +594,7 @@ class GalleryRepository:
             self.conn.execute("DELETE FROM persons WHERE id=?", (person_id,))
             self.conn.commit()
             return
-        embs = np.stack(
-            [np.frombuffer(r["embedding"], dtype=np.float32) for r in rows]
-        )
+        embs = np.stack([np.frombuffer(r["embedding"], dtype=np.float32) for r in rows])
         centroid = embs.mean(axis=0)
         norm = float(np.linalg.norm(centroid))
         if norm > 0:

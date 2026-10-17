@@ -113,14 +113,40 @@ def _render_jpeg(abspath: Path, ext: str) -> bytes:
 
 
 def _to_thumbnail_bytes(image) -> bytes:
+    image = _fit_rgb(image, THUMB_EDGE)
+    out = io.BytesIO()
+    image.save(out, "JPEG", quality=JPEG_QUALITY)
+    return out.getvalue()
+
+
+def _fit_rgb(image, max_edge: int):
+    """Upright RGB copy of ``image`` no larger than ``max_edge`` on either side."""
     from PIL import ImageOps
 
     image = ImageOps.exif_transpose(image)
     image = image.convert("RGB")
-    image.thumbnail((THUMB_EDGE, THUMB_EDGE))
-    out = io.BytesIO()
-    image.save(out, "JPEG", quality=JPEG_QUALITY)
-    return out.getvalue()
+    image.thumbnail((max_edge, max_edge))
+    return image
+
+
+def load_preview(abspath: Path, ext: str, max_edge: int = 2048):
+    """A large upright RGB Pillow image of the file for the viewer: the file
+    itself for regular images, the embedded preview for RAW. None when it
+    cannot be read. Never raises."""
+    try:
+        from PIL import Image
+
+        ext = (ext or "").lower()
+        if ext in RAW_EXTENSIONS:
+            image = _open_raw_preview(Path(abspath))
+        else:
+            image = Image.open(abspath)
+            if ext in JPEG_EXTENSIONS:
+                image.draft("RGB", (max_edge, max_edge))
+        with image:
+            return _fit_rgb(image, max_edge)
+    except Exception:
+        return None
 
 
 def _open_raw_preview(abspath: Path):

@@ -46,6 +46,7 @@ class LibraryRow:
     media_type: str
     ext: str
     mtime_ns: Optional[int]
+    duration_ms: Optional[int] = None  # videos, for the tile label
 
 
 def _normalize_folder(folder: str) -> str:
@@ -97,12 +98,19 @@ def library_rows(repo: GalleryRepository, q: LibraryQuery) -> list[LibraryRow]:
     where, params = _library_where(q)
     order = _ORDER_BY.get(q.sort, _ORDER_BY["date"])
     cur = repo.conn.execute(
-        f"SELECT id, relpath, media_type, ext, mtime_ns FROM media_items"
-        f"{where} ORDER BY {order}",
+        f"SELECT id, relpath, media_type, ext, mtime_ns, duration_ms"
+        f" FROM media_items{where} ORDER BY {order}",
         params,
     )
     return [
-        LibraryRow(r["id"], r["relpath"], r["media_type"], r["ext"], r["mtime_ns"])
+        LibraryRow(
+            r["id"],
+            r["relpath"],
+            r["media_type"],
+            r["ext"],
+            r["mtime_ns"],
+            None if r["duration_ms"] is None else round(r["duration_ms"]),
+        )
         for r in cur
     ]
 

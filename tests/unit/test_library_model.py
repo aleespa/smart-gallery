@@ -127,6 +127,15 @@ def test_library_rows_fields(repo, make_item):
         ".jpg",
         42,
     )
+    assert row.duration_ms is None
+
+
+def test_library_rows_duration_for_videos(repo, make_item):
+    _add(repo, make_item, "v.mp4", media_type="video", ext=".mp4", duration_ms=83500.4)
+
+    (row,) = library_rows(repo, LibraryQuery())
+
+    assert row.duration_ms == 83500
 
 
 def test_sort_orders(repo, make_item):

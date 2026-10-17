@@ -32,6 +32,12 @@ def placeholder(label: str) -> Callable[[AppContext], QWidget]:
     return build
 
 
+def _library(ctx: AppContext) -> QWidget:
+    from smart_gallery.gui.library.view import LibraryView
+
+    return LibraryView(ctx)
+
+
 def _people(ctx: AppContext) -> QWidget:
     from smart_gallery.gui.people.view import PeopleView
 
@@ -51,7 +57,7 @@ def _history(ctx: AppContext) -> QWidget:
 
 
 AREAS: list[Area] = [
-    Area("library", "Library", "image", placeholder("Library")),
+    Area("library", "Library", "image", _library),
     Area("import", "Import", "download", placeholder("Import")),
     Area("dashboard", "Dashboard", "chart", placeholder("Dashboard")),
     Area("people", "People", "people", _people),

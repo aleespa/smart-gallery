@@ -165,3 +165,30 @@ def test_raw_preview(copy_image, drive):
     assert out is not None and out.is_file()
     with Image.open(out) as im:
         assert 0 < max(im.size) <= THUMB_EDGE
+
+
+def test_load_preview_fits_max_edge(drive):
+    Image.new("RGB", (3000, 1500), "blue").save(drive / "big.png")
+    image = cache.load_preview(drive / "big.png", ".PNG", max_edge=1000)
+    assert image.mode == "RGB"
+    assert image.size == (1000, 500)
+
+
+def test_load_preview_raw_uses_embedded_preview(drive, monkeypatch):
+    buf = io.BytesIO()
+    Image.new("RGB", (600, 400), "red").save(buf, "JPEG")
+
+    class Result:
+        returncode = 0
+        stdout = buf.getvalue()
+
+    monkeypatch.setattr(cache.subprocess, "run", lambda args, **kw: Result())
+    (drive / "x.cr3").write_bytes(b"raw")
+    image = cache.load_preview(drive / "x.cr3", ".cr3")
+    assert image.size == (600, 400)
+
+
+def test_load_preview_unreadable_returns_none(drive):
+    (drive / "bad.jpg").write_bytes(b"junk")
+    assert cache.load_preview(drive / "bad.jpg", ".jpg") is None
+    assert cache.load_preview(drive / "missing.jpg", ".jpg") is None

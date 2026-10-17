@@ -41,6 +41,7 @@ Commands:
   convert-raw   Extract embedded JPEG previews from CR2/CR3 files.
   dashboard     Launch the Streamlit dashboard on a catalog.
   ui            Open the interactive terminal interface.
+  gui           Open the Windows desktop app.
   report        Write an Excel report (and optional figures).
   scan-faces    Detect & embed faces in every catalogued image (GPU).
   identify-faces Identify faces using person-named sample directories.

@@ -371,6 +371,8 @@ def build_parser() -> argparse.ArgumentParser:
         "ui", aliases=["tui"], help="Open the interactive Textual terminal interface."
     )
 
+    sub.add_parser("gui", help="Open the Windows desktop app.")
+
     p_report = sub.add_parser(
         "report", help="Write an Excel report (and optional figures)."
     )
@@ -800,6 +802,12 @@ def _handle_ui(args):
     run()
 
 
+def _handle_gui(args):
+    from smart_gallery.gui.app import run
+
+    run()
+
+
 _HANDLERS = {
     "init": _handle_init,
     "import": _handle_import,
@@ -811,6 +819,7 @@ _HANDLERS = {
     "dashboard": _handle_dashboard,
     "ui": _handle_ui,
     "tui": _handle_ui,
+    "gui": _handle_gui,
     "report": _handle_report,
     "scan-faces": _handle_scan_faces,
     "identify-faces": _handle_identify_faces,

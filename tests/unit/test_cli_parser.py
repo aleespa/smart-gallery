@@ -105,3 +105,7 @@ def test_aliases_still_parse():
 def test_name_person_name_is_optional():
     assert parse_args(["name-person", "E:/", "3"]).name is None
     assert parse_args(["name-person", "E:/", "3", "Alice"]).name == "Alice"
+
+
+def test_gui_command_parses():
+    assert parse_args(["gui"]).command == "gui"

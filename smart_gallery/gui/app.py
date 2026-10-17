@@ -1,0 +1,88 @@
+"""Main window: area rail, lazily built area pages, and the app entry point."""
+
+from __future__ import annotations
+
+import sys
+
+from PySide6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QMainWindow,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from smart_gallery.gui.areas import AREAS
+from smart_gallery.gui.context import AppContext
+from smart_gallery.gui.paths import exiftool_available
+
+EXIFTOOL_BANNER = (
+    "ExifTool not found. Install it from https://exiftool.org to read metadata."
+)
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, ctx: AppContext | None = None):
+        super().__init__()
+        self.setWindowTitle("Smart Gallery")
+        self.ctx = ctx or AppContext(self)
+        self._pages: dict[str, QWidget] = {}
+
+        central = QWidget()
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        self.banner = QLabel(EXIFTOOL_BANNER)
+        self.banner.setStyleSheet("background: #f0c040; color: black; padding: 6px;")
+        self.banner.setVisible(not exiftool_available())
+        outer.addWidget(self.banner)
+
+        body = QHBoxLayout()
+        outer.addLayout(body, 1)
+
+        left = QVBoxLayout()
+        # Top of the rail; the Galleries panel is mounted here.
+        self.galleries_slot = QVBoxLayout()
+        left.addLayout(self.galleries_slot)
+        self.rail = QListWidget()
+        self.rail.setFixedWidth(180)
+        for area in AREAS:
+            self.rail.addItem(area.label)
+        left.addWidget(self.rail, 1)
+        body.addLayout(left)
+
+        self.stack = QStackedWidget()
+        body.addWidget(self.stack, 1)
+        self.setCentralWidget(central)
+
+        self.rail.currentRowChanged.connect(self._show_area)
+        self.ctx.navigate.connect(self._navigate)
+        self.resize(1200, 800)
+        self.rail.setCurrentRow(0)
+
+    def _show_area(self, row: int) -> None:
+        if row < 0:
+            return
+        area = AREAS[row]
+        page = self._pages.get(area.id)
+        if page is None:
+            page = self._pages[area.id] = area.factory(self.ctx)
+            self.stack.addWidget(page)
+        self.stack.setCurrentWidget(page)
+
+    def _navigate(self, area_id: str) -> None:
+        for row, area in enumerate(AREAS):
+            if area.id == area_id:
+                self.rail.setCurrentRow(row)
+                return
+
+
+def run() -> None:
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setApplicationName("Smart Gallery")
+    window = MainWindow()
+    window.show()
+    app.exec()

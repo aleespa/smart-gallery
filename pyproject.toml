@@ -39,11 +39,14 @@ faces = [
     "rawpy>=0.22",
 ]
 
+# Windows desktop app (smart-gallery gui). Install with: uv sync --extra gui
+gui = ["PySide6>=6.8", "Pillow>=11"]
+
 [project.scripts]
 smart-gallery = "smart_gallery.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=9.0.2", "ruff>=0.14", "black>=26.1"]
+dev = ["pytest>=9.0.2", "ruff>=0.14", "black>=26.1", "pytest-qt>=4.4"]
 
 [tool.uv]
 # Keep the CPU `onnxruntime` (a transitive dep of insightface) out of the
@@ -61,4 +64,5 @@ packages = ["smart_gallery"]
 markers = [
     "exiftool: integration tests that require the ExifTool binary on PATH",
     "faces: tests that require the optional 'faces' extra (insightface/GPU)",
+    "gui: tests that need the optional 'gui' extra (PySide6)",
 ]

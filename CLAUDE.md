@@ -155,6 +155,25 @@ The core CLI must import cleanly without the extras:
 
 numpy is a core dependency and may be imported at module level.
 
+### Desktop app (`gui/`)
+
+`smart-gallery gui` opens a PySide6 window and needs the `gui` extra. The CLI
+imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
+
+- **No-Qt/Qt split.** `gui/paths.py` (app-data dir, how to launch the CLI,
+  ExifTool/faces availability) imports nothing from Qt, and
+  `test_core_import_without_pyside` enforces that. Everything else may import
+  PySide6.
+- **`AppContext`** (`gui/context.py`) is the signal hub every area shares:
+  `gallery_changed`, `catalog_updated`, `filters_changed`, `navigate`,
+  `open_in_actions`. It also holds the current gallery and filters, and
+  `open_repo()` gives a read-only repository for the current gallery.
+- **Area registry.** `gui/areas.py:AREAS` lists the rail entries in order. Each
+  `Area.factory(ctx)` imports its view module lazily and returns a QWidget.
+  `MainWindow` builds each area on its first visit.
+- **GUI tests** live in `tests/gui` (marker `gui`, headless via
+  `QT_QPA_PLATFORM=offscreen`) and are skipped when PySide6 is missing.
+
 ### Face pipeline
 
 1. **`scan-faces`** is resumable. Images already scanned at the current

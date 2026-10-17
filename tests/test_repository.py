@@ -57,3 +57,18 @@ def test_roundtrip_item_has_abspath(repo, make_item):
     item = repo.query()[0]
     assert item.abspath is not None
     assert item.abspath.endswith("a.jpg")
+
+
+def test_get_by_id(repo, make_item):
+    repo.upsert_many([make_item("Photos/a.jpg", iso=123), make_item("b.jpg")])
+    media_id = repo.conn.execute(
+        "SELECT id FROM media_items WHERE relpath=?", ("Photos/a.jpg",)
+    ).fetchone()["id"]
+
+    item = repo.get_by_id(media_id)
+
+    assert item is not None
+    assert item.relpath == "Photos/a.jpg"
+    assert item.iso == 123
+    assert item.abspath == str(repo.drive_root / "Photos" / "a.jpg")
+    assert repo.get_by_id(media_id + 1000) is None

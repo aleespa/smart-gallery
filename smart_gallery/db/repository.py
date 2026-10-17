@@ -233,6 +233,12 @@ class GalleryRepository:
         cur = self.conn.execute(sql, params)
         return [MediaItem.from_row(row, self.drive_root) for row in cur]
 
+    def get_by_id(self, media_id: int) -> Optional[MediaItem]:
+        row = self.conn.execute(
+            f"SELECT {_COLUMN_LIST} FROM media_items WHERE id=?", (media_id,)
+        ).fetchone()
+        return MediaItem.from_row(row, self.drive_root) if row else None
+
     def query_relpaths(self, filters: Optional[FilterOptions] = None) -> List[str]:
         where, params = build_where(filters) if filters else ("", [])
         cur = self.conn.execute(

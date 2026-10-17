@@ -15,6 +15,7 @@ from smart_gallery.gui.jobs import JobRunner
 from smart_gallery.progress import ProgressEvent
 
 LAST_JOB_MS = 10_000
+STOPPING = "Stopping after the current file… (click again to force)"
 
 
 def format_outcomes(outcomes: tuple[tuple[str, int], ...]) -> str:
@@ -34,6 +35,7 @@ class JobStatusBar(QWidget):
         self.detail = QLabel()
         self.cancel_btn = QPushButton("Cancel")
         self.last_job = QLabel()
+        self._stopping = False
         self._running = [self.title, self.steps, self.bar, self.detail, self.cancel_btn]
 
         layout = QHBoxLayout(self)
@@ -60,8 +62,12 @@ class JobStatusBar(QWidget):
             widget.setVisible(running)
 
     def _cancel(self) -> None:
-        self.cancel_btn.setEnabled(False)
-        self.detail.setText("Cancelling…")
+        if self._stopping:  # "Force stop"
+            self.cancel_btn.setEnabled(False)
+        else:
+            self._stopping = True
+            self.detail.setText(STOPPING)
+            self.cancel_btn.setText("Force stop")
         self.runner.cancel()
 
     def _on_started(self, spec) -> None:
@@ -71,6 +77,8 @@ class JobStatusBar(QWidget):
         self.steps.clear()
         self.detail.clear()
         self.bar.setRange(0, 0)
+        self._stopping = False
+        self.cancel_btn.setText("Cancel")
         self.cancel_btn.setEnabled(True)
         self._show_running(True)
         self.steps.setVisible(False)
@@ -88,6 +96,8 @@ class JobStatusBar(QWidget):
         else:
             self.bar.setRange(0, 0)  # total not known yet: busy
             counts = f"{event.done} {event.unit}"
+        if self._stopping:
+            return  # keep the stopping note until the job ends
         parts = [event.step, counts]
         if event.outcomes:
             parts.append(format_outcomes(event.outcomes))

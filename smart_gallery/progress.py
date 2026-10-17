@@ -6,7 +6,7 @@ split into outcomes. The CLI renders them as a terminal bar, or, when the
 terminal UI runs it with ``SG_PROGRESS=json``, writes them as tagged JSON lines
 that the UI turns into its progress panel instead of printing. When the desktop
 app sets ``SG_CANCEL_FILE``, creating that file asks the running command to stop
-at its next progress event.
+at its next progress event, or sooner where a long step calls ``check_cancelled``.
 """
 
 from __future__ import annotations
@@ -178,6 +178,15 @@ class Cancelled(Exception):
     """Raised from a progress callback once cancellation has been requested."""
 
 
+def check_cancelled(stop_file: Optional[Path] = None) -> None:
+    """Raise ``Cancelled`` if the stop file exists (by default the one named in
+    ``$SG_CANCEL_FILE``). Long single steps (one big copy, one ExifTool batch)
+    call this so a stop request doesn't wait for the next progress event."""
+    path = stop_file or os.environ.get(CANCEL_ENV)
+    if path and os.path.exists(path):
+        raise Cancelled()
+
+
 class CancellableProgress:
     """Wraps a reporter and raises ``Cancelled`` at the first event after the
     stop file appears, so services stop between items, never mid-item."""
@@ -187,8 +196,7 @@ class CancellableProgress:
         self._stop_file = stop_file
 
     def __call__(self, event: ProgressEvent) -> None:
-        if self._stop_file.exists():
-            raise Cancelled()
+        check_cancelled(self._stop_file)
         self._inner(event)
 
     def close(self) -> None:

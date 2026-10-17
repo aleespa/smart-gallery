@@ -11,6 +11,7 @@ from smart_gallery.progress import (
     JsonProgress,
     ProgressEvent,
     TerminalProgress,
+    check_cancelled,
     counted,
     progress_reporter,
 )
@@ -123,3 +124,16 @@ def test_cancellable_raises_once_stop_file_exists(tmp_path):
 def test_reporter_is_cancellable_when_env_set(tmp_path, monkeypatch):
     monkeypatch.setenv(CANCEL_ENV, str(tmp_path / "stop"))
     assert isinstance(progress_reporter(), CancellableProgress)
+
+
+def test_check_cancelled_raises_once_stop_file_exists(tmp_path, monkeypatch):
+    monkeypatch.setenv(CANCEL_ENV, str(tmp_path / "stop"))
+    check_cancelled()
+    (tmp_path / "stop").touch()
+    with pytest.raises(Cancelled):
+        check_cancelled()
+
+
+def test_check_cancelled_without_a_stop_file_never_raises(monkeypatch):
+    monkeypatch.delenv(CANCEL_ENV, raising=False)
+    check_cancelled()

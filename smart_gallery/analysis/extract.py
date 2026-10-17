@@ -20,7 +20,12 @@ from loguru import logger
 
 from smart_gallery.config import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from smart_gallery.models import MediaItem
-from smart_gallery.progress import READING, Cancelled, ProgressCallback, ProgressEvent
+from smart_gallery.progress import (
+    READING,
+    ProgressCallback,
+    ProgressEvent,
+    check_cancelled,
+)
 
 EXIFTOOL_IMAGE_TAG_ARGS = [
     "-Model",
@@ -203,16 +208,25 @@ def analyze_paths(
         batches = [
             file_list[i : i + batch_size] for i in range(0, len(file_list), batch_size)
         ]
-        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as ex:
-            futures = {
-                ex.submit(run_exiftool_batch, batch, tag_profile): len(batch)
-                for batch in batches
-            }
-            try:
-                for future in concurrent.futures.as_completed(futures):
-                    if stop_event and stop_event.is_set():
-                        ex.shutdown(wait=False, cancel_futures=True)
-                        break
+        # Not a ``with`` block: leaving one waits for the running batches,
+        # which a cancel must not.
+        ex = concurrent.futures.ThreadPoolExecutor(max_workers=num_workers)
+        futures = {
+            ex.submit(run_exiftool_batch, batch, tag_profile): len(batch)
+            for batch in batches
+        }
+        pending = set(futures)
+        try:
+            while pending:
+                # Wake at least once a second to see a stop request, even
+                # while every worker is still inside a batch.
+                done, pending = concurrent.futures.wait(
+                    pending, timeout=1, return_when=concurrent.futures.FIRST_COMPLETED
+                )
+                check_cancelled()
+                if stop_event and stop_event.is_set():
+                    break
+                for future in done:
                     for record in future.result():
                         item = MediaItem.from_exiftool(record, drive_root)
                         if item is not None:
@@ -222,10 +236,12 @@ def analyze_paths(
                         progress_callback(
                             ProgressEvent(READING, min(processed, total), total)
                         )
-            except Cancelled:
-                # Don't let the pool's exit wait for every queued batch.
-                ex.shutdown(wait=False, cancel_futures=True)
-                raise
+        except BaseException:
+            # Cancelled (or failed): drop the queued batches without waiting.
+            ex.shutdown(wait=False, cancel_futures=True)
+            raise
+        # A stop_event leaves batches pending: cancel them, don't wait.
+        ex.shutdown(wait=not pending, cancel_futures=True)
 
     _run(image_files, "image")
     _run(video_files, "video")

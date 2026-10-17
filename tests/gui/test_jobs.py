@@ -170,3 +170,14 @@ def test_cancel_kills_when_taskkill_did_not_stop_the_process(
         runner.cancel()
     assert blocker.args[0].status == "cancelled"
     assert len(launched) == (1 if sys.platform == "win32" else 0)
+
+
+def test_second_cancel_kills_at_once(qtbot, tmp_path):
+    runner = _runner(tmp_path)  # the default grace is far longer than this test
+    with qtbot.waitSignal(runner.output, timeout=10000):
+        assert runner.start(JobSpec("Hang", (("hang",),)))
+    runner.cancel()
+    with qtbot.waitSignal(runner.finished, timeout=5000) as blocker:
+        runner.cancel()  # "Force stop"
+    assert blocker.args[0].status == "cancelled"
+    assert not runner.running

@@ -73,17 +73,17 @@ def export_media(
 
     cancelled = False
     for done, item in enumerate(items, 1):
-        _export_one(
-            repo, item, dest, options, mirror, on_exist, dry_run, report, placed
-        )
-        if progress_callback:
-            try:
+        try:
+            _export_one(
+                repo, item, dest, options, mirror, on_exist, dry_run, report, placed
+            )
+            if progress_callback:
                 progress_callback(
                     copy_progress(done, len(items), report.copied, report.skipped)
                 )
-            except Cancelled:
-                cancelled = True
-                break
+        except Cancelled:  # mid-copy or between items; placed items are complete
+            cancelled = True
+            break
 
     if not dry_run and placed:
         if manifest:

@@ -223,6 +223,22 @@ def test_close_while_running_cancels_then_closes(qtbot, tmp_path, monkeypatch):
     assert HistoryStore(tmp_path / "history.jsonl").load()[0].status == "cancelled"
 
 
+def test_quit_while_already_stopping_does_not_force_stop(qtbot, tmp_path, monkeypatch):
+    win, runner = _busy_window(qtbot, tmp_path)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes),
+    )
+    assert runner.start(JobSpec("Wait", (("wait",),), writes_catalog=False))
+    forced = []
+    monkeypatch.setattr(runner, "_kill", lambda: forced.append(True))
+    runner.cancel()  # the user clicked Cancel before quitting
+    assert not win.close()
+    assert forced == []  # quitting waits for the safe stop
+    qtbot.waitUntil(lambda: not win.isVisible(), timeout=15000)
+
+
 def test_job_finishing_during_the_question_closes_without_stale_hook(
     qtbot, tmp_path, monkeypatch
 ):

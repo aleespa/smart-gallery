@@ -15,9 +15,11 @@ class _Runner(QObject):
     def __init__(self):
         super().__init__()
         self.cancelled = False
+        self.cancels = 0
 
     def cancel(self):
         self.cancelled = True
+        self.cancels += 1
 
 
 def _bar(qtbot):
@@ -66,3 +68,26 @@ def test_single_step_job_hides_step_label(qtbot):
     runner.started.emit(SimpleNamespace(title="Sync"))
     runner.step.emit(1, 1)
     assert not bar.steps.isVisible()
+
+
+def test_cancel_note_stays_until_the_job_ends_and_offers_force_stop(qtbot):
+    runner, bar = _bar(qtbot)
+    runner.started.emit(SimpleNamespace(title="Import"))
+    bar.cancel_btn.click()
+    note = "Stopping after the current file… (click again to force)"
+    assert bar.detail.text() == note
+    assert bar.cancel_btn.text() == "Force stop"
+    assert bar.cancel_btn.isEnabled()
+
+    runner.progress.emit(ProgressEvent("Copying files", 3, 40))
+    assert bar.detail.text() == note
+    assert (bar.bar.maximum(), bar.bar.value()) == (40, 3)
+
+    bar.cancel_btn.click()
+    assert runner.cancels == 2
+
+    runner.finished.emit(SimpleNamespace(status="cancelled"))
+    runner.started.emit(SimpleNamespace(title="Sync"))
+    assert bar.cancel_btn.text() == "Cancel"
+    runner.progress.emit(ProgressEvent("Finding files", 5))
+    assert bar.detail.text().startswith("Finding files")

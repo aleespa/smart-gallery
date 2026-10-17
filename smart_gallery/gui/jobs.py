@@ -2,7 +2,8 @@
 
 Every write the app makes goes through here as a ``smart-gallery`` subprocess,
 so a job is safe to cancel: the CLI is first asked to stop through a stop file,
-and only killed (with its ExifTool children) if it ignores that.
+and only killed (with its ExifTool children) if it ignores that for the grace
+time, or when the user cancels a second time ("Force stop").
 """
 
 from __future__ import annotations
@@ -36,6 +37,11 @@ _DETAILS = re.compile(r"(?:^|\s-\s)Details:\s*(.+)$")
 _LOG_PREFIX = re.compile(r"^\S+ \S+ \| \w+\s*\| \S+ - ")
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
+# Long enough for the CLI to finish the file or ExifTool batch it is on.
+GRACE_MS = 120_000
+# After taskkill, how long to wait before falling back to QProcess.kill().
+KILL_CHECK_MS = 5_000
+
 
 @dataclass(frozen=True)
 class JobSpec:
@@ -57,15 +63,15 @@ class JobRunner(QObject):
         history: HistoryStore,
         workdir: Path,
         program: list[str] | None = None,
-        grace_ms: int = 10_000,
+        grace_ms: int = GRACE_MS,
     ):
         super().__init__()
         self._history = history
         self._workdir = Path(workdir)
         self._program = list(program) if program is not None else cli_command()
+        self._grace_ms = grace_ms
         self._grace = QTimer(self)
         self._grace.setSingleShot(True)
-        self._grace.setInterval(grace_ms)
         self._grace.timeout.connect(self._kill)
         self._spec: JobSpec | None = None
         self._process: QProcess | None = None
@@ -86,6 +92,11 @@ class JobRunner(QObject):
     @property
     def running(self) -> bool:
         return self._spec is not None
+
+    @property
+    def cancelling(self) -> bool:
+        """A stop was requested and the job has not ended yet."""
+        return self.running and self._cancel_requested
 
     def start(self, spec: JobSpec) -> bool:
         """Begin ``spec``; False when another job is still running.
@@ -114,15 +125,19 @@ class JobRunner(QObject):
         return True
 
     def cancel(self) -> None:
-        """Ask the running job to stop; kill it if it has not within the grace time."""
-        if not self.running or self._cancel_requested:
+        """Ask the running job to stop; kill it if it has not within the grace
+        time. Cancelling again while it is stopping kills it now."""
+        if not self.running:
+            return
+        if self._cancel_requested:
+            self._kill()
             return
         self._cancel_requested = True
         try:
             self._stop_file.touch()
         except OSError:
             logger.warning("Could not create stop file %s", self._stop_file)
-        self._grace.start()
+        self._grace.start(self._grace_ms)
 
     def _launch(self) -> None:
         spec = self._spec
@@ -214,7 +229,8 @@ class JobRunner(QObject):
             )
             if ok:
                 self._taskkill_sent = True
-                self._grace.start()  # still running after another grace: kill()
+                # Still running a little later: kill() it directly.
+                self._grace.start(min(self._grace_ms, KILL_CHECK_MS))
                 return
         process.kill()
 

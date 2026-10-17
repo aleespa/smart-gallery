@@ -67,13 +67,40 @@ def test_copy_atomic_leaves_no_partial_on_failure(tmp_path, monkeypatch):
     dest_dir = tmp_path / "dest"
     dest_dir.mkdir()
 
-    def half_copy(source, destination, **kwargs):
-        Path(destination).write_bytes(Path(source).read_bytes()[:5])
+    def fail(*args, **kwargs):  # after the data is written, before the rename
         raise OSError("disk full")
 
-    monkeypatch.setattr(shutil, "copy2", half_copy)
+    monkeypatch.setattr(shutil, "copystat", fail)
     with pytest.raises(OSError):
         copy_atomic(src, dest_dir / "src.bin")
+    assert list(dest_dir.iterdir()) == []
+
+
+def test_copy_atomic_stops_mid_file_when_cancelled(tmp_path, monkeypatch):
+    import pytest
+
+    from smart_gallery import progress
+    from smart_gallery.organize.organize import COPY_CHUNK, copy_atomic
+
+    src = tmp_path / "big.bin"
+    src.write_bytes(b"x" * (20 * 1024 * 1024))
+    assert COPY_CHUNK < src.stat().st_size
+    dest_dir = tmp_path / "dest"
+    dest_dir.mkdir()
+    stop = tmp_path / "stop"
+    monkeypatch.setenv(progress.CANCEL_ENV, str(stop))
+    checks = []
+    real_check = progress.check_cancelled
+
+    def stop_after_first_chunk():
+        checks.append(1)
+        stop.touch()  # the user clicks Cancel while the first chunk is written
+        real_check()
+
+    monkeypatch.setattr(progress, "check_cancelled", stop_after_first_chunk)
+    with pytest.raises(progress.Cancelled):
+        copy_atomic(src, dest_dir / "big.bin")
+    assert len(checks) == 1
     assert list(dest_dir.iterdir()) == []
 
 

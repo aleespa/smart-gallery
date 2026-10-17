@@ -118,7 +118,8 @@ class MainWindow(QMainWindow):
         jobs.finished.connect(
             self._close_after_job, Qt.ConnectionType.SingleShotConnection
         )
-        jobs.cancel()
+        if not jobs.cancelling:  # a second cancel would force-stop the job
+            jobs.cancel()
 
     def _close_after_job(self, _record) -> None:
         self._closing = False

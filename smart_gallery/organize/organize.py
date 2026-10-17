@@ -14,6 +14,7 @@ from typing import List, Literal, Optional
 
 from loguru import logger
 
+from smart_gallery import progress
 from smart_gallery.config import PARTIAL_SUFFIX
 from smart_gallery.models import MediaItem
 from smart_gallery.progress import (
@@ -24,6 +25,10 @@ from smart_gallery.progress import (
 )
 
 StructurePart = Literal["Year", "Month", "Model", "Lens"]
+
+# A stop request is checked between chunks, so cancelling never waits for a
+# multi-GB video to finish copying.
+COPY_CHUNK = 8 * 1024 * 1024
 
 
 @dataclass
@@ -105,16 +110,17 @@ def organize_items(
     output = Path(output)
 
     for done, item in enumerate(items, 1):
-        _place(item, output, drive_root, options, report)
-        if progress_callback:
-            try:
+        try:
+            _place(item, output, drive_root, options, report)
+            if progress_callback:
                 progress_callback(
                     copy_progress(done, len(items), report.copied, report.skipped)
                 )
-            except Cancelled:
-                # The item just placed is complete; report it, then stop.
-                report.cancelled = True
-                break
+        except Cancelled:
+            # Every item placed so far is complete (a copy cut short leaves
+            # no file behind); report them, then stop.
+            report.cancelled = True
+            break
 
     logger.info(
         f"Organize report — copied={report.copied} skipped={report.skipped} "
@@ -125,11 +131,19 @@ def organize_items(
 
 def copy_atomic(source: Path, destination: Path) -> None:
     """Copy like ``shutil.copy2`` but never leave a truncated ``destination``:
-    copy to a partial file beside it, then rename into place."""
+    copy to a partial file beside it, then rename into place. Raises
+    ``Cancelled`` between chunks once a stop is requested."""
     source, destination = Path(source), Path(destination)
     partial = destination.with_name(destination.name + PARTIAL_SUFFIX)
     try:
-        shutil.copy2(source, partial)
+        with open(source, "rb") as src, open(partial, "wb") as dst:
+            chunk = src.read(COPY_CHUNK)
+            while chunk:
+                dst.write(chunk)
+                chunk = src.read(COPY_CHUNK)
+                if chunk:
+                    progress.check_cancelled()
+        shutil.copystat(source, partial)
         os.replace(partial, destination)
     except BaseException:
         partial.unlink(missing_ok=True)

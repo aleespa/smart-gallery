@@ -8,6 +8,13 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+# QtWebEngine must be imported before any QApplication exists.
+os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox --disable-gpu")
+try:
+    from PySide6 import QtWebEngineWidgets  # noqa: F401
+except ImportError:
+    pass
+
 
 def pytest_collection_modifyitems(items):
     for item in items:

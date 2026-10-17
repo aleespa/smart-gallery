@@ -56,10 +56,16 @@ def _history(ctx: AppContext) -> QWidget:
     return HistoryView(ctx)
 
 
+def _dashboard(ctx: AppContext) -> QWidget:
+    from smart_gallery.gui.dashboard.view import DashboardView
+
+    return DashboardView(ctx)
+
+
 AREAS: list[Area] = [
     Area("library", "Library", "image", _library),
     Area("import", "Import", "download", placeholder("Import")),
-    Area("dashboard", "Dashboard", "chart", placeholder("Dashboard")),
+    Area("dashboard", "Dashboard", "chart", _dashboard),
     Area("people", "People", "people", _people),
     Area("actions", "Actions", "play", _actions),
     Area("history", "History", "history", _history),

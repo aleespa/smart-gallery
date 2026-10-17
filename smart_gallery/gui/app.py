@@ -142,6 +142,9 @@ class MainWindow(QMainWindow):
 
 
 def run() -> None:
+    # QtWebEngine (Dashboard) must be imported before the QApplication exists.
+    from PySide6 import QtWebEngineWidgets  # noqa: F401
+
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Smart Gallery")
     window = MainWindow()

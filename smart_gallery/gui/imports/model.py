@@ -7,7 +7,7 @@ import sys
 from collections.abc import Sequence
 
 from smart_gallery.gui.galleries.store import Gallery, is_connected
-from smart_gallery.gui.jobs import JobSpec
+from smart_gallery.gui.jobspec import JobSpec
 from smart_gallery.import_profiles import ImportProfile, expand
 
 _DRIVE_REMOVABLE = 2

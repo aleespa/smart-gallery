@@ -14,13 +14,13 @@ import re
 import sys
 import uuid
 from collections import deque
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, Signal
 
 from smart_gallery.gui.history.store import TAIL_LINES, HistoryStore, JobRecord
+from smart_gallery.gui.jobspec import JobSpec
 from smart_gallery.gui.paths import cli_command
 from smart_gallery.progress import (
     CANCEL_ENV,
@@ -28,6 +28,8 @@ from smart_gallery.progress import (
     PROGRESS_ENV,
     ProgressEvent,
 )
+
+__all__ = ["JobRunner", "JobSpec"]
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +43,6 @@ _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 GRACE_MS = 120_000
 # After taskkill, how long to wait before falling back to QProcess.kill().
 KILL_CHECK_MS = 5_000
-
-
-@dataclass(frozen=True)
-class JobSpec:
-    title: str
-    argvs: tuple[tuple[str, ...], ...]  # run in order; stops at the first failure
-    writes_catalog: bool = True
 
 
 class JobRunner(QObject):

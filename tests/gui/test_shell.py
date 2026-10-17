@@ -34,3 +34,9 @@ def test_people_view_lists_persons(qtbot, repo):
     view = PeopleView(ctx)
     qtbot.addWidget(view)
     assert view.persons.item(0).text() == "Ana (3 faces)"
+
+
+def test_window_provides_thumbnail_loader(qtbot):
+    win = MainWindow()
+    qtbot.addWidget(win)
+    assert win.ctx.thumbs is not None

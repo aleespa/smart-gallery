@@ -26,6 +26,7 @@ from smart_gallery.gui.history.store import HistoryStore
 from smart_gallery.gui.jobs import JobRunner
 from smart_gallery.gui.paths import app_data_dir, exiftool_available
 from smart_gallery.gui.statusbar import JobStatusBar
+from smart_gallery.gui.thumbs.loader import ThumbnailLoader
 
 QUIT_WHILE_RUNNING = "A job is still running. Cancel it and quit?"
 EXIFTOOL_BANNER = (
@@ -45,6 +46,8 @@ class MainWindow(QMainWindow):
             self.ctx.jobs = JobRunner(
                 HistoryStore(data / "history.jsonl"), workdir=data
             )
+        if self.ctx.thumbs is None:
+            self.ctx.thumbs = ThumbnailLoader(self)
         self.ctx.jobs.catalog_written.connect(self.ctx.catalog_updated.emit)
         self._pages: dict[str, QWidget] = {}
         self._closing = False  # waiting for a cancelled job before closing

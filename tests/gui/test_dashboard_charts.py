@@ -1,3 +1,4 @@
+import pytest
 import shiboken6
 from PySide6.QtCharts import (
     QBarCategoryAxis,
@@ -74,9 +75,18 @@ def test_donut_slices_and_labels(qtbot, monkeypatch):
     assert not chart.legend().isVisible()
     (series,) = chart.series()
     assert isinstance(series, QPieSeries)
-    assert series.holeSize() == 0.4
+    # The hole is 40 % of the pie's diameter (Qt sizes both by the chart).
+    assert series.holeSize() / series.pieSize() == pytest.approx(0.4)
     slices = series.slices()
-    assert [s.label() for s in slices] == ["Images 96 %", "Videos 3 %", "Others 1 %"]
+    # Inside the ring the label breaks after the name, so it fits across it.
+    assert [s.label() for s in slices] == [
+        "Images<br>96 %",
+        "Videos 3 %",
+        "Others 1 %",
+    ]
+    # The two thin slices straddle 12 o'clock, so their labels go left and right.
+    assert series.pieStartAngle() == pytest.approx(180 * 4 / 100)
+    assert series.pieEndAngle() == pytest.approx(series.pieStartAngle() + 360)
     assert [s.value() for s in slices] == [96, 3, 1]
     assert [s.labelPosition() for s in slices] == [
         QPieSlice.LabelInsideHorizontal,
@@ -95,6 +105,11 @@ def test_donut_slices_and_labels(qtbot, monkeypatch):
     series.hovered.emit(slices[1], True)
     series.hovered.emit(slices[1], False)
     assert shown == [(True, "Videos: 3"), (False, "Videos: 3")]
+
+
+def test_slice_label_escapes_inside_name():
+    assert charts.slice_label("Images", 72, 100) == "Images 72 %"
+    assert charts.slice_label("A<B", 72, 100, inside=True) == "A&lt;B<br>72 %"
 
 
 def test_ranked_bar_full_long_names(qtbot):
@@ -148,6 +163,8 @@ def test_ranked_bar_counts_past_bar_ends(qtbot):
         assert label.pos().x() > end.x()
         assert label.sceneBoundingRect().contains(QPointF(label.pos().x() + 1, end.y()))
     # The largest count still fits inside the plot area.
+    (axis,) = [a for a in chart.axes(Qt.Horizontal) if type(a) is QValueAxis]
+    assert axis.max() - 1000 >= 0.2 * axis.max()
     assert by_text["1,000"].sceneBoundingRect().right() <= chart.plotArea().right()
 
 
@@ -269,12 +286,13 @@ def test_stacked_series_order_and_colors(qtbot, monkeypatch):
     assert y_axis.max() >= 4  # stacked total of the busiest month
 
     assert (
-        charts.month_tooltip("2026-02", 2, "photos", series="Cam B")
-        == "Feb 2026: Cam B 2.0 photos"
+        charts.month_tooltip("2026-02", 1234, "photos", "Cam B", ",.0f")
+        == "Feb 2026: Cam B 1,234 photos"
     )
+    # Whole-number data (photo counts) shows whole counts.
     shown = _tips(monkeypatch)
     series.hovered.emit(True, 1, sets[1])
-    assert shown == [(True, "Feb 2026: Cam B 2.0 photos")]
+    assert shown == [(True, "Feb 2026: Cam B 2 photos")]
 
 
 def _scheme(monkeypatch, scheme):
@@ -351,3 +369,20 @@ def test_theme_watcher_skips_deleted_views(qtbot, monkeypatch):
     _scheme(monkeypatch, Qt.ColorScheme.Dark)
     watcher.reapply()
     assert kept.chart().theme() == QChart.ChartThemeDark
+
+
+def test_ranked_bar_headroom_after_rounding(qtbot):
+    for top in (1, 8, 40, 999, 1000, 1234, 99999):
+        view = _view(qtbot, charts.ranked_bar_chart(Counts((("A", top),), top)))
+        chart = view.chart()
+        (axis,) = [a for a in chart.axes(Qt.Horizontal) if type(a) is QValueAxis]
+        assert axis.max() - top >= 0.2 * axis.max(), top
+
+
+def test_axis_numbers_have_thousands_separators(qtbot, monkeypatch):
+    view = _view(qtbot, charts.stop_bar_chart((("ISO 100", 30000),), "#ffd700"))
+    chart = view.chart()
+    _scheme(monkeypatch, Qt.ColorScheme.Dark)
+    charts.apply_theme(view)  # setTheme must not undo it
+    assert chart.localizeNumbers()
+    assert chart.locale().toString(30000.0, "f", 0) == "30,000"

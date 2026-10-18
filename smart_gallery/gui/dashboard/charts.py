@@ -9,6 +9,7 @@ each bar set or slice, because ``QChart.setTheme`` resets them;
 
 from __future__ import annotations
 
+import html
 import math
 from typing import Optional, Sequence
 
@@ -26,7 +27,7 @@ from PySide6.QtCharts import (
     QStackedBarSeries,
     QValueAxis,
 )
-from PySide6.QtCore import QObject, QPointF, Qt, QTimer
+from PySide6.QtCore import QLocale, QObject, QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPalette
 from PySide6.QtWidgets import QApplication, QGraphicsSimpleTextItem, QToolTip
 
@@ -43,6 +44,9 @@ COLOR_PROPERTY = "sg_color"
 END_LABEL = "sg_end_label"  # QGraphicsItem.data(0) of a ranked bar's count label
 _END_LABEL_GAP = 4  # px between a bar's end and its count
 _FILE_TYPES = ("Images", "Videos", "Others")
+_NUMBER_LOCALE = QLocale(QLocale.English, QLocale.UnitedStates)
+_PIE_SIZE = 0.65  # leaves room above for the outside labels
+_HOLE_RATIO = 0.4
 _SMALL_SLICE = 0.04  # slices under 4 % put their label outside
 _ROTATE_MONTH_LABELS = 12  # more labels than this are drawn at an angle
 
@@ -50,8 +54,11 @@ _ROTATE_MONTH_LABELS = 12  # more labels than this are drawn at an angle
 # --- tooltip and label text ------------------------------------------------
 
 
-def slice_label(name: str, count: int, total: int) -> str:
+def slice_label(name: str, count: int, total: int, inside: bool = False) -> str:
+    """``"Images 72 %"``; inside the ring it breaks after the name (rich text)."""
     pct = 100 * count / total if total else 0
+    if inside:
+        return f"{html.escape(name)}<br>{pct:.0f} %"
     return f"{name} {pct:.0f} %"
 
 
@@ -69,10 +76,14 @@ def stop_tooltip(label: str, count: int) -> str:
 
 
 def month_tooltip(
-    month: str, value: float, unit: str, series: Optional[str] = None
+    month: str,
+    value: float,
+    unit: str,
+    series: Optional[str] = None,
+    value_format: str = ",.1f",
 ) -> str:
     name = f"{series} " if series is not None else ""
-    return f"{month_label(month)}: {name}{value:,.1f} {unit}"
+    return f"{month_label(month)}: {name}{value:{value_format}} {unit}"
 
 
 def file_type_colors(items) -> list[str]:
@@ -95,21 +106,28 @@ def donut_chart(items: Sequence[tuple[str, int]], colors: Sequence[str]) -> QCha
     """Pie with a 40 % hole; ``colors`` is aligned with ``items``."""
     total = sum(count for _, count in items)
     series = QPieSeries()
-    series.setHoleSize(0.4)
-    series.setPieSize(0.6)  # room for outside labels
-    small_slices = 0
-    for (name, count), color in zip(items, colors):
-        slice_ = series.append(slice_label(name, count, total), count)
+    # Qt sizes both as fractions of the chart; the hole is 40 % of the pie.
+    series.setPieSize(_PIE_SIZE)
+    series.setHoleSize(_HOLE_RATIO * _PIE_SIZE)
+    small = [bool(total) and count / total < _SMALL_SLICE for _, count in items]
+    # Centre a run of thin slices at the end on 12 o'clock, so their outside
+    # labels split to the left and right instead of piling up on one side.
+    tail = 0
+    for (_, count), is_small in zip(reversed(items), reversed(small)):
+        if not is_small:
+            break
+        tail += count
+    start = 180 * tail / total if total else 0
+    series.setPieStartAngle(start)
+    series.setPieEndAngle(start + 360)
+    for (name, count), color, is_small in zip(items, colors, small):
+        slice_ = series.append(slice_label(name, count, total, not is_small), count)
         slice_.setProperty(COLOR_PROPERTY, color)
         slice_.setProperty("sg_name", name)
         slice_.setLabelVisible(True)
-        if total and count / total < _SMALL_SLICE:
-            slice_.setLabelPosition(QPieSlice.LabelOutside)
-            # Neighbouring small slices alternate arm lengths so labels don't overlap.
-            slice_.setLabelArmLengthFactor(0.15 + 0.25 * (small_slices % 2))
-            small_slices += 1
-        else:
-            slice_.setLabelPosition(QPieSlice.LabelInsideHorizontal)
+        slice_.setLabelPosition(
+            QPieSlice.LabelOutside if is_small else QPieSlice.LabelInsideHorizontal
+        )
 
     def on_hover(slice_: QPieSlice, state: bool) -> None:
         text = slice_tooltip(slice_.property("sg_name"), int(slice_.value()))
@@ -147,8 +165,8 @@ def ranked_bar_chart(counts: Counts) -> QChartView:
     names_axis.setTruncateLabels(False)
     _attach(chart, series, names_axis, Qt.AlignLeft)
     top = max((count for _, count in counts.items), default=0)
-    # Headroom so the largest bar's count fits inside the plot.
-    _attach(chart, series, _value_axis(top * 1.15, integer=True), Qt.AlignBottom)
+    # At least 20 % of the rounded axis is left past the longest bar, for its count.
+    _attach(chart, series, _value_axis(top * 1.25, integer=True), Qt.AlignBottom)
     _end_labels(
         chart, series, [(n - 1 - r, c) for r, (_, c) in enumerate(counts.items)]
     )
@@ -199,8 +217,12 @@ def month_bar_chart(
     """One bar per month; stacked by series (with a legend) when ``stacked``.
 
     Bars sit at index positions on a hidden value axis. A category axis over
-    the same range carries the thinned labels from ``month_axis_labels``."""
+    the same range carries the thinned labels from ``month_axis_labels``.
+    Whole-number data (photo counts) shows whole numbers on the axis and in
+    tooltips; anything else (video minutes) shows one decimal place."""
     n = len(ms.months)
+    whole = all(float(v).is_integer() for vs in ms.series.values() for v in vs)
+    value_format = ",.0f" if whole else ",.1f"
     series = QStackedBarSeries() if stacked else QBarSeries()
     series.setBarWidth(0.8)
     for rank, (name, values) in enumerate(ms.series.items()):
@@ -209,7 +231,9 @@ def month_bar_chart(
 
     def on_hover(state: bool, index: int, bar_set: QBarSet) -> None:
         name = bar_set.label() if stacked else None
-        text = month_tooltip(ms.months[index], bar_set.at(index), unit, series=name)
+        text = month_tooltip(
+            ms.months[index], bar_set.at(index), unit, name, value_format
+        )
         _show_tip(state, text)
 
     series.hovered.connect(on_hover)
@@ -234,7 +258,6 @@ def month_bar_chart(
         top = max((sum(col) for col in zip(*ms.series.values())), default=0)
     else:
         top = max((v for values in ms.series.values() for v in values), default=0)
-    whole = all(float(v).is_integer() for vs in ms.series.values() for v in vs)
     _attach(chart, series, _value_axis(top, integer=whole), Qt.AlignLeft)
     return _view(chart)
 
@@ -248,6 +271,9 @@ def _bar_set(label: str, values, color: str) -> QBarSet:
 
 def _chart(series, legend: bool = False) -> QChart:
     chart = QChart()
+    # Axis numbers with thousands separators, like the "1,234" in tooltips.
+    chart.setLocalizeNumbers(True)
+    chart.setLocale(_NUMBER_LOCALE)
     chart.setAnimationOptions(QChart.NoAnimation)
     chart.addSeries(series)
     chart.legend().setVisible(legend)
@@ -291,6 +317,7 @@ def _style_hints():
 
 
 def _color_scheme() -> Qt.ColorScheme:
+    # Not via _style_hints(): tests swap that for a fake signal source only.
     return QGuiApplication.styleHints().colorScheme()
 
 
@@ -345,7 +372,11 @@ def _text_on(color: QColor) -> QColor:
 
 
 class ThemeWatcher(QObject):
-    """Re-themes its chart views when the OS switches light/dark."""
+    """Re-themes its chart views when the OS switches light/dark.
+
+    Views whose C++ object is gone are dropped on the next switch, so a panel
+    removed from the Dashboard must be ``deleteLater()``-ed, not just hidden
+    or taken out of its layout, or it stays registered here."""
 
     def __init__(self, views: list[QChartView], parent: Optional[QObject] = None):
         super().__init__(parent)

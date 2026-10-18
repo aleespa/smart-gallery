@@ -1,7 +1,7 @@
 import pandas as pd
 import plotly.graph_objects as go
 
-from smart_gallery.dashboard import figures
+from smart_gallery.dashboard import data, figures
 
 
 def _images(n=2, **extra):
@@ -98,3 +98,57 @@ def test_every_figure_builds_from_realistic_data():
         figures.photo_map(fi),
     ]
     assert all(isinstance(f, go.Figure) for f in figs)
+
+
+def test_top_donut_matches_data():
+    df = _images(4, camera=["A", "A", "B", "C"])
+    fig = figures.top_donut(df, "camera")
+    expected = data.top_counts(df, "camera").items
+    assert tuple(fig.data[0].labels) == tuple(k for k, _ in expected)
+    assert tuple(fig.data[0].values) == tuple(v for _, v in expected)
+    assert tuple(fig.data[0].marker.colors) == tuple(
+        data.color_for(k, i) for i, (k, _) in enumerate(expected)
+    )
+
+
+def test_settings_bars_match_buckets():
+    fi = _images(4, aperture=[2.8, 4.0, 5.6, 2.8], iso=[100, 400, 400, 1600])
+    fig = figures.settings_histograms(fi)
+    buckets = data.settings_buckets(fi)
+    titles = [a.text for a in fig.layout.annotations]
+    assert titles == ["Aperture", "Shutter Speed", "ISO", "Focal Length"]
+    assert len(fig.data) == len(buckets)
+    for trace, (name, items) in zip(fig.data, buckets.items()):
+        assert all(isinstance(t, go.Bar) for t in fig.data)
+        assert tuple(trace.x) == tuple(k for k, _ in items)
+        assert tuple(trace.y) == tuple(v for _, v in items)
+        assert trace.marker.color == data.SETTINGS_COLORS[name]
+
+
+def test_timeline_matches_monthly_by_camera():
+    n = 12
+    df = pd.DataFrame(
+        {
+            "camera": [f"cam{i}" for i in range(n)] + ["cam0"],
+            "date_taken": pd.to_datetime(["2024-01-01"] * n + ["2024-03-01"]),
+        }
+    )
+    fig = figures.timeline_by_camera(df)
+    ms = data.monthly_by_camera(df)
+    assert [t.name for t in fig.data] == list(ms.series)
+    for trace in fig.data:
+        assert tuple(trace.x) == ms.months
+        assert tuple(trace.y) == ms.series[trace.name]
+    other = next(t for t in fig.data if t.name == "Other")
+    assert other.marker.color == "#9e9e9e"
+    assert fig.layout.title.text == "Monthly Photo Count by Camera"
+
+
+def test_video_minutes_matches_data():
+    fv = _videos()
+    fig = figures.video_minutes(fv)
+    ms = data.video_minutes_by_month(fv)
+    assert len(fig.data) == 1
+    assert tuple(fig.data[0].x) == ms.months
+    assert tuple(fig.data[0].y) == ms.series["Minutes"]
+    assert fig.data[0].marker.color == data.VIDEO_COLOR

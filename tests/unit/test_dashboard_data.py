@@ -24,6 +24,19 @@ def test_file_type_counts_drops_zero():
     assert data.file_type_counts(empty, empty, empty) == ()
 
 
+def test_file_type_colors_by_name():
+    assert data.file_type_colors((("Images", 1), ("Videos", 2), ("Others", 3))) == [
+        "#66b3ff",
+        "#99ff99",
+        "#ff9999",
+    ]
+    # No images: Videos stays green instead of taking the first colour.
+    assert data.file_type_colors((("Videos", 2), ("Others", 3))) == [
+        "#99ff99",
+        "#ff9999",
+    ]
+
+
 def test_top_counts_ranks_and_total():
     df = pd.DataFrame({"camera": ["A"] * 3 + ["B"] * 3 + ["C"] + [None, None]})
     c = data.top_counts(df, "camera")
@@ -91,6 +104,22 @@ def test_monthly_by_camera_zero_fill_and_other():
     assert len(ms.series) == 11
     assert "cam10" not in ms.series
     assert ms.series[OTHER] == (1.0,)
+
+
+def test_timeline_ranks_cameras_like_the_cameras_chart():
+    # B has the most images, but most of them are undated. Among dated images
+    # A leads; the timeline still ranks B first, as the Cameras chart does, so
+    # each camera gets the same colour on both charts.
+    rows = [("2026-01-05", "A")] * 3 + [("2026-01-06", "B")] * 2 + [(None, "B")] * 4
+    rows += [("2026-02-01", f"cam{i:02d}") for i in range(9)]
+    fi = _photos(rows)
+    ranked = [name for name, _ in data.top_counts(fi, "camera").items]
+    assert ranked[:2] == ["B", "A"]
+    ms = data.monthly_by_camera(fi)
+    assert list(ms.series) == ranked + [OTHER]
+    assert ms.series["B"] == (2.0, 0.0)  # only dated rows are counted
+    assert ms.series["A"] == (3.0, 0.0)
+    assert ms.series[OTHER] == (0.0, 1.0)  # cam08 is 11th overall
 
 
 def test_video_minutes_by_month():

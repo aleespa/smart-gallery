@@ -29,6 +29,7 @@ PALETTE: tuple[str, ...] = (
 )
 OTHER = "Other"
 OTHER_COLOR = "#9e9e9e"
+FILE_TYPES: tuple[str, ...] = ("Images", "Videos", "Others")
 FILE_TYPE_COLORS: tuple[str, ...] = ("#66b3ff", "#99ff99", "#ff9999")
 VIDEO_COLOR = "#dc143c"
 
@@ -61,8 +62,14 @@ class Counts:
 
 
 def file_type_counts(fi, fv, fo) -> tuple[tuple[str, int], ...]:
-    pairs = (("Images", len(fi)), ("Videos", len(fv)), ("Others", len(fo)))
+    pairs = zip(FILE_TYPES, (len(fi), len(fv), len(fo)))
     return tuple((name, n) for name, n in pairs if n > 0)
+
+
+def file_type_colors(items) -> list[str]:
+    """File-type colours by name, so Videos stays green when there are no images."""
+    by_name = dict(zip(FILE_TYPES, FILE_TYPE_COLORS))
+    return [by_name.get(name, color_for(name, i)) for i, (name, _) in enumerate(items)]
 
 
 def top_counts(df, column: str, n: int = 10) -> Counts:
@@ -203,18 +210,18 @@ def _month_range(periods: pd.Series) -> pd.PeriodIndex:
 
 
 def monthly_by_camera(fi, n: int = 10) -> Optional[MonthSeries]:
-    """Photos per month for the ``n`` top cameras, the rest as "Other"."""
+    """Photos per month for the ``n`` top cameras, the rest as "Other".
+
+    The top cameras are ranked over all of ``fi``, undated photos included,
+    exactly as ``top_counts`` ranks them for the Cameras chart, so a camera
+    has the same colour on both. Only dated photos are counted per month."""
     if fi.empty or "date_taken" not in fi.columns or "camera" not in fi.columns:
         return None
     tmp = fi.dropna(subset=["date_taken", "camera"])
     if tmp.empty:
         return None
     period = tmp["date_taken"].dt.to_period("M")
-    ranked = sorted(
-        ((str(k), int(v)) for k, v in tmp["camera"].value_counts().items()),
-        key=_by_count,
-    )
-    top = [name for name, _ in ranked[:n]]
+    top = [name for name, _ in top_counts(fi, "camera", n).items]
     camera = tmp["camera"].astype(str)
     camera = camera.where(camera.isin(top), other=OTHER)
     table = pd.crosstab(period, camera).reindex(_month_range(period), fill_value=0)

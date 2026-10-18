@@ -79,6 +79,17 @@ def test_timeline_groups_top_cameras_into_other():
     assert "Other" in {t.name for t in fig.data}
 
 
+def test_file_type_donut_colors_by_name():
+    fv = _videos()
+    fo = pd.DataFrame({"media_type": ["other"], "size (MB)": [0.1]})
+    fig = figures.file_type_donut(pd.DataFrame(), fv, fo)
+    # No images: Videos stays green, as in the desktop dashboard.
+    assert tuple(fig.data[0].labels) == ("Videos", "Others")
+    assert tuple(fig.data[0].marker.colors) == ("#99ff99", "#ff9999")
+    items = data.file_type_counts(pd.DataFrame(), fv, fo)
+    assert list(fig.data[0].marker.colors) == data.file_type_colors(items)
+
+
 def test_split_media():
     df = pd.DataFrame({"media_type": ["image", "image", "video", "other"]})
     fi, fv, fo = figures.split_media(df)

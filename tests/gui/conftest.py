@@ -1,8 +1,13 @@
 """GUI tests run headless and are skipped when the optional 'gui' extra is missing."""
 
 import os
+import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+if sys.platform == "win32":
+    # The offscreen platform has no fonts of its own; give it the real ones so
+    # rendered text (chart axis labels) is measured as on the desktop.
+    os.environ.setdefault("QT_QPA_FONTDIR", "C:/Windows/Fonts")
 
 import pytest
 

@@ -8,6 +8,7 @@ pytest.importorskip("PySide6.QtWebEngineWidgets")
 
 from PySide6.QtCharts import QChartView  # noqa: E402
 from PySide6.QtCore import QCoreApplication, QEvent  # noqa: E402
+from PySide6.QtGui import QColor  # noqa: E402
 from PySide6.QtWebEngineWidgets import QWebEngineView  # noqa: E402
 from PySide6.QtWidgets import QLabel  # noqa: E402
 
@@ -137,6 +138,22 @@ def test_dashboard_empty_catalog(qtbot, repo):
     assert [tile.caption.text() for tile in view.tiles] == METRIC_LABELS
     assert view.tiles[0].value.text() == "0"
     assert not any(_shown(view, title) for title in PANELS)
+
+
+def test_dashboard_file_type_colors_without_images(qtbot, repo, make_item):
+    repo.upsert_many(
+        [_video(make_item, "b/v.mp4"), make_item("c/notes.txt", media_type="other")]
+    )
+    view, _ = _view(qtbot, repo.db_path)
+    _loaded(qtbot, view)
+    donut = _charts(view, FILES_PANEL)[0]
+    (series,) = donut.chart().series()
+    # Videos stays green, as in the Streamlit dashboard.
+    assert [s.property("sg_name") for s in series.slices()] == ["Videos", "Others"]
+    assert [s.color() for s in series.slices()] == [
+        QColor("#99ff99"),
+        QColor("#ff9999"),
+    ]
 
 
 def test_dashboard_rebuild_deletes_old_chart_views(qtbot, repo, make_item):

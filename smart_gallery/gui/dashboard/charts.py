@@ -28,11 +28,17 @@ from PySide6.QtCharts import (
     QValueAxis,
 )
 from PySide6.QtCore import QLocale, QObject, QPointF, Qt, QTimer
-from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPalette
+from PySide6.QtGui import (
+    QColor,
+    QCursor,
+    QFontMetricsF,
+    QGuiApplication,
+    QPainter,
+    QPalette,
+)
 from PySide6.QtWidgets import QApplication, QGraphicsSimpleTextItem, QToolTip
 
 from smart_gallery.dashboard.data import (
-    FILE_TYPE_COLORS,
     Counts,
     MonthSeries,
     color_for,
@@ -43,12 +49,12 @@ from smart_gallery.dashboard.data import (
 COLOR_PROPERTY = "sg_color"
 END_LABEL = "sg_end_label"  # QGraphicsItem.data(0) of a ranked bar's count label
 _END_LABEL_GAP = 4  # px between a bar's end and its count
-_FILE_TYPES = ("Images", "Videos", "Others")
 _NUMBER_LOCALE = QLocale(QLocale.English, QLocale.UnitedStates)
 _PIE_SIZE = 0.65  # leaves room above for the outside labels
 _HOLE_RATIO = 0.4
 _SMALL_SLICE = 0.04  # slices under 4 % put their label outside
 _ROTATE_MONTH_LABELS = 12  # more labels than this are drawn at an angle
+_LABEL_GAP = 6  # px kept free between two upright stop labels
 
 
 # --- tooltip and label text ------------------------------------------------
@@ -84,12 +90,6 @@ def month_tooltip(
 ) -> str:
     name = f"{series} " if series is not None else ""
     return f"{month_label(month)}: {name}{value:{value_format}} {unit}"
-
-
-def file_type_colors(items) -> list[str]:
-    """File-type colours by name, so Videos stays green when there are no images."""
-    by_name = dict(zip(_FILE_TYPES, FILE_TYPE_COLORS))
-    return [by_name.get(name, color_for(name, i)) for i, (name, _) in enumerate(items)]
 
 
 def _show_tip(state: bool, text: str) -> None:
@@ -192,7 +192,11 @@ def _end_labels(chart: QChart, series, bars: list[tuple[int, int]]) -> None:
 
 
 def stop_bar_chart(buckets: Sequence[tuple[str, int]], color: str) -> QChartView:
-    """One bar per camera-setting stop."""
+    """One bar per camera-setting stop.
+
+    Like the month bars, the bars sit on a hidden index axis under a category
+    axis of labels: a bar-category axis would drop the end labels (1/4000,
+    30s) whenever they are wider than their bar."""
     labels = [label for label, _ in buckets]
     series = QBarSeries()
     series.setBarWidth(0.8)
@@ -203,9 +207,9 @@ def stop_bar_chart(buckets: Sequence[tuple[str, int]], color: str) -> QChartView
 
     series.hovered.connect(on_hover)
     chart = _chart(series)
-    stops_axis = QBarCategoryAxis()
-    stops_axis.append(labels)
-    _attach(chart, series, stops_axis, Qt.AlignBottom)
+    _, stops_axis = _index_axes(chart, series, len(labels), enumerate(labels))
+    stops_axis.setGridLineVisible(False)  # its lines would run through the bars
+    _upright_when_crowded(chart, stops_axis, labels)
     top = max((count for _, count in buckets), default=0)
     _attach(chart, series, _value_axis(top, integer=True), Qt.AlignLeft)
     return _view(chart)
@@ -219,7 +223,8 @@ def month_bar_chart(
     Bars sit at index positions on a hidden value axis. A category axis over
     the same range carries the thinned labels from ``month_axis_labels``.
     Whole-number data (photo counts) shows whole numbers on the axis and in
-    tooltips; anything else (video minutes) shows one decimal place."""
+    tooltips; anything else (video minutes) shows one decimal place in
+    tooltips and as many as the tick step needs on the axis."""
     n = len(ms.months)
     whole = all(float(v).is_integer() for vs in ms.series.values() for v in vs)
     value_format = ",.0f" if whole else ",.1f"
@@ -239,20 +244,12 @@ def month_bar_chart(
     series.hovered.connect(on_hover)
     chart = _chart(series, legend=stacked)
 
-    positions = QValueAxis()
-    positions.setRange(-0.5, n - 0.5)
-    positions.setVisible(False)
-    _attach(chart, series, positions, Qt.AlignBottom)
-    month_axis = QCategoryAxis()
-    month_axis.setLabelsPosition(QCategoryAxis.AxisLabelsPositionOnValue)
-    month_axis.setStartValue(-0.5)
     labels = month_axis_labels(ms.months)
-    for index, label in labels:
-        month_axis.append(label, index)
-    month_axis.setRange(-0.5, n - 0.5)
+    positions, month_axis = _index_axes(chart, series, n, labels)
     if len(labels) > _ROTATE_MONTH_LABELS:
         month_axis.setLabelsAngle(-45)
-    chart.addAxis(month_axis, Qt.AlignBottom)
+    if labels:
+        _keep_first_label(chart, positions, month_axis, n, labels[0][1])
 
     if stacked:
         top = max((sum(col) for col in zip(*ms.series.values())), default=0)
@@ -260,6 +257,75 @@ def month_bar_chart(
         top = max((v for values in ms.series.values() for v in values), default=0)
     _attach(chart, series, _value_axis(top, integer=whole), Qt.AlignLeft)
     return _view(chart)
+
+
+def _index_axes(
+    chart: QChart, series, n: int, labels
+) -> tuple[QValueAxis, QCategoryAxis]:
+    """A hidden axis placing bar ``i`` at ``i``, and a label axis over it.
+
+    ``labels`` are ``(index, text)`` pairs; each text is drawn whole (never
+    elided) under its bar."""
+    positions = QValueAxis()
+    positions.setRange(-0.5, n - 0.5)
+    positions.setVisible(False)
+    _attach(chart, series, positions, Qt.AlignBottom)
+    label_axis = QCategoryAxis()
+    label_axis.setLabelsPosition(QCategoryAxis.AxisLabelsPositionOnValue)
+    label_axis.setTruncateLabels(False)
+    label_axis.setStartValue(-0.5)
+    for index, text in labels:
+        label_axis.append(text, index)
+    label_axis.setRange(-0.5, n - 0.5)
+    chart.addAxis(label_axis, Qt.AlignBottom)
+    return positions, label_axis
+
+
+def _upright_when_crowded(chart: QChart, axis: QCategoryAxis, labels) -> None:
+    """Draw the labels upright (-90°) once the widest no longer fits its bar."""
+
+    def fit() -> None:
+        metrics = QFontMetricsF(axis.labelsFont())
+        widest = max((metrics.horizontalAdvance(t) for t in labels), default=0)
+        room = chart.plotArea().width() / max(1, len(labels))
+        angle = 0 if widest + _LABEL_GAP <= room else -90
+        if axis.labelsAngle() != angle:
+            axis.setLabelsAngle(angle)
+
+    chart.plotAreaChanged.connect(fit)
+    fit()
+
+
+def _keep_first_label(
+    chart: QChart, positions: QValueAxis, month_axis: QCategoryAxis, n: int, text
+) -> None:
+    """Start both month axes early enough that the first label is drawn.
+
+    Qt drops an axis label that would stick out past the start of the axis,
+    and on a long span the first month sits only a few pixels in. So the
+    axes start before -0.5 far enough to put the first label's centre half
+    its (rotated) width in from the plot's left edge, recomputed whenever
+    the plot area changes size."""
+
+    def fit() -> None:
+        metrics = QFontMetricsF(month_axis.labelsFont())
+        angle = math.radians(month_axis.labelsAngle())
+        width = metrics.horizontalAdvance(text) * abs(math.cos(angle))
+        half = (width + metrics.height() * abs(math.sin(angle))) / 2
+        plot = chart.plotArea().width()
+        if plot <= half:
+            return
+        # The first bar's centre, 0.5 + pad units from the start, must be
+        # at least `half` px in: (0.5 + pad) * plot / (n + pad) >= half.
+        pad = max(0.0, (half * n - 0.5 * plot) / (plot - half))
+        start = -0.5 - pad
+        if abs(positions.min() - start) > 1e-9:
+            positions.setMin(start)
+            month_axis.setMin(start)
+            month_axis.setStartValue(start)
+
+    chart.plotAreaChanged.connect(fit)
+    fit()
 
 
 def _bar_set(label: str, values, color: str) -> QBarSet:
@@ -277,6 +343,7 @@ def _chart(series, legend: bool = False) -> QChart:
     chart.setAnimationOptions(QChart.NoAnimation)
     chart.addSeries(series)
     chart.legend().setVisible(legend)
+    chart.legend().setShowToolTips(True)  # the full name of an elided entry
     return chart
 
 
@@ -293,11 +360,15 @@ def _value_axis(top: float, integer: bool) -> QValueAxis:
     if integer:
         step = max(1, step)
     axis = QValueAxis()
-    axis.setRange(0, step * max(1, math.ceil(top / step)))
+    # A hair over the last tick: Qt adds up the steps, and 3 * 0.1 overshoots 0.3.
+    axis.setRange(0, step * max(1, math.ceil(top / step)) * (1 + 1e-9))
     axis.setTickType(QValueAxis.TicksDynamic)
     axis.setTickAnchor(0)
     axis.setTickInterval(step)
-    axis.setLabelFormat("%.0f" if integer else "%g")
+    # Fixed decimals from the step: Qt draws nothing for "%g" once the
+    # chart localizes numbers.
+    decimals = 0 if step >= 1 else max(1, -math.floor(math.log10(step)))
+    axis.setLabelFormat(f"%.{decimals}f")
     return axis
 
 
@@ -374,9 +445,10 @@ def _text_on(color: QColor) -> QColor:
 class ThemeWatcher(QObject):
     """Re-themes its chart views when the OS switches light/dark.
 
-    Views whose C++ object is gone are dropped on the next switch, so a panel
-    removed from the Dashboard must be ``deleteLater()``-ed, not just hidden
-    or taken out of its layout, or it stays registered here."""
+    Views whose C++ object is gone are dropped when a view is added and on
+    the next switch, so a panel removed from the Dashboard must be
+    ``deleteLater()``-ed, not just hidden or taken out of its layout, or it
+    stays registered here."""
 
     def __init__(self, views: list[QChartView], parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -384,6 +456,8 @@ class ThemeWatcher(QObject):
         _style_hints().colorSchemeChanged.connect(self._schedule)
 
     def add(self, view: QChartView) -> None:
+        # Drop the views of earlier results here too, so reloads don't pile up.
+        self._views = [v for v in self._views if shiboken6.isValid(v)]
         self._views.append(view)
 
     def _schedule(self, *_args) -> None:

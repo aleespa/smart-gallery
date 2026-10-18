@@ -25,7 +25,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from smart_gallery.dashboard.data import SETTINGS_COLORS, VIDEO_COLOR
+from smart_gallery.dashboard.data import (
+    SETTINGS_COLORS,
+    VIDEO_COLOR,
+    file_type_colors,
+)
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.dashboard import charts
 from smart_gallery.gui.dashboard.model import DashboardData, load_dashboard
@@ -321,7 +325,7 @@ class DashboardView(QWidget):
             return None
         grid = ReflowGrid(3, FILES_WIDE)
         donut = charts.donut_chart(
-            result.file_types, charts.file_type_colors(result.file_types)
+            result.file_types, file_type_colors(result.file_types)
         )
         grid.add(self._titled("File Types", self._chart(donut, FILES_HEIGHT)))
         for title, counts in (("Cameras", result.cameras), ("Lenses", result.lenses)):

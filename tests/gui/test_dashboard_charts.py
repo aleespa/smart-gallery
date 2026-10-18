@@ -12,23 +12,64 @@ from PySide6.QtCharts import (
     QValueAxis,
 )
 from PySide6.QtCore import QObject, QPointF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QColor, QFont, QPainter, QPalette
+from PySide6.QtWidgets import QApplication, QGraphicsTextItem
 
 from smart_gallery.dashboard.data import (
+    APERTURE,
+    FOCAL,
+    ISO,
     OTHER,
     OTHER_COLOR,
     PALETTE,
+    SETTINGS_COLORS,
+    SHUTTER,
     VIDEO_COLOR,
     Counts,
     MonthSeries,
+    file_type_colors,
 )
 from smart_gallery.gui.dashboard import charts
+
+ELLIPSES = ("...", "…")
 
 
 def _view(qtbot, view):
     qtbot.addWidget(view)
     return view
+
+
+@pytest.fixture
+def desktop_font():
+    """The Windows desktop font, so labels are measured as the app draws them."""
+    app = QApplication.instance()
+    old = app.font()
+    app.setFont(QFont("Segoe UI", 9))
+    yield
+    app.setFont(old)
+
+
+def _rendered(qtbot, view, width: int, height: int) -> list[str]:
+    """The text of every visible label Qt drew, after showing at this size."""
+    view.resize(width, height)
+    view.show()
+    qtbot.waitExposed(view)
+    QApplication.processEvents()
+    texts = []
+
+    def walk(item):
+        for child in item.childItems():
+            if isinstance(child, QGraphicsTextItem) and child.isVisible():
+                if child.toPlainText():
+                    texts.append(child.toPlainText())
+            walk(child)
+
+    walk(view.chart())
+    return texts
+
+
+def _not_elided(texts):
+    return not any(e in t for t in texts for e in ELLIPSES)
 
 
 def _months(start_year: int, start_month: int, n: int) -> tuple[str, ...]:
@@ -54,22 +95,9 @@ def _assert_static(view):
     assert view.rubberBand() == view.RubberBand.NoRubberBand
 
 
-def test_file_type_colors_by_name():
-    assert charts.file_type_colors((("Images", 1), ("Videos", 2), ("Others", 3))) == [
-        "#66b3ff",
-        "#99ff99",
-        "#ff9999",
-    ]
-    # No images: Videos stays green instead of taking the first colour.
-    assert charts.file_type_colors((("Videos", 2), ("Others", 3))) == [
-        "#99ff99",
-        "#ff9999",
-    ]
-
-
 def test_donut_slices_and_labels(qtbot, monkeypatch):
     items = (("Images", 96), ("Videos", 3), ("Others", 1))
-    view = _view(qtbot, charts.donut_chart(items, charts.file_type_colors(items)))
+    view = _view(qtbot, charts.donut_chart(items, file_type_colors(items)))
     _assert_static(view)
     chart = view.chart()
     assert not chart.legend().isVisible()
@@ -201,8 +229,15 @@ def test_stop_bar_values(qtbot, monkeypatch):
     (bar_set,) = series.barSets()
     assert [bar_set.at(i) for i in range(bar_set.count())] == [4, 0, 1200]
     assert bar_set.color() == QColor("#ff7f50")
-    (axis,) = [a for a in chart.axes(Qt.Horizontal) if isinstance(a, QBarCategoryAxis)]
-    assert axis.categories() == ["f/1.8", "f/2", "f/2.8"]
+    (axis,) = [a for a in chart.axes(Qt.Horizontal) if isinstance(a, QCategoryAxis)]
+    assert axis.categoriesLabels() == ["f/1.8", "f/2", "f/2.8"]
+    assert [axis.endValue(label) for label in axis.categoriesLabels()] == [0, 1, 2]
+    assert not axis.truncateLabels()
+    assert not axis.isGridLineVisible()
+    (hidden,) = [a for a in chart.axes(Qt.Horizontal) if type(a) is QValueAxis]
+    assert not hidden.isVisible()
+    assert (hidden.min(), hidden.max()) == (-0.5, 2.5)
+    assert hidden in series.attachedAxes()
 
     assert charts.stop_tooltip("ISO 400", 1234) == "ISO 400: 1,234"
     shown = _tips(monkeypatch)
@@ -267,6 +302,15 @@ def test_month_bar_all_zero_values(qtbot):
     assert y_axis.max() > y_axis.min()
 
 
+def test_timeline_legend_shows_full_names_on_hover(qtbot, monkeypatch):
+    ms = MonthSeries(("2026-01",), {"Canon EOS R5 Mark II": (1.0,)})
+    view = _view(qtbot, charts.month_bar_chart(ms, {}, "photos", True))
+    assert view.chart().legend().showToolTips()
+    _scheme(monkeypatch, Qt.ColorScheme.Dark)
+    charts.apply_theme(view)
+    assert view.chart().legend().showToolTips()
+
+
 def test_stacked_series_order_and_colors(qtbot, monkeypatch):
     ms = MonthSeries(
         ("2026-01", "2026-02"),
@@ -326,7 +370,7 @@ def test_apply_theme_keeps_series_colors(qtbot, monkeypatch):
 
 def test_apply_theme_keeps_slice_colors(qtbot, monkeypatch):
     items = (("Videos", 5), ("Others", 1))
-    view = _view(qtbot, charts.donut_chart(items, charts.file_type_colors(items)))
+    view = _view(qtbot, charts.donut_chart(items, file_type_colors(items)))
     _scheme(monkeypatch, Qt.ColorScheme.Dark)
     charts.apply_theme(view)
     assert view.chart().theme() == QChart.ChartThemeDark
@@ -359,6 +403,21 @@ def test_theme_watcher_reapplies_on_signal(qtbot, monkeypatch):
     assert series.barSets()[0].color() == QColor("#ffd700")
 
 
+def test_theme_watcher_add_prunes_deleted_views(qtbot, monkeypatch):
+    hints = _FakeHints()
+    monkeypatch.setattr(charts, "_style_hints", lambda: hints)
+    watcher = charts.ThemeWatcher([], None)
+    kept = _view(qtbot, charts.stop_bar_chart((("ISO 200", 3),), "#ffd700"))
+    watcher.add(kept)
+    for _ in range(5):  # a reload replaces every panel
+        gone = charts.stop_bar_chart((("ISO 100", 3),), "#ffd700")
+        watcher.add(gone)
+        shiboken6.delete(gone)
+    newest = _view(qtbot, charts.stop_bar_chart((("ISO 400", 3),), "#ffd700"))
+    watcher.add(newest)
+    assert watcher._views == [kept, newest]
+
+
 def test_theme_watcher_skips_deleted_views(qtbot, monkeypatch):
     hints = _FakeHints()
     monkeypatch.setattr(charts, "_style_hints", lambda: hints)
@@ -386,3 +445,90 @@ def test_axis_numbers_have_thousands_separators(qtbot, monkeypatch):
     charts.apply_theme(view)  # setTheme must not undo it
     assert chart.localizeNumbers()
     assert chart.locale().toString(30000.0, "f", 0) == "30,000"
+
+
+# --- rendered axis labels (real fonts) -------------------------------------
+
+
+@pytest.mark.parametrize(
+    "top, numbers",
+    [
+        (12.3, ["0", "5", "10", "15"]),
+        (0.3, ["0.0", "0.1", "0.2", "0.3"]),
+        (0.04, ["0.00", "0.01", "0.02", "0.03", "0.04"]),
+        (1234.5, ["0", "500", "1,000", "1,500"]),
+    ],
+)
+def test_video_axis_numbers_are_drawn(qtbot, desktop_font, top, numbers):
+    ms = MonthSeries(("2026-01", "2026-02"), {"Minutes": (top / 2, top)})
+    view = _view(
+        qtbot, charts.month_bar_chart(ms, {"Minutes": VIDEO_COLOR}, "min", False)
+    )
+    texts = _rendered(qtbot, view, 600, 300)
+    assert set(numbers) <= set(texts), texts
+
+
+def test_24_month_labels_are_not_elided(qtbot, desktop_font):
+    months = _months(2024, 1, 24)
+    ms = MonthSeries(months, {"A": tuple(float(i % 5 + 1) for i in range(24))})
+    view = _view(qtbot, charts.month_bar_chart(ms, {}, "photos", True))
+    texts = _rendered(qtbot, view, 900, 380)
+    assert _not_elided(texts), texts
+    assert {f"Jan {y}" for y in (2024, 2025)} | {"Dec 2025"} <= set(texts)
+    assert sum(t.endswith(("2024", "2025")) and " " in t for t in texts) == 24
+
+
+@pytest.mark.parametrize("n", [60, 130, 300])
+@pytest.mark.parametrize("width", [600, 1000, 1400])
+def test_first_month_label_on_long_spans(qtbot, desktop_font, n, width):
+    ms = MonthSeries(_months(2015, 3, n), {"A": (1.0,) * n})
+    view = _view(qtbot, charts.month_bar_chart(ms, {}, "photos", True))
+    texts = _rendered(qtbot, view, width, 380)
+    assert "Mar 2015" in texts, texts
+    assert "2016" in texts
+    assert _not_elided(texts), texts
+    # The label axis starts where the bars' hidden axis does, so they line up.
+    chart = view.chart()
+    (axis,) = [a for a in chart.axes(Qt.Horizontal) if isinstance(a, QCategoryAxis)]
+    (hidden,) = [a for a in chart.axes(Qt.Horizontal) if type(a) is QValueAxis]
+    assert hidden.min() <= -0.5
+    assert axis.min() == axis.startValue("Mar 2015") == hidden.min()
+    assert axis.max() == hidden.max() == n - 0.5
+
+
+@pytest.mark.parametrize("spec", [APERTURE, SHUTTER, ISO, FOCAL], ids=lambda s: s.name)
+def test_stop_labels_are_not_elided(qtbot, desktop_font, spec):
+    buckets = tuple((label, 5) for label in spec.labels)
+    view = _view(qtbot, charts.stop_bar_chart(buckets, SETTINGS_COLORS[spec.name]))
+    texts = _rendered(qtbot, view, 450, 260)
+    assert _not_elided(texts), texts
+    # Every stop is drawn, including both ends (e.g. 1/4000 and 30s).
+    assert set(spec.labels) <= set(texts), texts
+
+
+@pytest.mark.parametrize("width, angle", [(330, -90), (450, -90), (900, 0)])
+def test_stop_labels_turn_upright_when_crowded(qtbot, desktop_font, width, angle):
+    buckets = tuple((label, 5) for label in SHUTTER.labels)
+    view = _view(qtbot, charts.stop_bar_chart(buckets, SETTINGS_COLORS["ISO"]))
+    texts = _rendered(qtbot, view, width, 260)
+    (axis,) = [
+        a for a in view.chart().axes(Qt.Horizontal) if isinstance(a, QCategoryAxis)
+    ]
+    assert axis.labelsAngle() == angle
+    assert {"1/4000", "30s"} <= set(texts), texts
+
+
+def test_theme_switch_keeps_label_axis_settings(qtbot, desktop_font, monkeypatch):
+    buckets = tuple((label, 5) for label in SHUTTER.labels)
+    view = _view(qtbot, charts.stop_bar_chart(buckets, SETTINGS_COLORS["ISO"]))
+    _rendered(qtbot, view, 450, 260)
+    _scheme(monkeypatch, Qt.ColorScheme.Dark)
+    charts.apply_theme(view)
+    texts = _rendered(qtbot, view, 450, 260)
+    (axis,) = [
+        a for a in view.chart().axes(Qt.Horizontal) if isinstance(a, QCategoryAxis)
+    ]
+    assert not axis.truncateLabels()
+    assert not axis.isGridLineVisible()
+    assert axis.labelsAngle() == -90
+    assert set(SHUTTER.labels) <= set(texts), texts

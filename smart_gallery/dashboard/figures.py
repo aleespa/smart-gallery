@@ -66,7 +66,7 @@ def file_type_donut(fi, fv, fo) -> Optional[go.Figure]:
         go.Pie(
             labels=[k for k, _ in items],
             values=[v for _, v in items],
-            marker=dict(colors=list(data.FILE_TYPE_COLORS[: len(items)])),
+            marker=dict(colors=data.file_type_colors(items)),
             hole=0.4,
             sort=False,
         )

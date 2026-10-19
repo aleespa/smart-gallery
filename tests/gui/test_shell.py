@@ -2,23 +2,69 @@ from smart_gallery.gui.app import MainWindow
 from smart_gallery.gui.areas import AREAS
 
 
-def test_window_lists_all_areas(qtbot):
+def test_every_area_is_a_tab(qtbot):
     win = MainWindow()
     qtbot.addWidget(win)
-    rail = win.rail
-    assert [rail.item(i).text() for i in range(rail.count())] == [
-        a.label for a in AREAS
+    assert list(win.tabs) == [a.id for a in AREAS]
+    assert [t.text() for t in win.tabs.values()] == [
+        "Library",
+        "Import",
+        "Dashboard",
+        "People",
+        "Actions",
+        "History",
     ]
-    for i in range(rail.count()):
-        rail.setCurrentRow(i)
+
+
+def test_every_area_opens_with_a_header(qtbot):
+    win = MainWindow()
+    qtbot.addWidget(win)
+    assert win.current_area == "library"
+    assert win.tabs["library"].isChecked()
+    for area in AREAS:
+        win.show_area(area.id)
         assert win.stack.currentWidget() is not None
+        assert win.title.text() == area.label
+        assert win.windowTitle() == "Smart Gallery"
+
+
+def test_tab_click_switches_area(qtbot):
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.tabs["import"].click()
+    assert win.current_area == "import"
+    assert win.tabs["import"].isChecked()
+    assert not win.tabs["library"].isChecked()
+    win.tabs["import"].click()  # clicking the open tab keeps it open
+    assert win.tabs["import"].isChecked()
+
+
+def test_header_names_the_open_gallery(qtbot, repo):
+    from smart_gallery.gui.galleries.store import Gallery
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.ctx.set_gallery(Gallery("uuid", str(repo.db_path), "Archive"))
+    assert win.eyebrow.text() == "Archive"
+    win.ctx.set_gallery(None)
+    assert win.eyebrow.text() == "No gallery open"
+
+
+def test_page_header_shows_the_library_controls(qtbot):
+    win = MainWindow()
+    qtbot.addWidget(win)
+    library = win.stack.currentWidget()
+    assert win.header_controls.currentWidget() is library.header_controls
+    win.show_area("import")
+    assert win.header_controls.currentWidget() is not library.header_controls
 
 
 def test_navigate_signal_switches_area(qtbot):
     win = MainWindow()
     qtbot.addWidget(win)
     win.ctx.navigate.emit("people")
-    assert win.rail.currentItem().text() == "People"
+    assert win.current_area == "people"
+    assert win.tabs["people"].isChecked()
 
 
 def test_people_view_lists_persons(qtbot, repo):

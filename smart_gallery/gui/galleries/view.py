@@ -1,15 +1,18 @@
-"""Galleries panel at the top of the rail: pick, add or create the open catalog."""
+"""Gallery picker in the top bar: pick, add or create the open catalog.
+
+One drop-down button names the open gallery; its menu lists every gallery,
+then the commands that add one, create one or look for drives again.
+"""
 
 from __future__ import annotations
 
 import sqlite3
 import time
 
-from PySide6.QtGui import QPalette
-from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
-    QComboBox,
     QFileDialog,
+    QMenu,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -26,6 +29,7 @@ from smart_gallery.gui.galleries.store import (
 from smart_gallery.gui.jobs import JobSpec
 
 NOT_CONNECTED = " (not connected)"
+NO_GALLERY = "No gallery"
 CREATE_DISABLED_TIP = "Available once jobs are wired"
 JOB_RUNNING = "A job is already running."
 # Switching back to the window re-checks the drives at most this often.
@@ -38,30 +42,35 @@ class GalleriesPanel(QWidget):
         self.ctx = ctx
         self.store = ctx.galleries
 
-        self.combo = QComboBox()
-        self.refresh_btn = QPushButton("Refresh")
-        self.refresh_btn.setToolTip("Look again for drives plugged in or removed")
-        self.add_btn = QPushButton("Add existing…")
-        self.create_btn = QPushButton("Create on drive…")
+        self.menu = QMenu(self)
+        self.menu.setToolTipsVisible(True)
+        self.button = QPushButton()
+        self.button.setMenu(self.menu)  # a click opens the menu
+        self.button.setMinimumWidth(150)
+        self.button.setToolTip("Switch, add or create a gallery")
+
+        self.add_action = QAction("Add existing…", self)
+        self.create_action = QAction("Create on drive…", self)
         # Creating a catalog is an "init" job, so it needs the job runner.
-        self.create_btn.setEnabled(ctx.jobs is not None)
+        self.create_action.setEnabled(ctx.jobs is not None)
         if ctx.jobs is None:
-            self.create_btn.setToolTip(CREATE_DISABLED_TIP)
+            self.create_action.setToolTip(CREATE_DISABLED_TIP)
+        self.refresh_action = QAction("Refresh drives", self)
+        self.refresh_action.setToolTip("Look again for drives plugged in or removed")
+        self._group = QActionGroup(self)  # the gallery entries, one checked
+        self._group.setExclusive(True)
         self._creating: str | None = None  # folder of the init job we started
-        # db_uuid -> connected, as the combo last showed it.
+        # db_uuid -> connected, as the menu last showed it.
         self._connected: dict[str, bool] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.combo)
-        layout.addWidget(self.refresh_btn)
-        layout.addWidget(self.add_btn)
-        layout.addWidget(self.create_btn)
+        layout.addWidget(self.button)
 
-        self.combo.currentIndexChanged.connect(self._on_index_changed)
-        self.refresh_btn.clicked.connect(self.recheck)
-        self.add_btn.clicked.connect(self._add_existing)
-        self.create_btn.clicked.connect(self._create_on_drive)
+        self.refresh_action.triggered.connect(self.recheck)
+        self.add_action.triggered.connect(self._add_existing)
+        self.create_action.triggered.connect(self._create_on_drive)
+        ctx.gallery_changed.connect(self._show_current)
         if ctx.jobs is not None:
             ctx.jobs.finished.connect(self._on_job_finished)
 
@@ -92,43 +101,63 @@ class GalleriesPanel(QWidget):
             self._last_check = now
             self.recheck()
 
+    def gallery_actions(self) -> list[QAction]:
+        """The menu's gallery entries, in store order."""
+        return list(self._group.actions())
+
     def refresh(self, select: str | None = None) -> None:
-        """Reload the combo from the store.
+        """Rebuild the menu from the store.
 
         Selects ``select`` (a db_uuid), else the open gallery, else the last one.
         """
         galleries = self.store.all()
         current = self.ctx.current.db_uuid if self.ctx.current else None
         wanted = select or current or self.store.last()
-        grey = self.palette().color(
-            QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text
-        )
-        self.combo.blockSignals(True)
-        self.combo.clear()
+        for action in self._group.actions():
+            self._group.removeAction(action)
+            action.deleteLater()
+        self.menu.clear()
         self._connected.clear()
+        self.menu.addSection("Galleries")
         for g in galleries:
             connected = self._connected[g.db_uuid] = is_connected(g)
-            self.combo.addItem(g.label if connected else g.label + NOT_CONNECTED, g)
+            action = QAction(g.label if connected else g.label + NOT_CONNECTED, self)
+            action.setCheckable(True)
+            action.setData(g)
             if not connected:
-                self.combo.setItemData(
-                    self.combo.count() - 1, grey, Qt.ItemDataRole.ForegroundRole
-                )
+                font = action.font()
+                font.setItalic(True)
+                action.setFont(font)
+            # Bind g now: the loop variable moves on.
+            action.triggered.connect(lambda _checked=False, g=g: self._select(g))
+            self._group.addAction(action)
+            self.menu.addAction(action)
+        self.menu.addSeparator()
+        self.menu.addAction(self.add_action)
+        self.menu.addAction(self.create_action)
+        self.menu.addAction(self.refresh_action)
         index = next((i for i, g in enumerate(galleries) if g.db_uuid == wanted), 0)
         if galleries:
-            self.combo.setCurrentIndex(index)
-        self.combo.blockSignals(False)
-        if galleries:
             self._select(galleries[index])
+        else:
+            self._show_current()
 
     def _select(self, gallery: Gallery) -> None:
         if self.ctx.current != gallery:
             self.ctx.set_gallery(gallery)
         self.store.set_last(gallery.db_uuid)
+        self._show_current()
 
-    def _on_index_changed(self, index: int) -> None:
-        gallery = self.combo.itemData(index, Qt.ItemDataRole.UserRole)
-        if gallery is not None:
-            self._select(gallery)
+    def _show_current(self, *_args) -> None:
+        """Name the open gallery on the button and tick it in the menu."""
+        uuid = getattr(self.ctx.current, "db_uuid", None)
+        text = NO_GALLERY
+        for action in self._group.actions():
+            mine = action.data().db_uuid == uuid
+            action.setChecked(mine)
+            if mine:
+                text = action.text()
+        self.button.setText(text)
 
     def _relocate_disconnected(self) -> None:
         """Look for galleries whose drive came back under another letter."""

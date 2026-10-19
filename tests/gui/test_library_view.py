@@ -233,3 +233,10 @@ def test_sort_direction_button_matches_sort_box_height(qtbot, repo):
     view.show()
     qtbot.waitExposed(view)
     assert view.descending.height() == view.sort.height()
+
+
+def test_folder_tree_uses_a_compact_indent(qtbot, repo):
+    from smart_gallery.gui.library.view import TREE_INDENT
+
+    view, _ = _view(qtbot, repo.db_path)
+    assert view.tree.indentation() == TREE_INDENT < 20

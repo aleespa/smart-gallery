@@ -64,6 +64,7 @@ THUMB_DEBOUNCE_MS = 120
 THUMB_RETRIES = 5  # passes that may find no laid-out row before giving up
 PIXMAP_CACHE_SIZE = 600  # ~55 MB of tile pixmaps
 LAYOUT_BATCH = 1000
+TREE_INDENT = 12  # px per folder level (Qt's default is about 20)
 # (label, sort, descending by default): oldest, A to Z, largest first.
 SORTS = (("Date taken", "date", False), ("Name", "name", False), ("Size", "size", True))
 ASCENDING_ARROW = "↑"
@@ -238,6 +239,7 @@ class LibraryView(QWidget):
         # Folder tree.
         self.tree = QTreeView()
         self.tree.setHeaderHidden(True)
+        self.tree.setIndentation(TREE_INDENT)
         self.tree_model = QStandardItemModel(self)
         self.tree.setModel(self.tree_model)
         self.subfolders = QCheckBox("Include subfolders")
@@ -267,9 +269,18 @@ class LibraryView(QWidget):
         self.filters_btn.setText("Filters")
         self.filters_btn.setCheckable(True)
         self.filters_btn.setChecked(True)
-        header = QHBoxLayout()
+        self.filters_btn.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+        )
+        # The main window moves these to the right of its page header; a view
+        # shown on its own keeps them above the grid.
+        self.header_controls = QWidget()
+        header = QHBoxLayout(self.header_controls)
+        header.setContentsMargins(0, 0, 0, 0)
+        header.addWidget(self.stats)
+        header.addSpacing(12)
         header.addWidget(self.filters_btn)
-        header.addWidget(self.stats, 1)
+        header.addSpacing(12)
         header.addWidget(QLabel("Sort by"))
         header.addWidget(self.sort)
         header.addWidget(self.descending)
@@ -296,7 +307,7 @@ class LibraryView(QWidget):
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.addLayout(header)
+        right_layout.addWidget(self.header_controls)
         right_layout.addWidget(self.stack, 1)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)

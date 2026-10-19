@@ -168,9 +168,22 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   `gallery_changed`, `catalog_updated`, `filters_changed`, `navigate`,
   `open_in_actions`, `open_in_import`. It also holds the current gallery and filters, and
   `open_repo()` gives a read-only repository for the current gallery.
-- **Area registry.** `gui/areas.py:AREAS` lists the rail entries in order. Each
+- **Area registry.** `gui/areas.py:AREAS` lists the areas in order. Each
   `Area.factory(ctx)` imports its view module lazily and returns a QWidget.
-  `MainWindow` builds each area on its first visit.
+  `MainWindow` builds each area on its first visit and shows each as a tab in
+  the top bar. Every page sits under a header that names it; a page that exposes a `header_controls`
+  widget gets those controls on the header's right (Library's sort and
+  filters).
+- **No system frame.** `MainWindow` is frameless: its top bar is a
+  `gui/titlebar.py:TitleBar` (drag to move, double-click to maximize) with
+  `WindowButtons` at the right, and a `ResizeFrame` margin resizes it. Moving
+  and resizing use `startSystemMove`/`startSystemResize`, so snapping works.
+- **Theme** lives in `gui/theme.py`: Segoe UI Variable Text for controls,
+  Georgia (`serif_font`) for headings only, and one accent (`ACCENT`, the
+  first Sunset stop) set as the palette's Highlight/Accent so every
+  selection, checked box and the open tab share it. Style sheets should use
+  `palette(highlight)` rather than a hard-coded colour. The brand name
+  (`gui/brand.py`) runs along the same `SUNSET` stops.
 - **GUI tests** live in `tests/gui` (marker `gui`, headless via
   `QT_QPA_PLATFORM=offscreen`) and are skipped when PySide6 is missing.
 

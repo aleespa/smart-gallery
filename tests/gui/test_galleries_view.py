@@ -2,7 +2,6 @@ import shutil
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from smart_gallery.db import GalleryRepository
@@ -33,18 +32,28 @@ def _panel(qtbot, tmp_path, *roots):
     return panel, ctx, store
 
 
-def test_panel_greys_out_disconnected(qtbot, tmp_path):
+def test_panel_marks_disconnected(qtbot, tmp_path):
     here = _catalog(tmp_path / "here", "Here")
     gone = _catalog(tmp_path / "gone", "Gone")
     panel, ctx, store = _panel(qtbot, tmp_path, here, gone)
     shutil.rmtree(gone)
     panel.refresh()
-    combo = panel.combo
-    assert combo.itemText(0) == "Here"
-    assert combo.itemText(1) == "Gone (not connected)"
-    grey = combo.itemData(1, Qt.ItemDataRole.ForegroundRole)
-    assert grey is not None
-    assert combo.itemData(0, Qt.ItemDataRole.ForegroundRole) is None
+    first, second = panel.gallery_actions()
+    assert first.text() == "Here"
+    assert second.text() == "Gone (not connected)"
+    assert second.font().italic() and not first.font().italic()
+
+
+def test_button_names_the_open_gallery_and_menu_holds_commands(qtbot, tmp_path):
+    panel, ctx, store = _panel(qtbot, tmp_path)
+    assert panel.button.text() == "No gallery"
+    a = _catalog(tmp_path / "a", "A")
+    store.add(a)
+    panel.refresh()
+    assert panel.button.text() == "A"
+    assert panel.gallery_actions()[0].isChecked()
+    texts = [a.text() for a in panel.menu.actions() if not a.isSeparator()]
+    assert texts[-3:] == ["Add existing…", "Create on drive…", "Refresh drives"]
 
 
 def test_selecting_sets_gallery_and_remembers_it(qtbot, tmp_path):
@@ -53,8 +62,9 @@ def test_selecting_sets_gallery_and_remembers_it(qtbot, tmp_path):
     panel, ctx, store = _panel(qtbot, tmp_path, a, b)
     assert ctx.current.label == "A"
     with qtbot.waitSignal(ctx.gallery_changed):
-        panel.combo.setCurrentIndex(1)
+        panel.gallery_actions()[1].trigger()
     assert ctx.current.label == "B"
+    assert panel.button.text() == "B"
     assert store.last() == ctx.current.db_uuid
     again = AppContext()
     again.galleries = store
@@ -67,10 +77,10 @@ def test_add_existing_registers_and_selects(qtbot, tmp_path, monkeypatch):
     assert ctx.current is None
     root = _catalog(tmp_path / "new", "New")
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(root))
-    panel.add_btn.click()
+    panel.add_action.trigger()
     assert [g.label for g in store.all()] == ["New"]
     assert ctx.current.label == "New"
-    assert panel.combo.count() == 1
+    assert len(panel.gallery_actions()) == 1
 
 
 def test_add_existing_reports_a_folder_without_catalog(qtbot, tmp_path, monkeypatch):
@@ -80,7 +90,7 @@ def test_add_existing_reports_a_folder_without_catalog(qtbot, tmp_path, monkeypa
     shown = []
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(empty))
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: shown.append(a[2]))
-    panel.add_btn.click()
+    panel.add_action.trigger()
     assert len(shown) == 1
     assert store.all() == []
 
@@ -104,14 +114,14 @@ def test_disconnected_gallery_is_located_on_startup(qtbot, tmp_path, monkeypatch
     assert [Path(x.db_path) for x in store.all()] == [
         (remounted / ".smart_gallery" / "gallery.db").resolve()
     ]
-    assert panel.combo.itemText(0) == "Old"
+    assert panel.gallery_actions()[0].text() == "Old"
     assert ctx.current.db_uuid == g.db_uuid
 
 
 def test_create_button_is_disabled_until_jobs_exist(qtbot, tmp_path):
     panel, ctx, store = _panel(qtbot, tmp_path)
-    assert not panel.create_btn.isEnabled()
-    assert panel.create_btn.toolTip() == "Available once jobs are wired"
+    assert not panel.create_action.isEnabled()
+    assert panel.create_action.toolTip() == "Available once jobs are wired"
 
 
 def _jobs_panel(qtbot, tmp_path, monkeypatch, folder):
@@ -137,16 +147,16 @@ def _jobs_panel(qtbot, tmp_path, monkeypatch, folder):
 def test_create_on_drive_runs_init_then_opens_the_gallery(qtbot, tmp_path, monkeypatch):
     root = _catalog(tmp_path / "new", "New")  # what a real init would leave behind
     panel, ctx, store, runner = _jobs_panel(qtbot, tmp_path, monkeypatch, root)
-    assert panel.create_btn.isEnabled()
+    assert panel.create_action.isEnabled()
     seen = []
     runner.started.connect(seen.append)
     with qtbot.waitSignal(runner.finished, timeout=15000):
-        panel.create_btn.click()
+        panel.create_action.trigger()
     assert seen[0].argvs == (("init", str(root)),)
     qtbot.waitUntil(lambda: ctx.current is not None, timeout=5000)
     assert ctx.current.label == "New"
     assert [g.label for g in store.all()] == ["New"]
-    assert panel.combo.itemText(0) == "New"
+    assert panel.gallery_actions()[0].text() == "New"
 
 
 def test_create_on_drive_ignores_failed_job(qtbot, tmp_path, monkeypatch):
@@ -154,7 +164,7 @@ def test_create_on_drive_ignores_failed_job(qtbot, tmp_path, monkeypatch):
     panel, ctx, store, runner = _jobs_panel(qtbot, tmp_path, monkeypatch, root)
     runner._program = [sys.executable, "-c", "raise SystemExit(1)"]
     with qtbot.waitSignal(runner.finished, timeout=15000):
-        panel.create_btn.click()
+        panel.create_action.trigger()
     assert store.all() == [] and ctx.current is None
 
 
@@ -167,7 +177,7 @@ def test_create_on_drive_tells_when_a_job_is_running(qtbot, tmp_path, monkeypatc
         QMessageBox, "information", lambda parent, title, text: shown.append(text)
     )
     assert runner.start(JobSpec("other", (("x",),)))
-    panel.create_btn.click()
+    panel.create_action.trigger()
     assert shown == ["A job is already running."]
     with qtbot.waitSignal(runner.finished, timeout=15000):
         runner.cancel()
@@ -178,7 +188,7 @@ def test_main_window_builds_job_runner_and_forwards_catalog_updates(qtbot):
     qtbot.addWidget(win)
     assert isinstance(win.ctx.jobs, JobRunner)
     assert isinstance(win.job_bar, JobStatusBar)
-    assert win.galleries_panel.create_btn.isEnabled()
+    assert win.galleries_panel.create_action.isEnabled()
     with qtbot.waitSignal(win.ctx.catalog_updated):
         win.ctx.jobs.catalog_written.emit()
 
@@ -187,7 +197,8 @@ def test_main_window_mounts_panel_and_store(qtbot):
     win = MainWindow()
     qtbot.addWidget(win)
     assert isinstance(win.ctx.galleries, GalleryStore)
-    assert win.galleries_slot.itemAt(0).widget().__class__.__name__ == "GalleriesPanel"
+    assert isinstance(win.galleries_panel, GalleriesPanel)
+    assert win.galleries_panel.parent() is not None
 
 
 def test_failed_start_does_not_leave_a_stale_create(qtbot, tmp_path, monkeypatch):
@@ -195,7 +206,7 @@ def test_failed_start_does_not_leave_a_stale_create(qtbot, tmp_path, monkeypatch
     panel, ctx, store, runner = _jobs_panel(qtbot, tmp_path, monkeypatch, stale)
     runner._program = [str(tmp_path / "no-such-program.exe")]
     with qtbot.waitSignal(runner.finished, timeout=15000):
-        panel.create_btn.click()  # finished fires before start() returns
+        panel.create_action.trigger()  # finished fires before start() returns
     assert panel._creating is None
     runner._program = [sys.executable, "-c", "pass"]
     with qtbot.waitSignal(runner.finished, timeout=15000):
@@ -215,14 +226,14 @@ def test_refresh_reconnects_a_gallery_whose_drive_came_back(
     root.rename(away)  # unplugged
     panel.refresh()
     assert not is_connected(ctx.current)
-    assert panel.combo.itemText(0) == "Card (not connected)"
+    assert panel.gallery_actions()[0].text() == "Card (not connected)"
 
     away.rename(root)  # plugged back in
     with qtbot.waitSignal(ctx.gallery_changed) as blocker:
-        panel.refresh_btn.click()
+        panel.refresh_action.trigger()
     assert blocker.args[0].label == "Card"
     assert is_connected(ctx.current)
-    assert panel.combo.itemText(0) == "Card"
+    assert panel.gallery_actions()[0].text() == "Card"
 
 
 def test_refresh_without_changes_does_not_reload_areas(qtbot, tmp_path, monkeypatch):
@@ -230,7 +241,7 @@ def test_refresh_without_changes_does_not_reload_areas(qtbot, tmp_path, monkeypa
     panel, ctx, store = _panel(qtbot, tmp_path, _catalog(tmp_path / "a", "A"))
     changes = []
     ctx.gallery_changed.connect(changes.append)
-    panel.refresh_btn.click()
+    panel.refresh_action.trigger()
     assert changes == []
 
 

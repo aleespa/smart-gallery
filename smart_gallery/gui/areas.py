@@ -1,4 +1,4 @@
-"""The app's areas, in rail order. Views are imported lazily by their factories."""
+"""The app's areas, in tab order. Views are imported lazily by their factories."""
 
 from __future__ import annotations
 

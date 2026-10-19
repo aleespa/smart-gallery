@@ -298,6 +298,17 @@ class GalleryRepository:
         )
         return [r["v"] for r in cur]
 
+    def value_counts(self, column: str) -> List[Tuple[str, int]]:
+        """Each value of ``column`` with how many items have it, most-used
+        first and ties by value."""
+        if column not in DB_COLUMNS:
+            raise ValueError(f"Unknown column: {column}")
+        cur = self.conn.execute(
+            f"SELECT {column} AS v, COUNT(*) AS n FROM media_items "
+            f"WHERE {column} IS NOT NULL GROUP BY {column} ORDER BY n DESC, {column}"
+        )
+        return [(r["v"], r["n"]) for r in cur]
+
     def date_bounds(self) -> Tuple[Optional[date], Optional[date]]:
         # '0001-01-01' skips the zero dates older catalogs may still hold.
         row = self.conn.execute(

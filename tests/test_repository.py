@@ -111,3 +111,15 @@ def test_date_bounds_skip_invalid_dates(repo, make_item):
         ]
     )
     assert repo.date_bounds() == (date(2026, 3, 1), date(2026, 3, 1))
+
+
+def test_value_counts_most_used_first(repo, make_item):
+    repo.upsert_many(
+        [
+            make_item("a.jpg", camera="Sony"),
+            make_item("b.jpg", camera="Canon"),
+            make_item("c.jpg", camera="Canon"),
+            make_item("d.jpg", camera=None),
+        ]
+    )
+    assert repo.value_counts("camera") == [("Canon", 2), ("Sony", 1)]

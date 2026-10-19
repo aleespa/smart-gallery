@@ -3,20 +3,24 @@
 It edits a ``FilterValues`` and publishes the parsed query with
 ``ctx.set_filters`` on Apply or after a short pause in editing. Every panel
 also follows ``filters_changed``, so two panels never show different filters.
+
+Each range (dates, aperture, ISO, shutter) is one line: lower bound, then
+upper. The date boxes open a calendar. Cameras, lenses, extensions and people
+are chip pickers, since a catalog can hold dozens of each.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from datetime import date
+
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
-    QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -24,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from smart_gallery.gui.context import AppContext
+from smart_gallery.gui.filter_widgets import ChipPicker, DateField
 from smart_gallery.gui.filters_model import (
     FilterValues,
     filter_choices,
@@ -35,28 +40,36 @@ from smart_gallery.organize.filters import FilterOptions
 
 DEBOUNCE_MS = 300
 FILE_TYPES = (("image", "Photos"), ("video", "Videos"), ("other", "Other files"))
-DATE_PLACEHOLDER = "YYYY-MM-DD"
+DATE_HINT = "A date like 2026-06-30, or pick one from the calendar."
 ERROR_STYLE = "border: 1px solid #d04040;"
+RANGE_DASH = "–"
 
-# (field, label, placeholder) for the text boxes, in panel order.
+# (field, label in error messages, placeholder) for the text boxes.
 _TEXT_FIELDS = (
-    ("date_from", "From", DATE_PLACEHOLDER),
-    ("date_to", "To", DATE_PLACEHOLDER),
-    ("min_aperture", "Aperture from", "f-number, e.g. 1.8"),
-    ("max_aperture", "Aperture to", "e.g. 8"),
-    ("min_iso", "ISO from", "e.g. 100"),
-    ("max_iso", "ISO to", "e.g. 3200"),
-    ("min_shutter", "Shutter from", "fastest, e.g. 1/1000"),
-    ("max_shutter", "Shutter to", "slowest, e.g. 2s"),
+    ("date_from", "From", "From"),
+    ("date_to", "To", "To"),
+    ("min_aperture", "Aperture from", "f/1.8"),
+    ("max_aperture", "Aperture to", "f/8"),
+    ("min_iso", "ISO from", "100"),
+    ("max_iso", "ISO to", "3200"),
+    ("min_shutter", "Shutter from", "1/1000"),
+    ("max_shutter", "Shutter to", "2s"),
 )
 _LABELS = {name: label for name, label, _ in _TEXT_FIELDS}
-_LISTS = ("cameras", "lenses", "extensions", "people")
-
-
-def _checklist() -> QListWidget:
-    widget = QListWidget()
-    widget.setMaximumHeight(130)
-    return widget
+# (row label, lower field, upper field, what the bounds mean) for Exposure.
+_EXPOSURE = (
+    ("Aperture", "min_aperture", "max_aperture", "f-number, widest to narrowest"),
+    ("ISO", "min_iso", "max_iso", "ISO, lowest to highest"),
+    ("Shutter", "min_shutter", "max_shutter", "Exposure time, fastest to slowest"),
+)
+# (field, section title, noun for the search hint)
+_PICKERS = (
+    ("cameras", "Cameras", "cameras"),
+    ("lenses", "Lenses", "lenses"),
+    ("extensions", "File extensions", "extensions"),
+    ("people", "People", "people"),
+)
+_LISTS = tuple(name for name, _, _ in _PICKERS)
 
 
 class FilterPanel(QWidget):
@@ -76,32 +89,40 @@ class FilterPanel(QWidget):
             edit.setClearButtonEnabled(True)
             edit.textEdited.connect(self._edited)
             self.texts[name] = edit
+        self.date_fields = {
+            "date_from": DateField(self.texts["date_from"], "Jump to first photo"),
+            "date_to": DateField(self.texts["date_to"], "Jump to last photo"),
+        }
+        for field in self.date_fields.values():
+            field.edit.setToolTip(DATE_HINT)
+            field.picked.connect(self._edited)
         self.filetypes: dict[str, QCheckBox] = {}
         for value, label in FILE_TYPES:
             box = QCheckBox(label)
             box.toggled.connect(self._edited)
             self.filetypes[value] = box
-        self.cameras = _checklist()
-        self.lenses = _checklist()
-        self.extensions = _checklist()
-        self.people = _checklist()
-        for name in _LISTS:
-            getattr(self, name).itemChanged.connect(self._edited)
+        for name, _title, noun in _PICKERS:
+            picker = ChipPicker(noun)
+            picker.changed.connect(self._edited)
+            setattr(self, name, picker)
 
         content = QWidget()
         body = QVBoxLayout(content)
-        body.addWidget(self._form("Date taken", "date_from", "date_to"))
+        body.addWidget(self._dates_box())
         types = QGroupBox("Type")
         types_layout = QVBoxLayout(types)
         for box in self.filetypes.values():
             types_layout.addWidget(box)
         body.addWidget(types)
-        body.addWidget(self._group("Cameras", self.cameras))
-        body.addWidget(self._group("Lenses", self.lenses))
-        body.addWidget(self._group("File extensions", self.extensions))
-        exposure = [name for name, *_ in _TEXT_FIELDS[2:]]
-        body.addWidget(self._form("Exposure", *exposure))
-        self.people_box = self._group("People", self.people)
+        self._boxes: dict[str, QGroupBox] = {}
+        for name, title, _noun in _PICKERS:
+            box = QGroupBox(title)
+            QVBoxLayout(box).addWidget(getattr(self, name))
+            self._boxes[name] = box
+            if name != "people":
+                body.addWidget(box)
+        body.addWidget(self._exposure_box())
+        self.people_box = self._boxes["people"]
         self.people_box.setVisible(False)
         body.addWidget(self.people_box)
         body.addStretch(1)
@@ -126,7 +147,7 @@ class FilterPanel(QWidget):
         layout.addWidget(scroll, 1)
         layout.addWidget(self.errors)
         layout.addLayout(buttons)
-        self.setMinimumWidth(230)
+        self.setMinimumWidth(250)
 
         self._timer.timeout.connect(self.apply)
         self.apply_btn.clicked.connect(self.apply)
@@ -140,32 +161,34 @@ class FilterPanel(QWidget):
         self.set_values(from_filter_options(ctx.filters))
         self.reload_choices()
 
-    def _form(self, title: str, *names: str) -> QGroupBox:
-        box = QGroupBox(title)
-        form = QFormLayout(box)
-        for name in names:
-            form.addRow(_LABELS[name], self.texts[name])
+    def _dates_box(self) -> QGroupBox:
+        box = QGroupBox("Date taken")
+        row = QHBoxLayout(box)
+        row.addWidget(self.date_fields["date_from"], 1)
+        row.addWidget(QLabel(RANGE_DASH))
+        row.addWidget(self.date_fields["date_to"], 1)
         return box
 
-    @staticmethod
-    def _group(title: str, widget: QWidget) -> QGroupBox:
-        box = QGroupBox(title)
-        QVBoxLayout(box).addWidget(widget)
+    def _exposure_box(self) -> QGroupBox:
+        box = QGroupBox("Exposure")
+        grid = QGridLayout(box)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(3, 1)
+        for i, (label, low, high, meaning) in enumerate(_EXPOSURE):
+            name = QLabel(label)
+            name.setToolTip(meaning)
+            grid.addWidget(name, i, 0)
+            grid.addWidget(self.texts[low], i, 1)
+            grid.addWidget(QLabel(RANGE_DASH), i, 2)
+            grid.addWidget(self.texts[high], i, 3)
         return box
 
     # ── values ──────────────────────────────────────────────────────────────
     def values(self) -> FilterValues:
-        def checked(widget: QListWidget) -> tuple[str, ...]:
-            return tuple(
-                widget.item(i).text()
-                for i in range(widget.count())
-                if widget.item(i).checkState() == Qt.CheckState.Checked
-            )
-
         return FilterValues(
             **{name: edit.text() for name, edit in self.texts.items()},
             filetypes=tuple(v for v, box in self.filetypes.items() if box.isChecked()),
-            **{name: checked(getattr(self, name)) for name in _LISTS},
+            **{name: getattr(self, name).selected() for name in _LISTS},
         )
 
     def set_values(self, values: FilterValues) -> None:
@@ -176,24 +199,10 @@ class FilterPanel(QWidget):
             for value, box in self.filetypes.items():
                 box.setChecked(value in values.filetypes)
             for name in _LISTS:
-                widget = getattr(self, name)
-                options = [widget.item(i).text() for i in range(widget.count())]
-                self._fill(widget, options, set(getattr(values, name)))
+                getattr(self, name).set_selected(getattr(values, name))
             self._show_errors({})
         finally:
             self._syncing = False
-
-    @staticmethod
-    def _fill(widget: QListWidget, options: list[str], checked: set[str]) -> None:
-        """Show ``options`` plus any checked value missing from them; a filter
-        is never dropped just because the catalog no longer offers it."""
-        widget.clear()
-        for text in options + sorted(checked - set(options)):
-            item = QListWidgetItem(text)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            on = text in checked
-            item.setCheckState(Qt.CheckState.Checked if on else Qt.CheckState.Unchecked)
-            widget.addItem(item)
 
     # ── applying ────────────────────────────────────────────────────────────
     def _edited(self, *_args) -> None:
@@ -217,7 +226,8 @@ class FilterPanel(QWidget):
     def _show_errors(self, errors: dict[str, str]) -> None:
         for name, edit in self.texts.items():
             edit.setStyleSheet(ERROR_STYLE if name in errors else "")
-            edit.setToolTip(errors.get(name, ""))
+            default = DATE_HINT if name in self.date_fields else ""
+            edit.setToolTip(errors.get(name, default))
         lines = [f"{_LABELS[name]}: {message}" for name, message in errors.items()]
         self.errors.setText("\n".join(lines))
         self.errors.setVisible(bool(lines))
@@ -238,23 +248,14 @@ class FilterPanel(QWidget):
             return
         self._choices.run(filter_choices)
 
-    def _set_choices(self, choices: dict[str, list[str]]) -> None:
+    def _set_choices(self, choices: dict[str, list]) -> None:
         values = self.values()
-        self._syncing = True
-        try:
-            for name in _LISTS:
-                self._fill(
-                    getattr(self, name),
-                    choices.get(name, []),
-                    set(getattr(values, name)),
-                )
-        finally:
-            self._syncing = False
+        for name in _LISTS:
+            getattr(self, name).set_options(choices.get(name, []))
         self.people_box.setVisible("people" in choices or bool(values.people))
         bounds = choices.get("date_bounds") or []
-        self.texts["date_from"].setPlaceholderText(
-            f"e.g. {bounds[0]}" if bounds else DATE_PLACEHOLDER
+        first, last = (
+            (date.fromisoformat(b) for b in bounds) if bounds else (None, None)
         )
-        self.texts["date_to"].setPlaceholderText(
-            f"e.g. {bounds[1]}" if bounds else DATE_PLACEHOLDER
-        )
+        self.date_fields["date_from"].jump_to = first
+        self.date_fields["date_to"].jump_to = last

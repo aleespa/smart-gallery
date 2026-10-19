@@ -94,9 +94,9 @@ def test_filters_change_reloads_rows(qtbot, repo, make_item):
     )
     view, ctx = _view(qtbot, repo.db_path)
     qtbot.waitUntil(lambda: len(view.grid_model.rows) == 2)
-    qtbot.waitUntil(lambda: view.filters.cameras.count() == 2)
+    qtbot.waitUntil(lambda: len(view.filters.cameras.available()) == 2)
 
-    view.filters.cameras.item(1).setCheckState(Qt.CheckState.Checked)
+    view.filters.cameras.pick("Sony")
     view.filters.apply()
     assert ctx.filters.cameras == ["Sony"]
     qtbot.waitUntil(lambda: _relpaths(view) == ["b.jpg"])

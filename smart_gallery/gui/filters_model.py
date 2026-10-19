@@ -146,18 +146,30 @@ def _has_face_data(repo: GalleryRepository) -> bool:
     return bool(row[0])
 
 
-def filter_choices(repo: GalleryRepository) -> dict[str, list[str]]:
-    """The values the panel offers: ``cameras``, ``lenses``, ``extensions``,
-    ``date_bounds`` (``[first, last]`` ISO dates, or empty), and ``people``
-    (named persons) only when the catalog has face data."""
+def filter_choices(repo: GalleryRepository) -> dict[str, list]:
+    """The values the panel offers. ``cameras``, ``lenses``, ``extensions``
+    and ``people`` are ``(value, photo count)`` pairs, most-used first;
+    ``people`` (named persons) is there only when the catalog has face data.
+    ``date_bounds`` is ``[first, last]`` as ISO dates, or empty."""
     low, high = repo.date_bounds()
     choices = {
-        "cameras": repo.distinct_values("camera"),
-        "lenses": repo.distinct_values("lens"),
-        "extensions": repo.distinct_values("ext"),
+        "cameras": repo.value_counts("camera"),
+        "lenses": repo.value_counts("lens"),
+        "extensions": repo.value_counts("ext"),
         "date_bounds": [low.isoformat(), high.isoformat()] if low and high else [],
     }
     if _has_face_data(repo):
-        names = {p["name"] for p in repo.list_persons() if p["name"]}
-        choices["people"] = sorted(names, key=lambda n: (n.lower(), n))
+        choices["people"] = _people_counts(repo)
     return choices
+
+
+def _people_counts(repo: GalleryRepository) -> list[tuple[str, int]]:
+    """Each person's name with the photos their faces are in. Persons that
+    share a name are one choice, as the filter matches by name."""
+    rows = repo.conn.execute(
+        "SELECT p.name AS name, COUNT(DISTINCT f.media_id) AS n FROM persons p "
+        "LEFT JOIN faces f ON f.person_id = p.id "
+        "WHERE p.name IS NOT NULL AND p.name != '' "
+        "GROUP BY p.name ORDER BY n DESC, lower(p.name), p.name"
+    )
+    return [(r["name"], r["n"]) for r in rows]

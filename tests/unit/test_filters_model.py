@@ -128,15 +128,56 @@ def test_filter_choices(repo, make_item):
         ]
     )
     choices = filter_choices(repo)
-    assert choices["cameras"] == ["Canon EOS R6", "Sony A7"]
-    assert choices["lenses"] == ["RF24-70mm"]
-    assert choices["extensions"] == [".cr3", ".jpg", ".mp4"]
+    # (value, photo count), most-used first, ties by name.
+    assert choices["cameras"] == [("Canon EOS R6", 1), ("Sony A7", 1)]
+    assert choices["lenses"] == [("RF24-70mm", 2)]
+    assert choices["extensions"] == [(".cr3", 1), (".jpg", 1), (".mp4", 1)]
     assert choices["date_bounds"] == ["2026-01-05", "2026-03-01"]
     assert "people" not in choices  # no face data yet
 
     repo.create_person(Person(name="Ana", face_count=2))
     repo.create_person(Person(name=None, face_count=1))
-    assert filter_choices(repo)["people"] == ["Ana"]
+    assert filter_choices(repo)["people"] == [("Ana", 0)]
+
+
+def test_filter_choices_put_the_most_used_first(repo, make_item):
+    repo.upsert_many(
+        [
+            make_item("a.jpg", camera="Sony A7"),
+            make_item("b.jpg", camera="Canon EOS R6"),
+            make_item("c.jpg", camera="Canon EOS R6"),
+        ]
+    )
+    assert filter_choices(repo)["cameras"] == [("Canon EOS R6", 2), ("Sony A7", 1)]
+
+
+def test_filter_choices_count_photos_per_person(repo, make_item):
+    from smart_gallery.config import FACE_DET_VERSION
+    from smart_gallery.models import Face
+
+    repo.upsert_many([make_item("a.jpg"), make_item("b.jpg")])
+    ids = dict(repo.conn.execute("SELECT relpath, id FROM media_items").fetchall())
+    ana = repo.create_person(Person(name="Ana", face_count=3))
+    faces = [
+        Face.from_detection(ids["a.jpg"], (0, 0, 10, 10), 0.9, _unit()),
+        Face.from_detection(ids["a.jpg"], (20, 0, 30, 10), 0.9, _unit()),
+        Face.from_detection(ids["b.jpg"], (0, 0, 10, 10), 0.9, _unit()),
+    ]
+    for face in faces:
+        face.person_id = ana
+    repo.add_scan_results(
+        [(ids["a.jpg"], faces[:2]), (ids["b.jpg"], faces[2:])], FACE_DET_VERSION
+    )
+    # Two faces in a.jpg are still one photo.
+    assert filter_choices(repo)["people"] == [("Ana", 2)]
+
+
+def _unit():
+    import numpy as np
+
+    vector = np.zeros(512, dtype=np.float32)
+    vector[0] = 1.0
+    return vector
 
 
 def test_filter_choices_on_old_catalog_without_face_tables(repo, make_item):

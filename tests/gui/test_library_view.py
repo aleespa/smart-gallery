@@ -199,3 +199,37 @@ def test_viewer_opens_on_double_click_and_steps(qtbot, repo, make_item, copy_ima
 
     viewer.prev_btn.click()
     qtbot.waitUntil(lambda: viewer.field("Path") == "a/1.jpg")
+
+
+def test_sort_direction_toggle(qtbot, repo, make_item):
+    repo.upsert_many(
+        [
+            make_item("a.jpg", date_taken="2026-01-01", size_bytes=10),
+            make_item("b.jpg", date_taken="2026-02-01", size_bytes=30),
+            make_item("c.jpg", date_taken="2026-03-01", size_bytes=20),
+        ]
+    )
+    view, _ = _view(qtbot, repo.db_path)
+    qtbot.waitUntil(lambda: _relpaths(view) == ["a.jpg", "b.jpg", "c.jpg"])
+    assert not view.descending.isChecked()
+
+    view.descending.setChecked(True)
+    qtbot.waitUntil(lambda: _relpaths(view) == ["c.jpg", "b.jpg", "a.jpg"])
+
+    # Picking a sort resets the direction to that sort's natural one.
+    view.sort.setCurrentIndex(view.sort.findData("size"))
+    assert view.descending.isChecked()
+    qtbot.waitUntil(lambda: _relpaths(view) == ["b.jpg", "c.jpg", "a.jpg"])
+    view.descending.setChecked(False)
+    qtbot.waitUntil(lambda: _relpaths(view) == ["a.jpg", "c.jpg", "b.jpg"])
+
+    view.sort.setCurrentIndex(view.sort.findData("name"))
+    assert not view.descending.isChecked()
+
+
+def test_sort_direction_button_matches_sort_box_height(qtbot, repo):
+    view, _ = _view(qtbot, repo.db_path)
+    view.resize(1200, 700)
+    view.show()
+    qtbot.waitExposed(view)
+    assert view.descending.height() == view.sort.height()

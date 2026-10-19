@@ -148,11 +148,32 @@ def test_sort_orders(repo, make_item):
         ]
     )
 
-    def order(sort):
-        return [r.relpath for r in library_rows(repo, LibraryQuery(sort=sort))]
+    def order(sort, descending=False):
+        q = LibraryQuery(sort=sort, descending=descending)
+        return [r.relpath for r in library_rows(repo, q)]
 
     assert order("date") == ["b.jpg", "c.jpg", "a.jpg", "n.jpg"]
     assert order("name") == ["a.jpg", "b.jpg", "c.jpg", "n.jpg"]
+    assert order("size") == ["n.jpg", "c.jpg", "b.jpg", "a.jpg"]
+
+
+def test_sort_orders_descending(repo, make_item):
+    repo.upsert_many(
+        [
+            make_item("c.jpg", date_taken="2026-01-01", size_bytes=10),
+            make_item("a.jpg", date_taken="2026-03-01", size_bytes=30),
+            make_item("b.jpg", date_taken="2026-01-01", size_bytes=20),
+            make_item("n.jpg", date_taken=None, size_bytes=5),
+        ]
+    )
+
+    def order(sort):
+        q = LibraryQuery(sort=sort, descending=True)
+        return [r.relpath for r in library_rows(repo, q)]
+
+    # Undated items stay last whichever way the dates run.
+    assert order("date") == ["a.jpg", "c.jpg", "b.jpg", "n.jpg"]
+    assert order("name") == ["n.jpg", "c.jpg", "b.jpg", "a.jpg"]
     assert order("size") == ["a.jpg", "b.jpg", "c.jpg", "n.jpg"]
 
 

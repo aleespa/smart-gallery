@@ -15,11 +15,12 @@ from smart_gallery.organize.filters import FilterOptions
 
 _ESCAPE = r"'\'"
 
-# NULL dates last, then the tiebreak on relpath for a stable order.
+# {d} is ASC or DESC. NULL dates stay last either way, and the relpath
+# tiebreak keeps the order stable.
 _ORDER_BY = {
-    "date": "(date_taken IS NULL), date_taken, relpath",
-    "name": "relpath",
-    "size": "size_bytes DESC, relpath",
+    "date": "(date_taken IS NULL), date_taken {d}, relpath {d}",
+    "name": "relpath {d}",
+    "size": "size_bytes {d}, relpath {d}",
 }
 
 
@@ -37,6 +38,7 @@ class LibraryQuery:
     recursive: bool = True
     filters: Optional[FilterOptions] = None
     sort: Literal["date", "name", "size"] = "date"
+    descending: bool = False
 
 
 @dataclass(frozen=True)
@@ -97,6 +99,7 @@ def _library_where(q: LibraryQuery) -> tuple[str, list]:
 def library_rows(repo: GalleryRepository, q: LibraryQuery) -> list[LibraryRow]:
     where, params = _library_where(q)
     order = _ORDER_BY.get(q.sort, _ORDER_BY["date"])
+    order = order.format(d="DESC" if q.descending else "ASC")
     cur = repo.conn.execute(
         f"SELECT id, relpath, media_type, ext, mtime_ns, duration_ms"
         f" FROM media_items{where} ORDER BY {order}",

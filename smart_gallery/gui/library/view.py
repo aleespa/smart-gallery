@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListView,
+    QSizePolicy,
     QSplitter,
     QStackedWidget,
     QToolButton,
@@ -63,7 +64,10 @@ THUMB_DEBOUNCE_MS = 120
 THUMB_RETRIES = 5  # passes that may find no laid-out row before giving up
 PIXMAP_CACHE_SIZE = 600  # ~55 MB of tile pixmaps
 LAYOUT_BATCH = 1000
-SORTS = (("Date taken", "date"), ("Name", "name"), ("Size", "size"))
+# (label, sort, descending by default): oldest, A to Z, largest first.
+SORTS = (("Date taken", "date", False), ("Name", "name", False), ("Size", "size", True))
+ASCENDING_ARROW = "↑"
+DESCENDING_ARROW = "↓"
 PATH_ROLE = Qt.ItemDataRole.UserRole + 1
 
 NO_GALLERY = "Open or create a gallery to browse it here."
@@ -249,8 +253,16 @@ class LibraryView(QWidget):
         # Header, grid and message.
         self.stats = QLabel()
         self.sort = QComboBox()
-        for label, value in SORTS:
+        for label, value, _descending in SORTS:
             self.sort.addItem(label, value)
+        self.descending = QToolButton()
+        self.descending.setCheckable(True)
+        # Tool buttons keep a fixed, shorter height; let it fill the header row
+        # so it lines up with the sort box.
+        self.descending.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+        )
+        self._show_direction(False)
         self.filters_btn = QToolButton()
         self.filters_btn.setText("Filters")
         self.filters_btn.setCheckable(True)
@@ -260,6 +272,7 @@ class LibraryView(QWidget):
         header.addWidget(self.stats, 1)
         header.addWidget(QLabel("Sort by"))
         header.addWidget(self.sort)
+        header.addWidget(self.descending)
 
         self.grid = QListView()
         self.grid.setViewMode(QListView.ViewMode.IconMode)
@@ -301,7 +314,9 @@ class LibraryView(QWidget):
 
         self.tree.selectionModel().currentChanged.connect(self._on_tree_current)
         self.subfolders.toggled.connect(self.reload_rows)
-        self.sort.currentIndexChanged.connect(self.reload_rows)
+        self.sort.currentIndexChanged.connect(self._on_sort_changed)
+        self.descending.toggled.connect(self._show_direction)
+        self.descending.toggled.connect(self.reload_rows)
         self.filters_btn.toggled.connect(self.filters.setVisible)
         self.grid.doubleClicked.connect(self.open_viewer)
         self.grid_model.rowsInserted.connect(self._schedule_thumbs)
@@ -339,12 +354,27 @@ class LibraryView(QWidget):
             recursive=self.subfolders.isChecked(),
             filters=None if is_query_empty(filters) else filters,
             sort=self.sort.currentData(),
+            descending=self.descending.isChecked(),
         )
 
         def load(repo):
             return repo.drive_root, library_rows(repo, q), library_stats(repo, q)
 
         self._rows_query.run(load)
+
+    def _on_sort_changed(self, index: int) -> None:
+        """Switch to the new sort's natural direction, then reload once."""
+        descending = SORTS[index][2]
+        self.descending.blockSignals(True)
+        self.descending.setChecked(descending)
+        self.descending.blockSignals(False)
+        self._show_direction(descending)
+        self.reload_rows()
+
+    def _show_direction(self, descending: bool) -> None:
+        self.descending.setText(DESCENDING_ARROW if descending else ASCENDING_ARROW)
+        direction = "Descending" if descending else "Ascending"
+        self.descending.setToolTip(f"{direction}. Click to reverse.")
 
     def select_folder(self, path: str) -> None:
         """Show ``path`` (POSIX, relative to the root; "" for everything)."""

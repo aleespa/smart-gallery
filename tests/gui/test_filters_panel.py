@@ -235,3 +235,30 @@ def test_clear_button_uses_the_accent(qtbot, repo, make_item):
     assert abs(edge.red() - accent.red()) < 12
     assert abs(edge.green() - accent.green()) < 12
     assert abs(edge.blue() - accent.blue()) < 12
+
+
+def test_clicking_the_calendar_button_opens_a_calendar_that_stays(
+    qtbot, repo, make_item
+):
+    """With a gallery open, the Jump button was shown before it had a parent,
+    so it opened as a window of its own and the calendar closed at once."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication, QToolButton
+
+    from smart_gallery.gui.filter_widgets import CalendarPopup
+
+    panel, _ = _shown(qtbot, repo, make_item)
+    edit = panel.texts["date_from"]
+    button = next(b for b in edit.findChildren(QToolButton) if b.isVisible())
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton, pos=button.rect().center())
+    popup = panel.date_fields["date_from"]._popup
+    assert isinstance(popup, CalendarPopup)
+    assert panel.date_fields["date_from"].jump_to is not None  # a gallery is open
+    qtbot.wait(200)
+    assert popup.isVisible()
+    assert popup.jump_btn.isVisible() and popup.jump_btn.window() is popup
+    stray = [w for w in QApplication.topLevelWidgets() if w.isVisible()]
+    assert all(not w.inherits("QPushButton") for w in stray)
+    popup.calendar.clicked.emit(QDate(2024, 7, 9))
+    assert edit.text() == "2024-07-09"
+    assert not popup.isVisible()

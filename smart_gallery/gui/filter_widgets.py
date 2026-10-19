@@ -362,13 +362,15 @@ class CalendarPopup(QFrame):
         plain.setForeground(self.palette().color(QPalette.ColorRole.Text))
         for day in (Qt.DayOfWeek.Saturday, Qt.DayOfWeek.Sunday):
             self.calendar.setWeekdayTextFormat(day, plain)
-        self.jump_btn = QPushButton(jump_text)
-        self.clear_btn = QPushButton("Clear")
+        # Made as children: showing a widget that has no parent yet opens it
+        # as a window of its own, which took the focus from this popup and
+        # so closed it the moment it opened.
+        self.jump_btn = QPushButton(jump_text, self)
+        self.clear_btn = QPushButton("Clear", self)
         for btn in (self.jump_btn, self.clear_btn):
             btn.setObjectName("linkButton")
             btn.setFlat(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.jump_btn.setVisible(jump_to is not None)
         self._jump_to = jump_to
         links = QHBoxLayout()
         links.addWidget(self.jump_btn)
@@ -378,6 +380,7 @@ class CalendarPopup(QFrame):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.addWidget(self.calendar)
         layout.addLayout(links)
+        self.jump_btn.setVisible(jump_to is not None)
 
         self.calendar.clicked.connect(self._choose)
         self.calendar.activated.connect(self._choose)
@@ -424,6 +427,8 @@ class DateField(QWidget):
         layout.addWidget(edit)
 
     def open_calendar(self) -> CalendarPopup:
+        if self._popup is not None:
+            self._popup.deleteLater()  # one calendar per box, not one per click
         popup = CalendarPopup(self.jump_text, self.jump_to, self)
         typed = self._typed()
         if typed is not None:

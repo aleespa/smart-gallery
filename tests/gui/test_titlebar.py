@@ -63,3 +63,37 @@ def test_minimize_and_close_buttons_act_on_the_window(qtbot):
     qtbot.waitUntil(lambda: not win.isMinimized())
     win.window_buttons.close_btn.click()
     qtbot.waitUntil(lambda: not win.isVisible())
+
+
+def test_resize_cursor_stays_on_the_border(qtbot):
+    """Crossing the resize border into the window used to leave every widget
+    inside showing the resize arrow, since they inherit the frame's cursor."""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+
+    from smart_gallery.gui.titlebar import ResizeFrame
+
+    content = QWidget()
+    label = QLabel("inside")
+    QVBoxLayout(content).addWidget(label)
+    frame = ResizeFrame(content)
+    qtbot.addWidget(frame)
+    frame.resize(400, 300)
+    frame.show()
+    qtbot.waitExposed(frame)
+
+    on_border = QPointF(1, 150)
+    move = QMouseEvent(
+        QEvent.Type.MouseMove,
+        on_border,
+        frame.mapToGlobal(on_border.toPoint()).toPointF(),
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(frame, move)
+    assert frame.cursor().shape() == Qt.CursorShape.SizeHorCursor
+    # The pointer then moves on into the window, where nothing resizes.
+    assert label.cursor().shape() == Qt.CursorShape.ArrowCursor
+    assert content.cursor().shape() == Qt.CursorShape.ArrowCursor

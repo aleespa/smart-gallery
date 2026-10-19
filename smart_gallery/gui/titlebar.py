@@ -148,6 +148,10 @@ class ResizeFrame(QWidget):
         layout = QHBoxLayout(self)
         layout.setSpacing(0)
         layout.addWidget(content)
+        # The content's own arrow: otherwise everything inside inherits the
+        # resize cursor set on this frame, and keeps it once the pointer has
+        # crossed the border inwards.
+        content.setCursor(Qt.CursorShape.ArrowCursor)
         self.set_margin(RESIZE_MARGIN)
 
     def set_margin(self, margin: int) -> None:

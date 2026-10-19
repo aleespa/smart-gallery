@@ -28,6 +28,7 @@ from smart_gallery.gui.paths import app_data_dir, exiftool_available
 from smart_gallery.gui.statusbar import JobStatusBar
 from smart_gallery.gui.thumbs.loader import ThumbnailLoader
 
+RAIL_MARGIN = 8  # px between the window edge and the rail column
 QUIT_WHILE_RUNNING = "A job is still running. Cancel it and quit?"
 EXIFTOOL_BANNER = (
     "ExifTool not found. Install it from https://exiftool.org to read metadata."
@@ -66,6 +67,7 @@ class MainWindow(QMainWindow):
         outer.addLayout(body, 1)
 
         left = QVBoxLayout()
+        left.setContentsMargins(RAIL_MARGIN, 0, 0, 0)  # off the window edge
         # Top of the rail; the Galleries panel is mounted here.
         self.galleries_slot = QVBoxLayout()
         left.addLayout(self.galleries_slot)

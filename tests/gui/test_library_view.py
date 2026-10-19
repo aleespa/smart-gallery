@@ -148,7 +148,9 @@ def test_scrolling_drops_queued_thumbnails_before_requesting_visible_ones(
     assert ("request", last) in ctx.thumbs.log
 
 
-def test_video_tile_placeholder_and_no_request(qtbot, repo, make_item):
+def test_video_tile_requests_a_thumbnail_and_badges_it(
+    qtbot, repo, make_item, tmp_path
+):
     repo.upsert_many(
         [make_item("v.mp4", media_type="video", ext=".mp4", duration_ms=83_000)]
     )
@@ -156,11 +158,23 @@ def test_video_tile_placeholder_and_no_request(qtbot, repo, make_item):
     view.resize(900, 600)
     view.show()
     qtbot.waitUntil(lambda: len(view.grid_model.rows) == 1)
-    qtbot.wait(300)
-    assert ctx.thumbs.requests == []
+    row = view.grid_model.rows[0]
+    qtbot.waitUntil(lambda: [i for _, i in ctx.thumbs.requests] == [row.id])
     index = view.grid_model.index(0)
-    assert not view.grid_model.data(index, Qt.ItemDataRole.DecorationRole).isNull()
+    placeholder = view.grid_model.data(index, Qt.ItemDataRole.DecorationRole)
+    assert not placeholder.isNull()
     assert view.grid_model.data(index, Qt.ItemDataRole.DisplayRole) == "v.mp4"
+
+    frame = tmp_path / "frame.jpg"
+    Image.new("RGB", (256, 144), (0, 0, 255)).save(frame)
+    ctx.thumbs.ready.emit(str(view._root), row.id, str(frame))
+    tile = view.grid_model.data(index, Qt.ItemDataRole.DecorationRole).toImage()
+    assert tile.cacheKey() != placeholder.toImage().cacheKey()
+    # The frame shows at the edge; the centre carries the light play badge.
+    edge = tile.pixelColor(8, tile.height() // 2)
+    centre = tile.pixelColor(tile.width() // 2 + 4, tile.height() // 2)
+    assert edge.blue() > 200 and edge.red() < 60
+    assert centre.red() > 150 and centre.green() > 150
 
 
 def test_gallery_change_cancels_pending_thumbnails(qtbot, repo, make_item, tmp_path):

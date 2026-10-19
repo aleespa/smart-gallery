@@ -122,6 +122,49 @@ def _placeholder(kind: str, text: str = "") -> QPixmap:
     return pixmap
 
 
+_BADGE_BG = QColor(0, 0, 0, 150)
+_BADGE_FG = QColor(255, 255, 255, 235)
+
+
+def _with_video_badge(frame: QPixmap, duration: str) -> QPixmap:
+    """``frame`` with a play sign in the middle and ``duration`` in the
+    bottom-right corner, so a video tile still reads as a video."""
+    tile = QPixmap(frame)
+    w, h = tile.width(), tile.height()
+    p = QPainter(tile)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    radius = min(w, h) * 0.16
+    cx, cy = w / 2, h / 2
+    p.setBrush(_BADGE_BG)
+    p.drawEllipse(QPointF(cx, cy), radius, radius)
+    p.setBrush(_BADGE_FG)
+    side = radius * 0.9
+    tri = [
+        QPointF(cx - side * 0.38, cy - side * 0.55),
+        QPointF(cx - side * 0.38, cy + side * 0.55),
+        QPointF(cx + side * 0.62, cy),
+    ]
+    p.drawPolygon(QPolygonF(tri))
+    if duration:
+        font = QFont(p.font())
+        font.setPointSize(9)
+        font.setBold(True)
+        p.setFont(font)
+        metrics = p.fontMetrics()
+        pad = 4
+        box = QRectF(
+            0, 0, metrics.horizontalAdvance(duration) + pad * 2, metrics.height() + 2
+        )
+        box.moveBottomRight(QPointF(w - 6, h - 6))
+        p.setBrush(_BADGE_BG)
+        p.drawRoundedRect(box, 4, 4)
+        p.setPen(_BADGE_FG)
+        p.drawText(box, Qt.AlignmentFlag.AlignCenter, duration)
+    p.end()
+    return tile
+
+
 def _placeholder_for(row: LibraryRow) -> QPixmap:
     if row.media_type == "video":
         return _placeholder("video", format_duration(row.duration_ms))
@@ -186,7 +229,7 @@ class LibraryGridModel(QAbstractListModel):
     def needs_thumbnail(self, row: LibraryRow) -> bool:
         key = self._key(row)
         return (
-            row.media_type == "image"
+            row.media_type in ("image", "video")
             and key not in self._pixmaps
             and key not in self._missing
         )
@@ -196,17 +239,21 @@ class LibraryGridModel(QAbstractListModel):
         i = self._row_of.get(media_id)
         if i is None:
             return False
-        key = self._key(self.rows[i])
+        row = self.rows[i]
+        key = self._key(row)
         pixmap = QPixmap(path) if path else QPixmap()
         if pixmap.isNull():
             self._missing.add(key)
         else:
-            self._pixmaps[key] = pixmap.scaled(
+            pixmap = pixmap.scaled(
                 ICON_EDGE,
                 ICON_EDGE,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
+            if row.media_type == "video":
+                pixmap = _with_video_badge(pixmap, format_duration(row.duration_ms))
+            self._pixmaps[key] = pixmap
             self._pixmaps.move_to_end(key)
             while len(self._pixmaps) > PIXMAP_CACHE_SIZE:
                 self._pixmaps.popitem(last=False)

@@ -4,12 +4,16 @@ Thumbnails live beside the catalog at
 ``<root>/.smart_gallery/thumbs/<id // 1000>/<id>-<mtime_ns>.jpg``. The mtime in
 the name makes a changed file regenerate. A ``.none`` marker with the same stem
 records a failure so a broken file is only opened once.
+
+A video's thumbnail is a frame picked by ffmpeg (when it is installed), else
+the thumbnail the camera embedded in the file, read with ExifTool.
 """
 
 from __future__ import annotations
 
 import io
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -21,6 +25,12 @@ from smart_gallery.analysis.extract import _get_exiftool_path
 THUMB_EDGE = 256
 JPEG_QUALITY = 85
 EXIFTOOL_TIMEOUT_S = 30
+FFMPEG_TIMEOUT_S = 60
+# ffmpeg starts this far in, then keeps the most typical of the next frames,
+# so a fade-in or a black first frame is skipped.
+VIDEO_SEEK_S = 1.0
+VIDEO_SAMPLE_FRAMES = 50
+VIDEO_PREVIEW_TAGS = ("-ThumbnailImage", "-PreviewImage", "-CoverArt")
 
 RAW_EXTENSIONS = frozenset(
     {".cr2", ".cr3", ".nef", ".arw", ".dng", ".raf", ".rw2", ".orf"}
@@ -72,8 +82,9 @@ def _ensure(root, media_id, mtime_ns, abspath, ext, media_type) -> Path | None:
 
     try:
         if media_type == "video":
-            raise ValueError("videos have no thumbnail")
-        data = _render_jpeg(abspath, ext.lower())
+            data = _render_video_jpeg(abspath)
+        else:
+            data = _render_jpeg(abspath, ext.lower())
     except _Unavailable:
         return None  # environmental, not a property of the file
     except Exception:
@@ -155,9 +166,18 @@ def _open_raw_preview(abspath: Path):
     Raises _Unavailable when ExifTool cannot run, ValueError when it ran but
     no tag yielded a usable image.
     """
+    image = _open_embedded(abspath, RAW_PREVIEW_TAGS)
+    if image is None:
+        raise ValueError(f"no embedded preview in {abspath}")
+    return image
+
+
+def _open_embedded(abspath: Path, tags):
+    """First of ``tags`` holding a decodable image, as an open Pillow image;
+    None when none does. Raises _Unavailable when ExifTool cannot run."""
     from PIL import Image
 
-    for tag in RAW_PREVIEW_TAGS:
+    for tag in tags:
         data = _exiftool_bytes(tag, abspath)
         if not data:
             continue
@@ -167,20 +187,95 @@ def _open_raw_preview(abspath: Path):
             return image
         except Exception:
             continue
-    raise ValueError(f"no embedded preview in {abspath}")
+    return None
 
 
-def _exiftool_bytes(tag: str, abspath: Path) -> bytes:
+def _render_video_jpeg(abspath: Path) -> bytes:
+    """A frame from ffmpeg, else the embedded thumbnail.
+
+    Raises _Unavailable when neither could be tried (no ffmpeg, and ExifTool
+    missing or the file has no embedded image), so nothing is recorded and
+    the thumbnail appears once ffmpeg is installed. Raises ValueError when
+    ffmpeg ran and still nothing gave an image.
+    """
+    from PIL import Image
+
+    if not abspath.is_file():
+        raise FileNotFoundError(abspath)
+    ffmpeg = _ffmpeg_path()
+    if ffmpeg is not None:
+        frame = _ffmpeg_frame(ffmpeg, abspath)
+        if frame:
+            try:
+                with Image.open(io.BytesIO(frame)) as image:
+                    return _to_thumbnail_bytes(image)
+            except Exception:
+                pass  # not a picture after all: try the embedded one
+    image = _open_embedded(abspath, VIDEO_PREVIEW_TAGS)
+    if image is not None:
+        with image:
+            return _to_thumbnail_bytes(image)
+    if ffmpeg is None:
+        raise _Unavailable("ffmpeg is not installed")
+    raise ValueError(f"no frame in {abspath}")
+
+
+def _ffmpeg_path() -> str | None:
+    """``$SG_FFMPEG_PATH``, else ffmpeg on PATH, else None."""
+    return os.environ.get("SG_FFMPEG_PATH") or shutil.which("ffmpeg")
+
+
+def _ffmpeg_frame(ffmpeg: str, abspath: Path) -> bytes:
+    """One JPEG frame, scaled to fit the thumbnail; b"" when none came out.
+    A clip shorter than the seek is read again from the start."""
+    picks = (
+        f"thumbnail={VIDEO_SAMPLE_FRAMES},"
+        f"scale={THUMB_EDGE}:{THUMB_EDGE}:force_original_aspect_ratio=decrease"
+    )
+    for seek in (VIDEO_SEEK_S, 0):
+        args = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin"]
+        if seek:
+            args += ["-ss", str(seek)]
+        args += [
+            "-i",
+            str(abspath),
+            "-an",
+            "-frames:v",
+            "1",
+            "-vf",
+            picks,
+            "-f",
+            "image2pipe",
+            "-c:v",
+            "mjpeg",
+            "-",
+        ]
+        data = _run_tool(args, FFMPEG_TIMEOUT_S)
+        if data:
+            return data
+    return b""
+
+
+def _run_tool(args: list[str], timeout: float) -> bytes:
+    """stdout of a successful run, b"" on a failed one. Raises _Unavailable
+    when the program cannot run or takes too long."""
     kwargs = {}
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     try:
         result = subprocess.run(
-            [_get_exiftool_path(), "-b", tag, str(abspath)],
+            args,
             capture_output=True,
-            timeout=EXIFTOOL_TIMEOUT_S,
+            timeout=timeout,
+            stdin=subprocess.DEVNULL,
             **kwargs,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise _Unavailable(str(exc)) from exc
     return result.stdout if result.returncode == 0 else b""
+
+
+def _exiftool_bytes(tag: str, abspath: Path) -> bytes:
+    return _run_tool(
+        [_get_exiftool_path(), "-b", tag, str(abspath)], EXIFTOOL_TIMEOUT_S
+    )

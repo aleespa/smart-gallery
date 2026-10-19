@@ -1,5 +1,7 @@
 import io
 import os
+import shutil
+import subprocess
 import threading
 
 import pytest
@@ -70,10 +72,131 @@ def test_missing_file_returns_none(drive):
     assert thumb_path(drive, 1, 100).with_suffix(".none").is_file()
 
 
-def test_video_returns_none(drive):
-    (drive / "v.mp4").write_bytes(b"\0" * 32)
-    assert _ensure(drive, "v.mp4", ext=".mp4", media_type="video") is None
-    assert thumb_path(drive, 1, 100).with_suffix(".none").is_file()
+def _video(drive, rel="v.mp4"):
+    return _ensure(drive, rel, ext=".mp4", media_type="video")
+
+
+def _marker(drive):
+    return thumb_path(drive, 1, 100).with_suffix(".none")
+
+
+def _jpeg(size=(640, 360), colour="blue") -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", size, colour).save(buf, "JPEG")
+    return buf.getvalue()
+
+
+class _Result:
+    def __init__(self, stdout=b"", returncode=0):
+        self.stdout, self.returncode = stdout, returncode
+
+
+def _fake_tools(monkeypatch, ffmpeg=None, exiftool=None):
+    """Route subprocess.run to fakes: ``ffmpeg(args)``/``exiftool(args)``
+    return stdout bytes or raise. ffmpeg=None means it is not installed."""
+    calls = []
+    monkeypatch.setattr(cache, "_ffmpeg_path", lambda: "ffmpeg" if ffmpeg else None)
+
+    def run(args, **kwargs):
+        assert kwargs["timeout"] > 0
+        tool = "ffmpeg" if args[0] == "ffmpeg" else "exiftool"
+        calls.append(tool)
+        fake = ffmpeg if tool == "ffmpeg" else exiftool
+        if fake is None:
+            raise FileNotFoundError(tool)
+        return _Result(fake(args))
+
+    monkeypatch.setattr(cache.subprocess, "run", run)
+    return calls
+
+
+needs_ffmpeg = pytest.mark.skipif(
+    shutil.which("ffmpeg") is None, reason="needs ffmpeg on PATH"
+)
+
+
+def _make_clip(path, seconds):
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc=size=640x360:rate=25:duration={seconds}",
+            "-pix_fmt",
+            "yuv420p",
+            str(path),
+        ],
+        check=True,
+        timeout=60,
+    )
+
+
+@needs_ffmpeg
+def test_video_thumbnail_is_a_frame(drive):
+    _make_clip(drive / "v.mp4", 4)
+    out = _video(drive)
+    assert out is not None
+    with Image.open(out) as im:
+        assert im.format == "JPEG"
+        assert max(im.size) == THUMB_EDGE
+        assert im.size[0] > im.size[1]  # keeps the clip's 16:9 shape
+
+
+@needs_ffmpeg
+def test_clip_shorter_than_the_seek_still_gets_a_frame(drive):
+    _make_clip(drive / "v.mp4", 0.4)
+    assert _video(drive) is not None
+
+
+def test_video_without_ffmpeg_uses_its_embedded_thumbnail(drive, monkeypatch):
+    calls = _fake_tools(
+        monkeypatch, exiftool=lambda args: _jpeg() if "-ThumbnailImage" in args else b""
+    )
+    (drive / "v.mp4").write_bytes(b"video")
+    out = _video(drive)
+    assert out is not None and calls[0] == "exiftool"
+    with Image.open(out) as im:
+        assert max(im.size) == THUMB_EDGE
+
+
+def test_undecodable_video_falls_back_to_embedded(drive, monkeypatch):
+    calls = _fake_tools(
+        monkeypatch,
+        ffmpeg=lambda args: b"",
+        exiftool=lambda args: _jpeg() if "-PreviewImage" in args else b"",
+    )
+    (drive / "v.mp4").write_bytes(b"video")
+    assert _video(drive) is not None
+    assert calls[0] == "ffmpeg" and "exiftool" in calls
+
+
+def test_video_without_ffmpeg_or_embedded_waits_for_ffmpeg(drive, monkeypatch):
+    """No marker: the thumbnail appears once ffmpeg is installed."""
+    _fake_tools(monkeypatch, exiftool=lambda args: b"")
+    (drive / "v.mp4").write_bytes(b"video")
+    assert _video(drive) is None
+    assert not _marker(drive).exists()
+
+
+def test_video_nothing_can_read_records_failure(drive, monkeypatch):
+    _fake_tools(monkeypatch, ffmpeg=lambda args: b"", exiftool=lambda args: b"")
+    (drive / "v.mp4").write_bytes(b"video")
+    assert _video(drive) is None
+    assert _marker(drive).is_file()
+
+
+def test_ffmpeg_timeout_leaves_no_marker(drive, monkeypatch):
+    def slow(args):
+        raise subprocess.TimeoutExpired(args, 1)
+
+    _fake_tools(monkeypatch, ffmpeg=slow, exiftool=lambda args: b"")
+    (drive / "v.mp4").write_bytes(b"video")
+    assert _video(drive) is None
+    assert not _marker(drive).exists()
 
 
 def test_unwritable_cache_returns_none_without_marker(copy_image, drive):

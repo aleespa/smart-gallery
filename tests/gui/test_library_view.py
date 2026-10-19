@@ -5,7 +5,7 @@ from PySide6.QtGui import QPixmap
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.galleries.store import Gallery
 from smart_gallery.gui.library.view import LibraryView
-from smart_gallery.gui.library.viewer import MediaViewer
+from smart_gallery.gui.library.viewer import FIT_SCREEN_MAX, MediaViewer
 
 
 class FakeThumbs(QObject):
@@ -254,3 +254,59 @@ def test_folder_tree_uses_a_compact_indent(qtbot, repo):
 
     view, _ = _view(qtbot, repo.db_path)
     assert view.tree.indentation() == TREE_INDENT < 20
+
+
+def test_fitted_size_follows_the_image_shape():
+    from PySide6.QtCore import QSize
+
+    from smart_gallery.gui.library.viewer import fitted_size
+
+    chrome, screen = QSize(360, 60), QSize(1920, 1040)
+    # 3:2 landscape at a 600px tall photo area: 900 wide, plus the chrome.
+    assert fitted_size(QSize(3000, 2000), 600, chrome, screen) == QSize(1260, 660)
+    # Portrait 2:3 keeps the height and narrows.
+    assert fitted_size(QSize(2000, 3000), 600, chrome, screen) == QSize(760, 660)
+    # A panorama is capped by the screen width and gets shorter instead.
+    pano = fitted_size(QSize(8000, 1000), 600, chrome, screen)
+    assert pano.width() <= screen.width() and pano.height() < 660
+    # An area taller than the screen allows is capped by the screen height.
+    tall = fitted_size(QSize(1000, 1000), 2000, chrome, screen)
+    assert tall.height() <= screen.height()
+    assert tall.width() - chrome.width() == tall.height() - chrome.height()
+
+
+def _photo(drive, rel, size):
+    path = drive / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", size, (90, 120, 160)).save(path, "JPEG")
+
+
+def _area_ratio(viewer):
+    return viewer.image.width() / viewer.image.height()
+
+
+def test_viewer_window_matches_each_photo_shape(qtbot, repo, make_item):
+    drive = repo.drive_root
+    _photo(drive, "a/portrait.jpg", (600, 800))
+    _photo(drive, "a/wide.jpg", (900, 600))
+    repo.upsert_many([make_item("a/portrait.jpg"), make_item("a/wide.jpg")])
+    view, _ = _view(qtbot, repo.db_path)
+    qtbot.waitUntil(lambda: len(view.grid_model.rows) == 2)
+    rows = view.grid_model.rows
+    start = next(i for i, r in enumerate(rows) if r.relpath == "a/portrait.jpg")
+
+    view.grid.doubleClicked.emit(view.grid_model.index(start))
+    viewer = view.viewer
+    qtbot.waitUntil(viewer.has_preview)
+    qtbot.waitUntil(lambda: abs(_area_ratio(viewer) - 600 / 800) < 0.05)
+    height = viewer.image.height()
+
+    wide = next(i for i, r in enumerate(rows) if r.relpath == "a/wide.jpg")
+    viewer.show_index(wide)
+    qtbot.waitUntil(lambda: abs(_area_ratio(viewer) - 900 / 600) < 0.05)
+    # Same height and wider, unless that would not fit the screen: then the
+    # window is as wide as allowed and the photo area shorter.
+    screen = viewer.screen().availableGeometry().width()
+    capped = viewer.width() >= int(screen * FIT_SCREEN_MAX) - 2
+    assert abs(viewer.image.height() - height) <= 2 or capped
+    assert viewer.image.width() > viewer.image.height()

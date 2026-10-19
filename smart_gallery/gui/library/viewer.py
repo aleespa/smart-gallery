@@ -1,5 +1,11 @@
 """Single-item viewer: a large preview, the catalog metadata, and stepping
-through the Library's current rows."""
+through the Library's current rows.
+
+The window follows each photo's shape: the photo area takes the photo's
+aspect ratio beside the fixed info card. The first photo sets the area's
+height (most of the screen, never larger than the photo); later photos keep
+that height, or the one the owner resized to, and change only the width.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +13,15 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QImage, QKeySequence, QPixmap, QShortcut
+from PySide6.QtCore import QRect, QSize, Qt, QUrl
+from PySide6.QtGui import (
+    QDesktopServices,
+    QGuiApplication,
+    QImage,
+    QKeySequence,
+    QPixmap,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QDialog,
     QFormLayout,
@@ -46,6 +59,9 @@ FIELDS = (
 LOADING = "Loading…"
 NO_PREVIEW = "No preview for this file."
 DISCONNECTED = "Drive not connected."
+FIT_SCREEN_HEIGHT = 0.8  # of the screen, for the first photo's window
+FIT_SCREEN_MAX = 0.95  # the window never takes more of the screen than this
+MIN_AREA = QSize(200, 200)  # the photo area's smallest size
 
 
 def format_size(num_bytes: int | None) -> str:
@@ -93,6 +109,27 @@ def _metadata(item: MediaItem) -> dict[str, str]:
     }
 
 
+def fitted_size(image: QSize, area_height: int, chrome: QSize, screen: QSize) -> QSize:
+    """Window size whose photo area has ``image``'s shape at ``area_height``.
+
+    ``chrome`` is everything around the photo area (info card, buttons,
+    margins). The window stays within ``FIT_SCREEN_MAX`` of ``screen``: a
+    photo too wide or too tall for it gets a smaller area of the same shape.
+    """
+    aspect = image.width() / image.height()
+    max_w = int(screen.width() * FIT_SCREEN_MAX) - chrome.width()
+    max_h = int(screen.height() * FIT_SCREEN_MAX) - chrome.height()
+    height = max(MIN_AREA.height(), area_height)
+    width = round(height * aspect)
+    if width > max_w:
+        width, height = max_w, round(max_w / aspect)
+    if height > max_h:
+        height, width = max_h, round(max_h * aspect)
+    width = max(MIN_AREA.width(), width)
+    height = max(MIN_AREA.height(), height)
+    return QSize(width + chrome.width(), height + chrome.height())
+
+
 def _to_qimage(image) -> QImage:
     """QImage copy of an RGB Pillow image; safe to build on a worker thread."""
     w, h = image.size
@@ -122,12 +159,16 @@ class MediaViewer(QDialog):
         self._index = index
         self._pixmap = QPixmap()
         self._text = ""
+        # The photo area's height to keep from one photo to the next; set by
+        # the first photo, then by any resize the owner makes.
+        self._area_height: int | None = None
+        self._fitted_size: QSize | None = None  # the last size we asked for
         self._query = RepoQuery(ctx, self)
         self.resize(1100, 750)
 
         self.image = QLabel()
         self.image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image.setMinimumSize(200, 200)
+        self.image.setMinimumSize(MIN_AREA)
         # Ignored, so a large pixmap never forces the dialog to grow.
         self.image.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
 
@@ -218,6 +259,7 @@ class MediaViewer(QDialog):
         if image is None:
             self._set_pixmap(QPixmap(), NO_PREVIEW)
         else:
+            self._fit_to(image.size())
             self._set_pixmap(QPixmap.fromImage(image), "")
 
     def _on_failed(self, error) -> None:
@@ -245,8 +287,32 @@ class MediaViewer(QDialog):
             )
         )
 
+    def _fit_to(self, image: QSize) -> None:
+        """Resize the window around its centre so the photo area takes the
+        shape of ``image``, keeping it on screen."""
+        if not self.isVisible() or image.isEmpty():
+            return
+        screen = (self.screen() or QGuiApplication.primaryScreen()).availableGeometry()
+        chrome = self.size() - self.image.size()
+        if self._area_height is None:
+            fill = int(screen.height() * FIT_SCREEN_HEIGHT) - chrome.height()
+            self._area_height = min(fill, image.height())  # never enlarge
+        size = fitted_size(image, self._area_height, chrome, screen.size())
+        geometry = QRect(self.geometry().topLeft(), size)
+        geometry.moveCenter(self.geometry().center())
+        geometry.moveLeft(
+            max(screen.left(), min(geometry.left(), screen.right() - size.width()))
+        )
+        geometry.moveTop(
+            max(screen.top(), min(geometry.top(), screen.bottom() - size.height()))
+        )
+        self._fitted_size = size
+        self.setGeometry(geometry)
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        if self._area_height is not None and event.size() != self._fitted_size:
+            self._area_height = self.image.height()  # the owner resized it
         self._rescale()
 
     # ── for tests and callers ───────────────────────────────────────────────

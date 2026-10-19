@@ -70,9 +70,13 @@ def _parse_capture(value) -> tuple[Optional[str], Optional[str], Optional[int]]:
     try:
         bits = [int(b) for b in date_part.split("-")[:3]]
         if len(bits) == 3:
-            date_taken = f"{bits[0]:04d}-{bits[1]:02d}-{bits[2]:02d}"
+            # Rejects impossible dates such as the '0000:00:00' a camera
+            # writes when its clock was never set.
+            date_taken = date(*bits).isoformat()
     except (ValueError, TypeError):
         date_taken = None
+    if date_taken is None:
+        return None, None, None
 
     if date_taken:
         stamp = f"{date_taken} {time_part}" if time_part else date_taken

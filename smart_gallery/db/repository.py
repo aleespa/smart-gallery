@@ -299,13 +299,19 @@ class GalleryRepository:
         return [r["v"] for r in cur]
 
     def date_bounds(self) -> Tuple[Optional[date], Optional[date]]:
+        # '0001-01-01' skips the zero dates older catalogs may still hold.
         row = self.conn.execute(
             "SELECT MIN(date_taken) AS lo, MAX(date_taken) AS hi FROM media_items "
-            "WHERE date_taken IS NOT NULL"
+            "WHERE date_taken >= '0001-01-01'"
         ).fetchone()
-        lo = date.fromisoformat(row["lo"]) if row and row["lo"] else None
-        hi = date.fromisoformat(row["hi"]) if row and row["hi"] else None
-        return lo, hi
+
+        def parse(value: Optional[str]) -> Optional[date]:
+            try:
+                return date.fromisoformat(value) if value else None
+            except ValueError:
+                return None
+
+        return (parse(row["lo"]), parse(row["hi"])) if row else (None, None)
 
     # ── faces: scanning (schema v2) ──────────────────────────────────────────
     def count_unscanned_images(self, det_version: str) -> int:

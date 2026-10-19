@@ -10,7 +10,7 @@ import sqlite3
 import numpy as np
 import pytest
 
-from smart_gallery.config import FACE_DET_VERSION
+from smart_gallery.config import FACE_DET_VERSION, SCHEMA_VERSION
 from smart_gallery.db import GalleryRepository
 from smart_gallery.db.schema import (
     CREATE_FACES,
@@ -95,7 +95,7 @@ def test_migrate_v1_catalog_gains_face_tables(tmp_path):
     conn.close()
 
     with GalleryRepository.open(db) as repo:  # read-write -> migrate runs
-        assert repo.schema_version == 3
+        assert repo.schema_version == SCHEMA_VERSION
         tables = {
             r[0]
             for r in repo.conn.execute(
@@ -313,3 +313,27 @@ def test_cluster_synthetic_three_people(repo, make_item):
     assert report.persons_created == 3
     assert report.faces_assigned == 30
     assert len(repo.list_persons()) == 3
+
+
+def test_migrate_v4_clears_zero_capture_dates(tmp_path):
+    db = tmp_path / "gallery.db"
+    conn = sqlite3.connect(db)
+    conn.execute(CREATE_META)
+    conn.execute(CREATE_MEDIA_ITEMS)
+    conn.execute("INSERT INTO meta(key, value) VALUES('schema_version', '3')")
+    conn.execute(
+        "INSERT INTO media_items(relpath, media_type, date_taken, time_taken, taken_ts)"
+        " VALUES('a.jpg', 'image', '0000-00-00', '00:00:00', NULL),"
+        " ('b.jpg', 'image', '2026-03-01', '10:00:00', 1772359200)"
+    )
+    conn.commit()
+    conn.close()
+
+    with GalleryRepository.open(db) as repo:
+        rows = repo.conn.execute(
+            "SELECT relpath, date_taken, time_taken FROM media_items ORDER BY relpath"
+        ).fetchall()
+        assert [tuple(r) for r in rows] == [
+            ("a.jpg", None, None),
+            ("b.jpg", "2026-03-01", "10:00:00"),
+        ]

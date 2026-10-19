@@ -150,6 +150,13 @@ def migrate(conn: sqlite3.Connection) -> None:
         if "reference_centroid" not in columns:
             conn.execute("ALTER TABLE persons ADD COLUMN reference_centroid BLOB")
 
+    if current < 4:
+        # Older parsers stored an unset camera clock as '0000-00-00'.
+        conn.execute(
+            "UPDATE media_items SET date_taken=NULL, time_taken=NULL, taken_ts=NULL "
+            "WHERE date_taken < '0001-01-01'"
+        )
+
     conn.execute(
         "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value;",

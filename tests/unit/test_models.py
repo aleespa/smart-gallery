@@ -65,3 +65,15 @@ def test_shutter_helpers_roundtrip():
     assert format_shutter(2) == "2s"
     assert parse_shutter("1/250s") == 1 / 250
     assert parse_shutter("2s") == 2.0
+
+
+def test_from_exiftool_unset_camera_clock_has_no_date():
+    """Cameras with an unset clock write '0000:00:00 00:00:00'; that is no date."""
+    record = {
+        "SourceFile": "C:/x/a.jpg",
+        "FileTypeExtension": "jpg",
+        "MIMEType": "image/jpeg",
+        "DateTimeOriginal": "0000:00:00 00:00:00",
+    }
+    item = MediaItem.from_exiftool(record)
+    assert (item.date_taken, item.time_taken, item.taken_ts) == (None, None, None)

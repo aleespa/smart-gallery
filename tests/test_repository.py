@@ -101,3 +101,13 @@ def test_read_only_uri_keeps_a_unc_host_out_of_the_authority():
 
     uri = _read_only_uri(PureWindowsPath(r"\\nas\photos\Trip #2\gallery.db"))
     assert uri == "file:////nas/photos/Trip%20%232/gallery.db?mode=ro"
+
+
+def test_date_bounds_skip_invalid_dates(repo, make_item):
+    repo.upsert_many(
+        [
+            make_item("a.jpg", date_taken="0000-00-00"),
+            make_item("b.jpg", date_taken="2026-03-01"),
+        ]
+    )
+    assert repo.date_bounds() == (date(2026, 3, 1), date(2026, 3, 1))

@@ -34,7 +34,7 @@ from smart_gallery.dashboard.data import (
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.dashboard import charts
 from smart_gallery.gui.dashboard.model import DashboardData, load_dashboard
-from smart_gallery.gui.filters_panel import FilterPanel
+from smart_gallery.gui.filters_panel import PANEL_WIDTH, FilterPanel
 from smart_gallery.gui.paths import app_data_dir
 from smart_gallery.gui.repo_query import RepoQuery
 from smart_gallery.organize.filters import is_query_empty
@@ -253,7 +253,7 @@ class DashboardView(QWidget):
         splitter.addWidget(self.filters)
         splitter.addWidget(self.stack)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([260, 940])
+        splitter.setSizes([PANEL_WIDTH, 940])
         QVBoxLayout(self).addWidget(splitter)
 
         self._query.finished.connect(self._on_data)

@@ -1,8 +1,9 @@
 """Filter panel shared by the Library and the Dashboard.
 
 It edits a ``FilterValues`` and publishes the parsed query with
-``ctx.set_filters`` on Apply or after a short pause in editing. Every panel
-also follows ``filters_changed``, so two panels never show different filters.
+``ctx.set_filters`` after a short pause in editing, so there is no Apply
+button. Every panel also follows ``filters_changed``, so two panels never
+show different filters. "Clear all filters" sits at the end of the column.
 
 Each range (dates, aperture, ISO, shutter) is one line: lower bound, then
 upper. The date boxes open a calendar. Cameras, lenses, extensions and people
@@ -14,6 +15,7 @@ from __future__ import annotations
 from datetime import date
 
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QGridLayout,
@@ -27,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from smart_gallery.gui import theme
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.filter_widgets import ChipPicker, DateField
 from smart_gallery.gui.filters_model import (
@@ -39,6 +42,23 @@ from smart_gallery.gui.repo_query import RepoQuery
 from smart_gallery.organize.filters import FilterOptions
 
 DEBOUNCE_MS = 300
+# Wide enough for the three Type boxes side by side; the Library and the
+# Dashboard open the panel at this width.
+PANEL_WIDTH = 300
+CLEAR_TEXT = "Clear all filters"
+_HOVER = QColor(theme.ACCENT).lighter(112).name()
+_PRESSED = QColor(theme.ACCENT).darker(112).name()
+CLEAR_STYLE = f"""
+QPushButton#accentButton {{
+    background: {theme.ACCENT};
+    color: {theme.ON_ACCENT};
+    border: none;
+    border-radius: 4px;
+    padding: 6px 16px;
+}}
+QPushButton#accentButton:hover {{ background: {_HOVER}; }}
+QPushButton#accentButton:pressed {{ background: {_PRESSED}; }}
+"""
 FILE_TYPES = (("image", "Photos"), ("video", "Videos"), ("other", "Other files"))
 DATE_HINT = "A date like 2026-06-30, or pick one from the calendar."
 ERROR_STYLE = "border: 1px solid #d04040;"
@@ -110,9 +130,9 @@ class FilterPanel(QWidget):
         body = QVBoxLayout(content)
         body.addWidget(self._dates_box())
         types = QGroupBox("Type")
-        types_layout = QVBoxLayout(types)
-        for box in self.filetypes.values():
-            types_layout.addWidget(box)
+        types_layout = QGridLayout(types)  # one column per type
+        for column, box in enumerate(self.filetypes.values()):
+            types_layout.addWidget(box, 0, column)
         body.addWidget(types)
         self._boxes: dict[str, QGroupBox] = {}
         for name, title, _noun in _PICKERS:
@@ -125,32 +145,28 @@ class FilterPanel(QWidget):
         self.people_box = self._boxes["people"]
         self.people_box.setVisible(False)
         body.addWidget(self.people_box)
+        self.clear_btn = QPushButton(CLEAR_TEXT)
+        self.clear_btn.setObjectName("accentButton")
+        self.clear_btn.setStyleSheet(CLEAR_STYLE)  # on the button: nothing can undo it
+        body.addWidget(self.clear_btn)
         body.addStretch(1)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(content)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setWidget(content)
 
         self.errors = QLabel()
         self.errors.setWordWrap(True)
         self.errors.setStyleSheet("color: #d04040;")
         self.errors.setVisible(False)
-        self.apply_btn = QPushButton("Apply")
-        self.clear_btn = QPushButton("Clear")
-        buttons = QHBoxLayout()
-        buttons.addWidget(self.clear_btn)
-        buttons.addStretch(1)
-        buttons.addWidget(self.apply_btn)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(scroll, 1)
+        layout.addWidget(self.scroll, 1)
         layout.addWidget(self.errors)
-        layout.addLayout(buttons)
-        self.setMinimumWidth(250)
+        self.setMinimumWidth(PANEL_WIDTH)
 
         self._timer.timeout.connect(self.apply)
-        self.apply_btn.clicked.connect(self.apply)
         self.clear_btn.clicked.connect(self.clear)
         self._choices.finished.connect(self._set_choices)
         self._choices.failed.connect(lambda _error: self._set_choices({}))

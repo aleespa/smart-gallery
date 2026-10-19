@@ -166,3 +166,72 @@ def test_invalid_range_text_still_reports_an_error(qtbot, repo, make_item):
     assert panel.errors.isVisibleTo(panel)
     assert "ISO from" in panel.errors.text()
     assert panel.texts["min_iso"].toolTip()
+
+
+def test_type_checkboxes_sit_side_by_side(qtbot, repo, make_item):
+    panel, _ = _panel(qtbot, repo, make_item)
+    panel.resize(300, 900)
+    panel.show()
+    qtbot.waitExposed(panel)
+    boxes = [panel.filetypes[v] for v in ("image", "video", "other")]
+    tops = {b.mapTo(panel, b.rect().topLeft()).y() for b in boxes}
+    lefts = [b.mapTo(panel, b.rect().topLeft()).x() for b in boxes]
+    assert max(tops) - min(tops) <= 2
+    assert lefts == sorted(lefts) and len(set(lefts)) == 3
+
+
+def _shown(qtbot, repo, make_item):
+    from smart_gallery.gui.filters_panel import PANEL_WIDTH
+
+    panel, ctx = _panel(qtbot, repo, make_item)
+    panel.resize(PANEL_WIDTH, 1000)
+    panel.show()
+    qtbot.waitExposed(panel)
+    return panel, ctx
+
+
+def test_type_boxes_fit_the_default_width(qtbot, repo, make_item):
+    panel, _ = _shown(qtbot, repo, make_item)
+    group = panel.filetypes["other"].parentWidget()
+    last = panel.filetypes["other"]
+    needed = last.sizeHint().width()
+    assert last.width() >= needed  # not squeezed
+    assert last.geometry().right() < group.contentsRect().right()
+
+
+def test_there_is_no_apply_button(qtbot, repo, make_item):
+    from PySide6.QtWidgets import QPushButton
+
+    panel, _ = _panel(qtbot, repo, make_item)
+    texts = [b.text() for b in panel.findChildren(QPushButton)]
+    assert "Apply" not in texts
+
+
+def test_clear_sits_in_the_column_below_the_filters(qtbot, repo, make_item):
+    panel, ctx = _shown(qtbot, repo, make_item)
+    button = panel.clear_btn
+    assert panel.scroll.widget().isAncestorOf(button)
+    exposure = panel.texts["max_shutter"]
+    below = exposure.mapTo(panel, exposure.rect().bottomLeft()).y()
+    assert button.mapTo(panel, button.rect().topLeft()).y() > below
+
+    panel.cameras.pick("Sony A7")
+    panel.apply()
+    assert ctx.filters.cameras == ["Sony A7"]
+    button.click()
+    assert panel.cameras.selected() == ()
+    assert not ctx.filters.cameras
+
+
+def test_clear_button_uses_the_accent(qtbot, repo, make_item):
+    from PySide6.QtGui import QColor
+
+    from smart_gallery.gui import theme
+
+    panel, _ = _shown(qtbot, repo, make_item)
+    image = panel.clear_btn.grab().toImage()
+    edge = image.pixelColor(6, image.height() // 2)
+    accent = QColor(theme.ACCENT)
+    assert abs(edge.red() - accent.red()) < 12
+    assert abs(edge.green() - accent.green()) < 12
+    assert abs(edge.blue() - accent.blue()) < 12

@@ -45,7 +45,7 @@ from PySide6.QtWidgets import (
 )
 
 from smart_gallery.gui.context import AppContext
-from smart_gallery.gui.filters_panel import FilterPanel
+from smart_gallery.gui.filters_panel import PANEL_WIDTH, FilterPanel
 from smart_gallery.gui.library.model import (
     FolderNode,
     LibraryQuery,
@@ -362,7 +362,7 @@ class LibraryView(QWidget):
         splitter.addWidget(self.filters)
         splitter.addWidget(right)
         splitter.setStretchFactor(2, 1)
-        splitter.setSizes([220, 260, 800])
+        splitter.setSizes([220, PANEL_WIDTH, 800])
         QVBoxLayout(self).addWidget(splitter)
 
         self._thumb_timer = QTimer(self)

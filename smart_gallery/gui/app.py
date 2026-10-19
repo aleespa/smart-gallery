@@ -108,6 +108,7 @@ class MainWindow(QMainWindow):
         outer.addWidget(self.job_bar)
         self.frame = ResizeFrame(central)
         self.setCentralWidget(self.frame)
+        self._web_anchor = _web_anchor(central)
 
         self.ctx.navigate.connect(self.show_area)
         self.ctx.gallery_changed.connect(self._update_header)
@@ -249,6 +250,20 @@ class MainWindow(QMainWindow):
     def _close_after_job(self, _record) -> None:
         self._closing = False
         self.close()
+
+
+def _web_anchor(parent: QWidget) -> QWidget:
+    """A zero-size web view, shown, so the window is GPU-composited from the
+    start. Otherwise the first real web view (the Dashboard map) switches the
+    shown window over, which recreates its native window and makes it flash.
+    A hidden one would not count."""
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+
+    view = QWebEngineView(parent)
+    view.setFixedSize(0, 0)
+    view.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    view.setAccessibleName("")
+    return view
 
 
 def _rule() -> QFrame:

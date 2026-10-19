@@ -10,6 +10,7 @@ from __future__ import annotations
 import pandas as pd
 from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, QUrl
 from PySide6.QtGui import QPalette
+from PySide6.QtWebEngineCore import QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QFrame,
@@ -204,6 +205,13 @@ class DashboardView(QWidget):
         self.map_caption = QLabel()
         self.map_view = QWebEngineView()
         self.map_view.setFixedHeight(MAP_HEIGHT)
+        # The map page is a local file we write; its tiles come from the
+        # internet and plotly.js from a file beside it. Allowing remote URLs
+        # turns local-file access off, so allow files again afterwards.
+        settings = self.map_view.settings()
+        attrs = QWebEngineSettings.WebAttribute
+        settings.setAttribute(attrs.LocalContentCanAccessRemoteUrls, True)
+        settings.setAttribute(attrs.LocalContentCanAccessFileUrls, True)
         map_body = QWidget()
         map_layout = QVBoxLayout(map_body)
         map_layout.setContentsMargins(0, 0, 0, 0)

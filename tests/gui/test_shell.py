@@ -86,3 +86,15 @@ def test_window_provides_thumbnail_loader(qtbot):
     win = MainWindow()
     qtbot.addWidget(win)
     assert win.ctx.thumbs is not None
+
+
+def test_window_holds_web_content_before_it_is_shown(qtbot):
+    """A first web view (the Dashboard map) used to recreate the shown window,
+    which flashed. The headless platform never recreates windows, so check
+    the cause instead: a visible web view is there before the first show."""
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    views = win.findChildren(QWebEngineView)
+    assert any(not v.isHidden() for v in views)

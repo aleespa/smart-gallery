@@ -192,3 +192,16 @@ def test_dashboard_disconnected_drive_message(qtbot, tmp_path):
     view, _ = _view(qtbot, tmp_path / "gone" / "gallery.db")
     qtbot.waitUntil(lambda: "not connected" in view.message.text())
     assert view.stack.currentWidget() is view.message
+
+
+def test_map_page_may_fetch_its_tiles_and_plotly(qtbot, repo):
+    from PySide6.QtWebEngineCore import QWebEngineSettings
+
+    view, _ = _view(qtbot, repo.db_path)
+    settings = view.map_view.settings()
+    attrs = QWebEngineSettings.WebAttribute
+    # The map is a local page whose tiles come from the internet, and which
+    # loads plotly.js from a file beside it. Turning on the first quietly
+    # turns off the second, so both must hold.
+    assert settings.testAttribute(attrs.LocalContentCanAccessRemoteUrls)
+    assert settings.testAttribute(attrs.LocalContentCanAccessFileUrls)

@@ -17,7 +17,7 @@ from smart_gallery.gui import theme
 APP_NAME = "Smart Gallery"
 # The base colours run from the first stop to the last.
 GRADIENT = tuple(QColor(c) for c in theme.SUNSET)
-TOP = QColor("#FFFFFF")
+TOP = QColor(theme.BRAND_CAPS)
 # Where the fade sits in each letter's height, from the bottom.
 BASE_AT = 0.15
 WHITE_AT = 0.95

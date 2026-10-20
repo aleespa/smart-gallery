@@ -4,6 +4,7 @@ import sys
 
 import pandas as pd
 
+from smart_gallery import colors
 from smart_gallery.dashboard import data
 from smart_gallery.dashboard.data import (
     APERTURE,
@@ -26,14 +27,14 @@ def test_file_type_counts_drops_zero():
 
 def test_file_type_colors_by_name():
     assert data.file_type_colors((("Images", 1), ("Videos", 2), ("Others", 3))) == [
-        "#66b3ff",
-        "#99ff99",
-        "#ff9999",
+        colors.FILE_TYPE_COLORS["Images"],
+        colors.FILE_TYPE_COLORS["Videos"],
+        colors.FILE_TYPE_COLORS["Others"],
     ]
-    # No images: Videos stays green instead of taking the first colour.
+    # No images: Videos keeps its colour instead of taking the first one.
     assert data.file_type_colors((("Videos", 2), ("Others", 3))) == [
-        "#99ff99",
-        "#ff9999",
+        colors.FILE_TYPE_COLORS["Videos"],
+        colors.FILE_TYPE_COLORS["Others"],
     ]
 
 

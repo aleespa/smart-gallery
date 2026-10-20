@@ -61,7 +61,7 @@ QPushButton#accentButton:pressed {{ background: {_PRESSED}; }}
 """
 FILE_TYPES = (("image", "Photos"), ("video", "Videos"), ("other", "Other files"))
 DATE_HINT = "A date like 2026-06-30, or pick one from the calendar."
-ERROR_STYLE = "border: 1px solid #d04040;"
+ERROR_STYLE = theme.ERROR_FIELD_STYLE
 RANGE_DASH = "–"
 
 # (field, label in error messages, placeholder) for the text boxes.
@@ -157,7 +157,7 @@ class FilterPanel(QWidget):
 
         self.errors = QLabel()
         self.errors.setWordWrap(True)
-        self.errors.setStyleSheet("color: #d04040;")
+        self.errors.setStyleSheet(theme.ERROR_TEXT_STYLE)
         self.errors.setVisible(False)
 
         layout = QVBoxLayout(self)

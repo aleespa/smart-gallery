@@ -15,6 +15,7 @@ from PySide6.QtCore import QObject, QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPalette
 from PySide6.QtWidgets import QApplication, QGraphicsTextItem
 
+from smart_gallery import colors
 from smart_gallery.dashboard.data import (
     APERTURE,
     FOCAL,
@@ -123,9 +124,9 @@ def test_donut_slices_and_labels(qtbot, monkeypatch):
     ]
     assert all(s.isLabelVisible() for s in slices)
     assert [s.color() for s in slices] == [
-        QColor("#66b3ff"),
-        QColor("#99ff99"),
-        QColor("#ff9999"),
+        QColor(colors.FILE_TYPE_COLORS["Images"]),
+        QColor(colors.FILE_TYPE_COLORS["Videos"]),
+        QColor(colors.FILE_TYPE_COLORS["Others"]),
     ]
 
     assert charts.slice_tooltip("Images", 12345) == "Images: 12,345"
@@ -376,8 +377,8 @@ def test_apply_theme_keeps_slice_colors(qtbot, monkeypatch):
     assert view.chart().theme() == QChart.ChartThemeDark
     (series,) = view.chart().series()
     assert [s.color() for s in series.slices()] == [
-        QColor("#99ff99"),
-        QColor("#ff9999"),
+        QColor(colors.FILE_TYPE_COLORS["Videos"]),
+        QColor(colors.FILE_TYPE_COLORS["Others"]),
     ]
 
 

@@ -14,6 +14,8 @@ from PySide6.QtCore import QEvent, QPoint, QSize, Qt
 from PySide6.QtGui import QFont, QMouseEvent
 from PySide6.QtWidgets import QHBoxLayout, QToolButton, QWidget
 
+from smart_gallery.gui import theme
+
 RESIZE_MARGIN = 5  # px of the window edge that resizes it
 # Windows' own caption glyphs (Segoe Fluent Icons; MDL2 Assets on Windows 10).
 ICON_FONTS = ["Segoe Fluent Icons", "Segoe MDL2 Assets"]
@@ -24,12 +26,11 @@ GLYPHS = {
     "close": "",
 }
 BUTTON_SIZE = QSize(46, 36)
-CLOSE_HOVER = "#C42B1C"  # the system close button's red
 BUTTON_STYLE = f"""
 QToolButton#windowButton {{ border: none; background: transparent; }}
 QToolButton#windowButton:hover {{ background: palette(midlight); }}
 QToolButton#windowButton[role="close"]:hover {{
-    background: {CLOSE_HOVER};
+    background: {theme.CLOSE_HOVER};
     color: white;
 }}
 """

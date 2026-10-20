@@ -10,18 +10,46 @@ from typing import Optional
 
 import pandas as pd
 
+from smart_gallery import colors
 from smart_gallery.config import to_abspath
 from smart_gallery.db import GalleryRepository
 from smart_gallery.organize import FilterOptions
 
 _IMAGE_COLS = [
-    "name", "ext", "directory_rel", "Full path", "date_taken", "time_taken",
-    "camera", "lens", "focal_length", "aperture", "iso", "shutter_speed",
-    "latitude", "longitude", "altitude", "size_bytes", "size (MB)", "width", "height",
+    "name",
+    "ext",
+    "directory_rel",
+    "Full path",
+    "date_taken",
+    "time_taken",
+    "camera",
+    "lens",
+    "focal_length",
+    "aperture",
+    "iso",
+    "shutter_speed",
+    "latitude",
+    "longitude",
+    "altitude",
+    "size_bytes",
+    "size (MB)",
+    "width",
+    "height",
 ]
 _VIDEO_COLS = [
-    "name", "ext", "directory_rel", "Full path", "date_taken", "time_taken",
-    "size_bytes", "size (MB)", "width", "height", "duration_ms", "codec", "frame_rate",
+    "name",
+    "ext",
+    "directory_rel",
+    "Full path",
+    "date_taken",
+    "time_taken",
+    "size_bytes",
+    "size (MB)",
+    "width",
+    "height",
+    "duration_ms",
+    "codec",
+    "frame_rate",
 ]
 _OTHER_COLS = ["name", "ext", "directory_rel", "Full path", "size_bytes", "size (MB)"]
 
@@ -68,8 +96,8 @@ def _to_sheet(df: pd.DataFrame, writer: pd.ExcelWriter, sheet_name: str) -> None
             "bold": True,
             "valign": "middle",
             "align": "left",
-            "fg_color": "#000000",
-            "font_color": "#FFFFFF",
+            "fg_color": colors.REPORT_HEADER,
+            "font_color": colors.ON_REPORT_HEADER,
             "border": 1,
         }
     )

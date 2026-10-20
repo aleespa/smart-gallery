@@ -1,18 +1,36 @@
-"""Typefaces and the accent colour for the desktop app.
+"""Typefaces, colours and shared style sheets for the desktop app.
 
 Segoe UI Variable Text is the body face for every control; Georgia is kept for
 headings (the brand, page titles, section titles). Each family lists fallbacks
 for systems that lack it.
 
-The accent is the first Sunset stop, the colour the brand name starts from.
-It replaces the system accent in the palette, so selections, checked boxes,
-toggled buttons and the open tab's underline all share it.
+The colours themselves live in ``smart_gallery/colors.py``, shared with the
+Streamlit dashboard and the report figures; edit them there. The accent is the
+first Sunset stop, the colour the brand name starts from. It replaces the
+system accent in the palette, so selections, checked boxes, toggled buttons
+and the open tab's underline all share it. Everything else should use a
+palette role or one of the names re-exported here, never a colour literal.
 """
 
 from __future__ import annotations
 
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
+
+from smart_gallery.colors import (  # noqa: F401  (re-exported for the GUI)
+    ACCENT,
+    BADGE_BACK,
+    BADGE_TEXT,
+    BRAND_CAPS,
+    CLOSE_HOVER,
+    ERROR,
+    ON_ACCENT,
+    ON_WARNING,
+    SUNSET,
+    TILE_BACK,
+    TILE_GLYPH,
+    WARNING,
+)
 
 SANS = ["Segoe UI Variable Text", "Segoe UI", "sans-serif"]
 SERIF = ["Georgia", "Times New Roman", "serif"]
@@ -22,11 +40,14 @@ TAB_PT = 11
 TITLE_PT = 22
 SECTION_PT = 10.5
 
-# Sunset: coral to orange. The brand's letters run along it.
-SUNSET = ("#FF5F6D", "#FFA552")
-ACCENT = SUNSET[0]
-# Text on the accent: dark, since white on coral is too faint to read.
-ON_ACCENT = "#1A1A1A"
+WARNING_BANNER_STYLE = f"background: {WARNING}; color: {ON_WARNING}; padding: 6px;"
+ERROR_TEXT_STYLE = f"color: {ERROR};"
+ERROR_FIELD_STYLE = f"border: 1px solid {ERROR};"
+
+
+def qcolor(color: str | tuple[int, ...]) -> QColor:
+    """A ``colors`` value as a QColor: ``#RRGGBB`` or an ``(r, g, b, a)`` tuple."""
+    return QColor(*color) if isinstance(color, tuple) else QColor(color)
 
 
 def apply_theme(app: QApplication) -> None:

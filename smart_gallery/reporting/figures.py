@@ -9,23 +9,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from smart_gallery import colors
 from smart_gallery.db import GalleryRepository
 
+# The same colours as the dashboards; edit them in ``smart_gallery.colors``.
 PLOT_COLORS = {
-    "lens": "lightgreen",
-    "aperture": "coral",
-    "shutter_speed": "orchid",
-    "iso": "gold",
-    "focal_length": "teal",
-    "video_duration": "crimson",
-    "timeline_count": "blue",
-    "timeline_time": "darkorange",
-    "stacked_colors": [
-        "#e60000", "#3d6ba6", "#65880f", "#4e4e94",
-        "#a70000", "#2b4e72", "#5f720f", "#313178",
-        "#ff5252", "#5a8cc2", "#8eb027", "#7474b0",
-    ],
-    "pie_chart": ["#ff9999", "#66b3ff", "#99ff99"],
+    "lens": colors.ACCENT,
+    "video_duration": colors.VIDEO,
+    "locations": colors.ACCENT,
+    "stacked_colors": list(colors.categorical()),
+    "file_types": colors.FILE_TYPE_COLORS,
 }
 
 
@@ -69,7 +62,7 @@ def plot_general_counts(df_images, df_videos, df_others, output_dir):
         labels=counts.keys(),
         autopct="%1.1f%%",
         startangle=140,
-        colors=PLOT_COLORS["pie_chart"],
+        colors=[PLOT_COLORS["file_types"][name] for name in counts],
     )
     ax.set_title("File Type Distribution", fontsize=16)
     _save(fig, output_dir, "general_file_types.png")
@@ -82,14 +75,21 @@ def plot_cameras(df, output_dir):
         return
     counts = df["camera"].value_counts().nlargest(15)
     fig, ax = plt.subplots(figsize=(10, 8))
-    colors = [
-        PLOT_COLORS["stacked_colors"][i % len(PLOT_COLORS["stacked_colors"])]
-        for i in range(len(counts))
-    ]
-    wedges, _ = ax.pie(counts.values, startangle=140, colors=colors)
+    stacked = PLOT_COLORS["stacked_colors"]
+    slice_colors = [stacked[i % len(stacked)] for i in range(len(counts))]
+    wedges, _ = ax.pie(counts.values, startangle=140, colors=slice_colors)
     total = sum(counts.values)
-    labels = [f"{i} ({v / total * 100:.1f}%)" for i, v in zip(counts.index, counts.values)]
-    ax.legend(wedges, labels, title="Camera", loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
+    labels = [
+        f"{i} ({v / total * 100:.1f}%)" for i, v in zip(counts.index, counts.values)
+    ]
+    ax.legend(
+        wedges,
+        labels,
+        title="Camera",
+        loc="center left",
+        bbox_to_anchor=(1, 0.5),
+        frameon=False,
+    )
     ax.set_title("Top Cameras Used", fontsize=16)
     _save(fig, output_dir, "images_cameras.png")
 
@@ -114,7 +114,12 @@ def plot_video_duration(df, output_dir):
         return
     durations_s = df["duration_ms"].dropna() / 1000.0
     fig, ax = plt.subplots(figsize=(10, 6))
-    ax.hist(durations_s, bins=50, color=PLOT_COLORS["video_duration"], edgecolor="black")
+    ax.hist(
+        durations_s,
+        bins=50,
+        color=PLOT_COLORS["video_duration"],
+        edgecolor=colors.BAR_EDGE,
+    )
     ax.set_title("Video Duration Distribution", fontsize=16)
     ax.set_xlabel("Duration (seconds)")
     ax.set_ylabel("Number of Videos")
@@ -144,8 +149,15 @@ def plot_locations(df, output_dir):
 
     fig, ax = plt.subplots(figsize=(12, 8), dpi=120)
     if world is not None:
-        world.plot(ax=ax, color="white", edgecolor="lightgray")
-    ax.scatter(df_loc["longitude"], df_loc["latitude"], alpha=0.5, c="blue", s=20, zorder=5)
+        world.plot(ax=ax, color=colors.MAP_LAND, edgecolor=colors.MAP_BORDER)
+    ax.scatter(
+        df_loc["longitude"],
+        df_loc["latitude"],
+        alpha=0.5,
+        c=PLOT_COLORS["locations"],
+        s=20,
+        zorder=5,
+    )
     ax.axis("off")
     _save(fig, output_dir, "locations_map.png")
 

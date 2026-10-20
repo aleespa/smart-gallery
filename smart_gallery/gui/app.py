@@ -97,7 +97,7 @@ class MainWindow(QMainWindow):
         outer.addWidget(self._build_top_bar())
         outer.addWidget(_rule())
         self.banner = QLabel(EXIFTOOL_BANNER)
-        self.banner.setStyleSheet("background: #f0c040; color: black; padding: 6px;")
+        self.banner.setStyleSheet(theme.WARNING_BANNER_STYLE)
         self.banner.setVisible(not exiftool_available())
         outer.addWidget(self.banner)
         outer.addWidget(self._build_page_header())

@@ -1,6 +1,7 @@
 import pandas as pd
 import plotly.graph_objects as go
 
+from smart_gallery import colors
 from smart_gallery.dashboard import data, figures
 
 
@@ -85,7 +86,10 @@ def test_file_type_donut_colors_by_name():
     fig = figures.file_type_donut(pd.DataFrame(), fv, fo)
     # No images: Videos stays green, as in the desktop dashboard.
     assert tuple(fig.data[0].labels) == ("Videos", "Others")
-    assert tuple(fig.data[0].marker.colors) == ("#99ff99", "#ff9999")
+    assert tuple(fig.data[0].marker.colors) == (
+        colors.FILE_TYPE_COLORS["Videos"],
+        colors.FILE_TYPE_COLORS["Others"],
+    )
     items = data.file_type_counts(pd.DataFrame(), fv, fo)
     assert list(fig.data[0].marker.colors) == data.file_type_colors(items)
 
@@ -151,7 +155,7 @@ def test_timeline_matches_monthly_by_camera():
         assert tuple(trace.x) == ms.months
         assert tuple(trace.y) == ms.series[trace.name]
     other = next(t for t in fig.data if t.name == "Other")
-    assert other.marker.color == "#9e9e9e"
+    assert other.marker.color == colors.NEUTRAL
     assert fig.layout.title.text == "Monthly Photo Count by Camera"
 
 

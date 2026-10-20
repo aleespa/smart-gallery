@@ -1,6 +1,7 @@
 import pytest
 import shiboken6
 
+from smart_gallery import colors
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.galleries.store import Gallery
 
@@ -151,8 +152,8 @@ def test_dashboard_file_type_colors_without_images(qtbot, repo, make_item):
     # Videos stays green, as in the Streamlit dashboard.
     assert [s.property("sg_name") for s in series.slices()] == ["Videos", "Others"]
     assert [s.color() for s in series.slices()] == [
-        QColor("#99ff99"),
-        QColor("#ff9999"),
+        QColor(colors.FILE_TYPE_COLORS["Videos"]),
+        QColor(colors.FILE_TYPE_COLORS["Others"]),
     ]
 
 

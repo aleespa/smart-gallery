@@ -12,26 +12,15 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-# Today's STACKED_COLORS: category rank i gets PALETTE[i].
-PALETTE: tuple[str, ...] = (
-    "#e60000",
-    "#3d6ba6",
-    "#65880f",
-    "#4e4e94",
-    "#a70000",
-    "#2b4e72",
-    "#5f720f",
-    "#313178",
-    "#ff5252",
-    "#5a8cc2",
-    "#8eb027",
-    "#7474b0",
-)
+from smart_gallery import colors
+
+# Category rank i gets PALETTE[i]; the colours are set in ``colors``.
+PALETTE: tuple[str, ...] = colors.categorical()
 OTHER = "Other"
-OTHER_COLOR = "#9e9e9e"
-FILE_TYPES: tuple[str, ...] = ("Images", "Videos", "Others")
-FILE_TYPE_COLORS: tuple[str, ...] = ("#66b3ff", "#99ff99", "#ff9999")
-VIDEO_COLOR = "#dc143c"
+OTHER_COLOR = colors.NEUTRAL
+FILE_TYPES: tuple[str, ...] = tuple(colors.FILE_TYPE_COLORS)
+FILE_TYPE_COLORS: tuple[str, ...] = tuple(colors.FILE_TYPE_COLORS.values())
+VIDEO_COLOR = colors.VIDEO
 
 _TIE_TOLERANCE = 1e-12
 _MONTH_NAMES = (
@@ -67,7 +56,7 @@ def file_type_counts(fi, fv, fo) -> tuple[tuple[str, int], ...]:
 
 
 def file_type_colors(items) -> list[str]:
-    """File-type colours by name, so Videos stays green when there are no images."""
+    """File-type colours by name, so Videos keeps its colour with no images."""
     by_name = dict(zip(FILE_TYPES, FILE_TYPE_COLORS))
     return [by_name.get(name, color_for(name, i)) for i, (name, _) in enumerate(items)]
 
@@ -135,12 +124,7 @@ ISO = StopSpec("ISO", _ISO_STOPS, tuple(f"ISO {v}" for v in _ISO_STOPS))
 FOCAL = StopSpec("Focal Length", _FOCAL_STOPS, tuple(f"{v}mm" for v in _FOCAL_STOPS))
 SETTINGS: tuple[StopSpec, ...] = (APERTURE, SHUTTER, ISO, FOCAL)
 
-SETTINGS_COLORS: dict[str, str] = {
-    "Aperture": "#ff7f50",
-    "Shutter Speed": "#da70d6",
-    "ISO": "#ffd700",
-    "Focal Length": "#008080",
-}
+SETTINGS_COLORS: dict[str, str] = colors.SETTINGS_COLORS
 
 
 def stop_buckets(values: pd.Series, spec: StopSpec) -> tuple[tuple[str, int], ...]:

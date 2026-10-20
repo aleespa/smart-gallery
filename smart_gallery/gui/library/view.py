@@ -21,7 +21,6 @@ from PySide6.QtCore import (
     QTimer,
 )
 from PySide6.QtGui import (
-    QColor,
     QFont,
     QPainter,
     QPixmap,
@@ -43,6 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from smart_gallery.gui import theme
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.filters_panel import PANEL_WIDTH, FilterPanel
 from smart_gallery.gui.library.grid import GroupedGrid
@@ -75,8 +75,8 @@ DISCONNECTED = "Drive not connected. Plug in {label} to browse it."
 NOTHING = "Nothing matches this folder and the current filters."
 READ_ERROR = "Could not read the catalog: {error}"
 
-_TILE_BG = QColor(128, 128, 128, 50)
-_TILE_FG = QColor(128, 128, 128, 170)
+_TILE_BG = theme.qcolor(theme.TILE_BACK)
+_TILE_FG = theme.qcolor(theme.TILE_GLYPH)
 _placeholders: dict[tuple[str, str], QPixmap] = {}
 
 
@@ -121,8 +121,8 @@ def _placeholder(kind: str, text: str = "") -> QPixmap:
     return pixmap
 
 
-_BADGE_BG = QColor(0, 0, 0, 150)
-_BADGE_FG = QColor(255, 255, 255, 235)
+_BADGE_BG = theme.qcolor(theme.BADGE_BACK)
+_BADGE_FG = theme.qcolor(theme.BADGE_TEXT)
 
 
 def _with_video_badge(frame: QPixmap, duration: str) -> QPixmap:

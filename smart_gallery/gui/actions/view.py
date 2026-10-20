@@ -31,6 +31,7 @@ from smart_gallery.forms import (
     field_rows,
     format_command,
 )
+from smart_gallery.gui import theme
 from smart_gallery.gui.actions import model
 from smart_gallery.gui.actions.fields import FieldEditor, make_editor
 from smart_gallery.gui.actions.model import READ_ONLY_COMMANDS
@@ -40,8 +41,6 @@ from smart_gallery.gui.jobs import JobSpec
 logger = logging.getLogger(__name__)
 
 EXTRA = "extra"
-BANNER_STYLE = "background: #f0c040; color: black; padding: 6px;"
-ERROR_STYLE = "color: #d64545;"
 LABEL_WIDTH = 170
 JOB_RUNNING = "A job is already running."
 NO_JOBS = "Jobs are not available."
@@ -57,7 +56,7 @@ def _hint(text: str) -> QLabel:
 def _error_label() -> QLabel:
     label = QLabel()
     label.setWordWrap(True)
-    label.setStyleSheet(ERROR_STYLE)
+    label.setStyleSheet(theme.ERROR_TEXT_STYLE)
     label.setVisible(False)
     return label
 
@@ -235,7 +234,7 @@ class ActionsView(QWidget):
         self.title.setStyleSheet("font-weight: bold;")
         self.banner = QLabel()
         self.banner.setWordWrap(True)
-        self.banner.setStyleSheet(BANNER_STYLE)
+        self.banner.setStyleSheet(theme.WARNING_BANNER_STYLE)
         self.banner.setVisible(False)
         self.stack = QStackedWidget()
         self.preview = QLabel()

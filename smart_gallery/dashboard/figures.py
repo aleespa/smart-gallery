@@ -11,6 +11,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from smart_gallery import colors
 from smart_gallery.dashboard import data
 from smart_gallery.dashboard.data import geotagged, parse_shutter  # noqa: F401
 from smart_gallery.db import GalleryRepository
@@ -187,7 +188,7 @@ def photo_map(fi) -> Optional[go.Figure]:
         radius=10,
         zoom=2,
         map_style="open-street-map",
-        color_continuous_scale="Viridis",
+        color_continuous_scale=[list(stop) for stop in colors.sequential()],
         opacity=0.75,
     )
     fig.update_layout(

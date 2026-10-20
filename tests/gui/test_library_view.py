@@ -1,5 +1,5 @@
 from PIL import Image
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, QPoint, Qt, Signal
 from PySide6.QtGui import QPixmap
 
 from smart_gallery.gui.context import AppContext
@@ -52,7 +52,8 @@ def test_library_shows_rows_for_folder(qtbot, repo, make_item):
     assert view.stats.text().startswith("3 items")
 
     view.select_folder("a")
-    qtbot.waitUntil(lambda: _relpaths(view) == ["a/1.jpg", "a/sub/2.jpg"])
+    # Newest first by default.
+    qtbot.waitUntil(lambda: _relpaths(view) == ["a/sub/2.jpg", "a/1.jpg"])
 
     view.subfolders.setChecked(False)
     qtbot.waitUntil(lambda: _relpaths(view) == ["a/1.jpg"])
@@ -79,12 +80,12 @@ def test_library_reads_while_writer_open(qtbot, repo, make_item):
     view, ctx = _view(qtbot, repo.db_path)
 
     view.reload()
-    qtbot.waitUntil(lambda: _relpaths(view) == ["a/1.jpg", "a/2.jpg"])
+    qtbot.waitUntil(lambda: _relpaths(view) == ["a/2.jpg", "a/1.jpg"])
     assert view.stack.currentWidget() is view.grid
 
     repo.upsert_many([make_item("a/3.jpg")])  # commits the open transaction
     ctx.catalog_updated.emit()
-    qtbot.waitUntil(lambda: _relpaths(view) == ["a/1.jpg", "a/2.jpg", "a/3.jpg"])
+    qtbot.waitUntil(lambda: _relpaths(view) == ["a/3.jpg", "a/2.jpg", "a/1.jpg"])
     assert view.stack.currentWidget() is view.grid
 
 
@@ -224,11 +225,12 @@ def test_sort_direction_toggle(qtbot, repo, make_item):
         ]
     )
     view, _ = _view(qtbot, repo.db_path)
-    qtbot.waitUntil(lambda: _relpaths(view) == ["a.jpg", "b.jpg", "c.jpg"])
-    assert not view.descending.isChecked()
-
-    view.descending.setChecked(True)
+    # The newest photos come first by default.
     qtbot.waitUntil(lambda: _relpaths(view) == ["c.jpg", "b.jpg", "a.jpg"])
+    assert view.descending.isChecked()
+
+    view.descending.setChecked(False)
+    qtbot.waitUntil(lambda: _relpaths(view) == ["a.jpg", "b.jpg", "c.jpg"])
 
     # Picking a sort resets the direction to that sort's natural one.
     view.sort.setCurrentIndex(view.sort.findData("size"))
@@ -239,6 +241,108 @@ def test_sort_direction_toggle(qtbot, repo, make_item):
 
     view.sort.setCurrentIndex(view.sort.findData("name"))
     assert not view.descending.isChecked()
+
+
+def _labels(view):
+    return [(g.label, g.count) for g in view.grid.groups()]
+
+
+def test_grid_groups_follow_the_sort(qtbot, repo, make_item):
+    repo.upsert_many(
+        [
+            make_item("x/a.jpg", date_taken="2025-12-24", size_bytes=2 << 20),
+            make_item("x/b.jpg", date_taken="2026-03-01", size_bytes=500),
+            make_item("y/c.jpg", date_taken="2026-03-15", size_bytes=200 << 20),
+            make_item("d.jpg", date_taken=None, size_bytes=700),
+        ]
+    )
+    view, _ = _view(qtbot, repo.db_path)
+    view.resize(900, 600)
+    view.show()
+    qtbot.waitUntil(
+        lambda: _labels(view)
+        == [("March 2026", 2), ("December 2025", 1), ("No date", 1)]
+    )
+
+    view.sort.setCurrentIndex(view.sort.findData("name"))
+    qtbot.waitUntil(lambda: _labels(view) == [("Top folder", 1), ("x", 2), ("y", 1)])
+
+    view.sort.setCurrentIndex(view.sort.findData("size"))
+    qtbot.waitUntil(
+        lambda: _labels(view)
+        == [("100 MB to 1 GB", 1), ("1 to 10 MB", 1), ("Under 1 MB", 2)]
+    )
+
+
+def test_grid_headings_take_space_and_are_not_tiles(qtbot, repo, make_item):
+    from smart_gallery.gui.library.grid import HEADER_HEIGHT
+
+    repo.upsert_many(
+        [
+            make_item("a.jpg", date_taken="2026-03-01"),
+            make_item("b.jpg", date_taken="2026-02-01"),
+        ]
+    )
+    view, _ = _view(qtbot, repo.db_path)
+    view.resize(900, 600)
+    view.show()
+    qtbot.waitUntil(lambda: len(view.grid.groups()) == 2)
+    grid = view.grid
+    first = grid.visualRect(view.grid_model.index(0))
+    second = grid.visualRect(view.grid_model.index(1))
+    assert first.top() >= HEADER_HEIGHT
+    assert second.top() >= first.bottom() + HEADER_HEIGHT  # own heading between
+    assert not grid.indexAt(first.topLeft() - QPoint(0, HEADER_HEIGHT)).isValid()
+    assert grid.indexAt(first.center()).row() == 0
+    assert grid.indexAt(second.center()).row() == 1
+    assert list(grid.visible_rows()) == [0, 1]
+
+
+def test_clicking_a_heading_collapses_its_group(qtbot, repo, make_item):
+    from smart_gallery.gui.library.grid import HEADER_HEIGHT
+
+    repo.upsert_many(
+        [
+            make_item("a.jpg", date_taken="2026-03-02"),
+            make_item("b.jpg", date_taken="2026-03-01"),
+            make_item("c.jpg", date_taken="2026-02-01"),
+        ]
+    )
+    view, ctx = _view(qtbot, repo.db_path)
+    view.resize(900, 600)
+    view.show()
+    qtbot.waitUntil(lambda: len(view.grid.groups()) == 2)
+    grid, model = view.grid, view.grid_model
+    heading = QPoint(20, HEADER_HEIGHT // 2)
+    assert grid.heading_at(heading) == 0
+
+    qtbot.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton, pos=heading)
+    assert grid.is_collapsed("March 2026")
+    assert grid.isIndexHidden(model.index(0))
+    assert grid.visualRect(model.index(0)).isNull()
+    # February's heading moves up under March's, and its tile follows it.
+    assert grid.heading_at(QPoint(20, HEADER_HEIGHT + 5)) == 1
+    assert grid.visible_rows() == [2]
+    assert grid.indexAt(grid.visualRect(model.index(2)).center()).row() == 2
+
+    # Keys skip the collapsed group.
+    grid.setCurrentIndex(model.index(2))
+    grid.setFocus()
+    qtbot.keyClick(grid, Qt.Key.Key_Home)
+    assert grid.currentIndex().row() == 2
+
+    # A reload (filters, a sync) keeps it collapsed; a new sort does not.
+    ctx.catalog_updated.emit()
+    qtbot.wait(100)
+    assert grid.is_collapsed("March 2026")
+    qtbot.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton, pos=heading)
+    assert not grid.is_collapsed("March 2026")
+    assert grid.visible_rows() == [0, 1, 2]
+
+    grid.collapse_all()
+    assert grid.visible_rows() == []
+    view.sort.setCurrentIndex(view.sort.findData("size"))
+    assert not grid.is_collapsed("March 2026")
 
 
 def test_sort_direction_button_matches_sort_box_height(qtbot, repo):

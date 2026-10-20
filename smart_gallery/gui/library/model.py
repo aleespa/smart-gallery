@@ -16,10 +16,13 @@ from smart_gallery.organize.filters import FilterOptions
 _ESCAPE = r"'\'"
 
 # {d} is ASC or DESC. NULL dates stay last either way, and the relpath
-# tiebreak keeps the order stable.
+# tiebreak keeps the order stable. Name sorts by folder first (the rtrim
+# strips the file name), so each folder's files stay together and come
+# before its subfolders'.
+_PARENT = "rtrim(relpath, replace(relpath, '/', '')) COLLATE NOCASE"
 _ORDER_BY = {
     "date": "(date_taken IS NULL), date_taken {d}, relpath {d}",
-    "name": "relpath {d}",
+    "name": _PARENT + " {d}, relpath {d}",
     "size": "size_bytes {d}, relpath {d}",
 }
 
@@ -49,6 +52,17 @@ class LibraryRow:
     ext: str
     mtime_ns: Optional[int]
     duration_ms: Optional[int] = None  # videos, for the tile label
+    date_taken: Optional[str] = None  # 'YYYY-MM-DD', for date groups
+    size_bytes: Optional[int] = None  # for size groups
+
+
+@dataclass(frozen=True)
+class RowGroup:
+    """``count`` consecutive rows from ``start`` shown under ``label``."""
+
+    start: int
+    count: int
+    label: str
 
 
 def _normalize_folder(folder: str) -> str:
@@ -101,7 +115,8 @@ def library_rows(repo: GalleryRepository, q: LibraryQuery) -> list[LibraryRow]:
     order = _ORDER_BY.get(q.sort, _ORDER_BY["date"])
     order = order.format(d="DESC" if q.descending else "ASC")
     cur = repo.conn.execute(
-        f"SELECT id, relpath, media_type, ext, mtime_ns, duration_ms"
+        f"SELECT id, relpath, media_type, ext, mtime_ns, duration_ms,"
+        f" date_taken, size_bytes"
         f" FROM media_items{where} ORDER BY {order}",
         params,
     )
@@ -113,9 +128,69 @@ def library_rows(repo: GalleryRepository, q: LibraryQuery) -> list[LibraryRow]:
             r["ext"],
             r["mtime_ns"],
             None if r["duration_ms"] is None else round(r["duration_ms"]),
+            r["date_taken"],
+            r["size_bytes"],
         )
         for r in cur
     ]
+
+
+MONTHS = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)  # fmt: skip
+NO_DATE = "No date"
+TOP_FOLDER = "Top folder"
+# (lower bound in bytes, label), largest first.
+SIZE_BUCKETS = (
+    (1 << 30, "1 GB and over"),
+    (100 << 20, "100 MB to 1 GB"),
+    (10 << 20, "10 to 100 MB"),
+    (1 << 20, "1 to 10 MB"),
+    (0, "Under 1 MB"),
+)
+
+
+def _month_label(date_taken: Optional[str]) -> str:
+    try:
+        year, month = date_taken[:4], int(date_taken[5:7])
+        return f"{MONTHS[month - 1]} {int(year)}"
+    except (TypeError, ValueError, IndexError):
+        return NO_DATE
+
+
+def _folder_label(relpath: str) -> str:
+    folder, _, _ = relpath.rpartition("/")
+    return folder or TOP_FOLDER
+
+
+def _size_label(size_bytes: Optional[int]) -> str:
+    size = size_bytes or 0
+    return next(label for bound, label in SIZE_BUCKETS if size >= bound)
+
+
+def group_rows(rows: list[LibraryRow], sort: str) -> list[RowGroup]:
+    """Split sorted ``rows`` into runs that share a heading: the month taken,
+    the folder, or a size band. Runs follow the row order, so a heading can
+    only repeat if the order interleaves it."""
+    if sort == "name":
+        label_of, key_of = (lambda r: _folder_label(r.relpath)), _fold
+    elif sort == "size":
+        label_of, key_of = (lambda r: _size_label(r.size_bytes)), str
+    else:
+        label_of, key_of = (lambda r: _month_label(r.date_taken)), str
+    groups: list[RowGroup] = []
+    start, label, key = 0, "", None
+    for i, row in enumerate(rows):
+        row_label = label_of(row)
+        row_key = key_of(row_label)
+        if row_key != key:
+            if i:
+                groups.append(RowGroup(start, i - start, label))
+            start, label, key = i, row_label, row_key
+    if rows:
+        groups.append(RowGroup(start, len(rows) - start, label))
+    return groups
 
 
 def library_stats(repo: GalleryRepository, q: LibraryQuery) -> tuple[int, int]:

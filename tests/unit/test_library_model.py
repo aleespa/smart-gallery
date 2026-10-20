@@ -7,6 +7,7 @@ from smart_gallery.gui.library.model import (
     LibraryQuery,
     folder_clause,
     folder_tree,
+    group_rows,
     library_rows,
     library_stats,
 )
@@ -183,3 +184,46 @@ def test_library_stats(repo, make_item):
     assert library_stats(repo, LibraryQuery()) == (3, 300)
     assert library_stats(repo, LibraryQuery(folder="a")) == (2, 200)
     assert library_stats(repo, LibraryQuery(folder="nope")) == (0, 0)
+
+
+def test_name_sort_keeps_each_folders_files_together(repo, make_item):
+    _add(repo, make_item, "a/2024/x.jpg", "a/IMG_1.jpg", "A/IMG_0.jpg", "b.jpg")
+
+    rows = library_rows(repo, LibraryQuery(sort="name"))
+
+    assert [r.relpath for r in rows] == [
+        "b.jpg",
+        "A/IMG_0.jpg",
+        "a/IMG_1.jpg",
+        "a/2024/x.jpg",
+    ]
+    groups = group_rows(rows, "name")
+    assert [(g.start, g.count, g.label) for g in groups] == [
+        (0, 1, "Top folder"),
+        (1, 2, "A"),
+        (3, 1, "a/2024"),
+    ]
+
+
+def test_group_rows_by_month_and_size(repo, make_item):
+    repo.upsert_many(
+        [
+            make_item("a.jpg", date_taken="2026-03-31", size_bytes=1 << 30),
+            make_item("b.jpg", date_taken="2026-03-01", size_bytes=(1 << 30) - 1),
+            make_item("c.jpg", date_taken="2025-03-01", size_bytes=0),
+            make_item("n.jpg", date_taken=None, size_bytes=None),
+        ]
+    )
+    by_date = library_rows(repo, LibraryQuery(sort="date", descending=True))
+    assert [(g.label, g.count) for g in group_rows(by_date, "date")] == [
+        ("March 2026", 2),
+        ("March 2025", 1),
+        ("No date", 1),
+    ]
+    by_size = library_rows(repo, LibraryQuery(sort="size", descending=True))
+    assert [(g.label, g.count) for g in group_rows(by_size, "size")] == [
+        ("1 GB and over", 1),
+        ("100 MB to 1 GB", 1),
+        ("Under 1 MB", 2),
+    ]
+    assert group_rows([], "date") == []

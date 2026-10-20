@@ -1,4 +1,5 @@
-"""Library area: folder tree, filter panel, and a lazily thumbnailed grid.
+"""Library area: folder tree, filter panel, and a lazily thumbnailed grid
+grouped under headings that follow the sort (month, folder or size band).
 
 Catalog queries run on worker threads (``RepoQuery``); thumbnails are asked
 for only for the rows in view, after the grid settles.
@@ -13,7 +14,6 @@ from PySide6.QtCore import (
     QAbstractListModel,
     QEvent,
     QModelIndex,
-    QPoint,
     QPointF,
     QRectF,
     QSize,
@@ -34,7 +34,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
-    QListView,
     QSizePolicy,
     QSplitter,
     QStackedWidget,
@@ -46,11 +45,13 @@ from PySide6.QtWidgets import (
 
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.filters_panel import PANEL_WIDTH, FilterPanel
+from smart_gallery.gui.library.grid import GroupedGrid
 from smart_gallery.gui.library.model import (
     FolderNode,
     LibraryQuery,
     LibraryRow,
     folder_tree,
+    group_rows,
     library_rows,
     library_stats,
 )
@@ -61,12 +62,10 @@ from smart_gallery.organize.filters import is_query_empty
 ICON_EDGE = 150
 GRID_SIZE = QSize(ICON_EDGE + 20, ICON_EDGE + 40)
 THUMB_DEBOUNCE_MS = 120
-THUMB_RETRIES = 5  # passes that may find no laid-out row before giving up
 PIXMAP_CACHE_SIZE = 600  # ~55 MB of tile pixmaps
-LAYOUT_BATCH = 1000
 TREE_INDENT = 12  # px per folder level (Qt's default is about 20)
-# (label, sort, descending by default): oldest, A to Z, largest first.
-SORTS = (("Date taken", "date", False), ("Name", "name", False), ("Size", "size", True))
+# (label, sort, descending by default): newest, A to Z, largest first.
+SORTS = (("Date taken", "date", True), ("Name", "name", False), ("Size", "size", True))
 ASCENDING_ARROW = "↑"
 DESCENDING_ARROW = "↓"
 PATH_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -279,7 +278,6 @@ class LibraryView(QWidget):
         self._root: Path | None = None  # drive root of the rows in the grid
         self._folder = ""
         self._building_tree = False
-        self._thumb_retries = 0
         self._tree_query = RepoQuery(ctx, self)
         self._rows_query = RepoQuery(ctx, self)
 
@@ -311,7 +309,8 @@ class LibraryView(QWidget):
         self.descending.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
         )
-        self._show_direction(False)
+        self.descending.setChecked(SORTS[0][2])
+        self._show_direction(SORTS[0][2])
         self.filters_btn = QToolButton()
         self.filters_btn.setText("Filters")
         self.filters_btn.setCheckable(True)
@@ -332,16 +331,9 @@ class LibraryView(QWidget):
         header.addWidget(self.sort)
         header.addWidget(self.descending)
 
-        self.grid = QListView()
-        self.grid.setViewMode(QListView.ViewMode.IconMode)
-        self.grid.setResizeMode(QListView.ResizeMode.Adjust)
-        self.grid.setMovement(QListView.Movement.Static)
-        self.grid.setUniformItemSizes(True)
-        self.grid.setLayoutMode(QListView.LayoutMode.Batched)
-        self.grid.setBatchSize(LAYOUT_BATCH)
+        self.grid = GroupedGrid()
         self.grid.setIconSize(QSize(ICON_EDGE, ICON_EDGE))
         self.grid.setGridSize(GRID_SIZE)
-        self.grid.setWordWrap(False)
         self.grid.setTextElideMode(Qt.TextElideMode.ElideMiddle)
         self.grid_model = LibraryGridModel(self)
         self.grid.setModel(self.grid_model)
@@ -378,6 +370,7 @@ class LibraryView(QWidget):
         self.filters_btn.toggled.connect(self.filters.setVisible)
         self.grid.doubleClicked.connect(self.open_viewer)
         self.grid_model.rowsInserted.connect(self._schedule_thumbs)
+        self.grid.groups_toggled.connect(self._schedule_thumbs)
         self.grid.verticalScrollBar().valueChanged.connect(self._schedule_thumbs)
         self.grid.viewport().installEventFilter(self)
         self._tree_query.finished.connect(self._on_tree)
@@ -416,13 +409,15 @@ class LibraryView(QWidget):
         )
 
         def load(repo):
-            return repo.drive_root, library_rows(repo, q), library_stats(repo, q)
+            rows = library_rows(repo, q)
+            return repo.drive_root, rows, library_stats(repo, q), q.sort
 
         self._rows_query.run(load)
 
     def _on_sort_changed(self, index: int) -> None:
         """Switch to the new sort's natural direction, then reload once."""
         descending = SORTS[index][2]
+        self.grid.expand_all()  # another sort's headings name other groups
         self.descending.blockSignals(True)
         self.descending.setChecked(descending)
         self.descending.blockSignals(False)
@@ -491,10 +486,11 @@ class LibraryView(QWidget):
             self.reload_rows()
 
     def _on_rows(self, result) -> None:
-        root, rows, (count, size) = result
+        root, rows, (count, size), sort = result
         if self._root is not None and Path(root) != self._root:
             self.grid_model.forget_thumbnails()
         self._root = Path(root)
+        self.grid.set_groups(group_rows(rows, sort))
         self.grid_model.set_rows(rows)
         noun = "item" if count == 1 else "items"
         self.stats.setText(f"{count:,} {noun} · {format_size(size)}")
@@ -531,35 +527,14 @@ class LibraryView(QWidget):
         return super().eventFilter(watched, event)
 
     def _schedule_thumbs(self, *_args) -> None:
-        self._thumb_retries = 0
         self._thumb_timer.start()
-
-    def _visible_rows(self) -> range:
-        """Rows whose tiles intersect the viewport, sampled on a half-tile grid."""
-        rect = self.grid.viewport().rect()
-        if rect.isEmpty() or not self.grid_model.rows:
-            return range(0)
-        step_x, step_y = GRID_SIZE.width() // 2, GRID_SIZE.height() // 2
-        xs = [*range(rect.left(), rect.right(), step_x), rect.right()]
-        ys = [*range(rect.top(), rect.bottom(), step_y), rect.bottom()]
-        found = [
-            index.row()
-            for y in ys
-            for x in xs
-            if (index := self.grid.indexAt(QPoint(x, y))).isValid()
-        ]
-        return range(min(found), max(found) + 1) if found else range(0)
 
     def _request_visible(self) -> None:
         thumbs = self.ctx.thumbs
         if thumbs is None or self._root is None or not self.grid.isVisible():
             return
-        visible = self._visible_rows()
+        visible = self.grid.visible_rows()
         if not visible:
-            # The batched layout may not have placed any tile yet.
-            if self.grid_model.rows and self._thumb_retries < THUMB_RETRIES:
-                self._thumb_retries += 1
-                self._thumb_timer.start()
             return
         # Rows scrolled past are still queued; drop them so what is on screen
         # now loads first, not after them.

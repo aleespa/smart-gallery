@@ -144,6 +144,13 @@ def show_in_explorer(abspath: Path) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(abspath).parent)))
 
 
+def open_folder(path: Path) -> None:
+    if sys.platform == "win32":
+        subprocess.Popen(["explorer", str(path)])
+    else:
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+
 class MediaViewer(QDialog):
     def __init__(
         self,

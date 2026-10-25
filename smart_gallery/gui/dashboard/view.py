@@ -1,4 +1,6 @@
-"""Dashboard area: stat tiles, native chart panels, the photo map, data tables.
+"""Stats area (id ``dashboard``): stat tiles, native chart panels, the photo map.
+
+Every panel collapses to its title; which ones are collapsed persists.
 
 Filters are the same panel and state as the Library. The catalog loads and
 every chart's numbers are computed on a worker thread (``load_dashboard``);
@@ -7,8 +9,7 @@ when they arrive, the panels are rebuilt here on the GUI thread.
 
 from __future__ import annotations
 
-import pandas as pd
-from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, QUrl
+from PySide6.QtCore import QEvent, Qt, QUrl, Signal
 from PySide6.QtGui import QPalette
 from PySide6.QtWebEngineCore import QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -20,8 +21,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSplitter,
     QStackedWidget,
-    QTableView,
-    QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -37,13 +37,14 @@ from smart_gallery.gui.dashboard.model import DashboardData, load_dashboard
 from smart_gallery.gui.filters_panel import PANEL_WIDTH, FilterPanel
 from smart_gallery.gui.paths import app_data_dir
 from smart_gallery.gui.repo_query import RepoQuery
+from smart_gallery.gui.state_store import load_json, save_json
 from smart_gallery.organize.filters import is_query_empty
 
-NO_GALLERY = "Open or create a gallery to see its dashboard."
-DISCONNECTED = "Drive not connected. Plug in {label} to see its dashboard."
+NO_GALLERY = "Open or create a gallery to see its stats."
+DISCONNECTED = "Drive not connected. Plug in {label} to see its stats."
 READ_ERROR = "Could not read the catalog: {error}"
 MAP_CAPTION = "Displaying {count:,} geotagged photos"
-TABS = ("Images", "Videos", "Others")
+STATE_FILE = "dashboard.json"  # {"collapsed": [sorted panel titles]}
 
 FILES_PANEL = "File Types, Cameras, Lenses"
 SETTINGS_PANEL = "Camera Settings Distribution"
@@ -63,38 +64,6 @@ SETTINGS_HEIGHT = 260
 TIMELINE_HEIGHT = 380
 VIDEO_HEIGHT = 300
 MAP_HEIGHT = 500
-
-
-class DataFrameModel(QAbstractTableModel):
-    """Read-only view of a DataFrame; cells are read from the frame in place."""
-
-    def __init__(self, df: pd.DataFrame | None = None, parent=None):
-        super().__init__(parent)
-        self._df = pd.DataFrame() if df is None else df
-
-    def rowCount(self, parent=QModelIndex()) -> int:
-        return 0 if parent.isValid() else len(self._df)
-
-    def columnCount(self, parent=QModelIndex()) -> int:
-        return 0 if parent.isValid() else len(self._df.columns)
-
-    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
-            return None
-        value = self._df.iat[index.row(), index.column()]
-        return "" if pd.isna(value) else str(value)
-
-    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
-        if role != Qt.ItemDataRole.DisplayRole:
-            return None
-        if orientation == Qt.Orientation.Horizontal:
-            return str(self._df.columns[section])
-        return str(section + 1)
-
-    def set_frame(self, df: pd.DataFrame) -> None:
-        self.beginResetModel()
-        self._df = df
-        self.endResetModel()
 
 
 def _scaled_font(label: QLabel, factor: float, bold: bool = False) -> None:
@@ -153,19 +122,49 @@ class ReflowGrid(QWidget):
 
 
 class Panel(QFrame):
-    """A titled dashboard section; its ``body`` is replaced on every result."""
+    """A titled section that collapses to its title; its ``body`` is replaced
+    on every result."""
+
+    collapsed_changed = Signal(bool)
 
     def __init__(self, title: str, parent: QWidget | None = None):
         super().__init__(parent)
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.title = QLabel(title)
-        _scaled_font(self.title, 1.3, bold=True)
+        self._name = title
+        self._collapsed = False
+        self.title = QToolButton()
+        self.title.setAutoRaise(True)  # flat
+        self.title.setCursor(Qt.CursorShape.PointingHandCursor)
+        font = self.title.font()
+        font.setPointSizeF(font.pointSizeF() * 1.3)
+        font.setBold(True)
+        self.title.setFont(font)
+        self.title.clicked.connect(lambda: self.set_collapsed(not self._collapsed))
+        self._refresh_title()
         self.body: QWidget | None = None
         self._layout = QVBoxLayout(self)
-        self._layout.addWidget(self.title)
+        self._layout.addWidget(self.title, 0, Qt.AlignmentFlag.AlignLeft)
+
+    @property
+    def collapsed(self) -> bool:
+        return self._collapsed
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        if collapsed == self._collapsed:
+            return
+        self._collapsed = collapsed
+        self._refresh_title()
+        if self.body is not None:
+            self.body.setVisible(not collapsed)
+        self.collapsed_changed.emit(collapsed)
+
+    def _refresh_title(self) -> None:
+        chevron = "▸" if self._collapsed else "▾"
+        self.title.setText(f"{chevron} {self._name}")
 
     def set_body(self, body: QWidget | None) -> None:
-        """Show ``body``, or hide the panel when it is None.
+        """Show ``body`` (hidden while collapsed), or hide the panel when it
+        is None.
 
         The old body is deleted, not just hidden, so its chart views leave
         the ThemeWatcher too."""
@@ -176,6 +175,7 @@ class Panel(QFrame):
         self.body = body
         if body is not None:
             self._layout.addWidget(body)
+            body.setVisible(not self._collapsed)
         self.setVisible(body is not None)
 
 
@@ -189,19 +189,21 @@ class DashboardView(QWidget):
         self.theme_watcher = charts.ThemeWatcher([], self)
 
         self.filters = FilterPanel(ctx)
-        self.tables: dict[str, QTableView] = {}
-        self.tabs = QTabWidget()
-        for name in TABS:
-            table = QTableView()
-            table.setModel(DataFrameModel(parent=table))
-            table.setAlternatingRowColors(True)
-            self.tables[name] = table
-            self.tabs.addTab(table, name)
 
         self.tiles: list[StatTile] = []
         self._tiles_row = QHBoxLayout()
 
+        self.state_path = app_data_dir() / STATE_FILE
+        saved = load_json(self.state_path).get("collapsed")
+        collapsed = (
+            set(saved)
+            if isinstance(saved, list) and all(isinstance(t, str) for t in saved)
+            else set()
+        )
         self.panels = {title: Panel(title) for title in PANELS}
+        for title, panel in self.panels.items():
+            panel.set_collapsed(title in collapsed)
+            panel.collapsed_changed.connect(self._save_collapsed)
         self.map_caption = QLabel()
         self.map_view = QWebEngineView()
         self.map_view.setFixedHeight(MAP_HEIGHT)
@@ -238,15 +240,11 @@ class DashboardView(QWidget):
         top_layout.addLayout(self._tiles_row)
         top_layout.addWidget(self.charts_area, 1)
 
-        charts_split = QSplitter(Qt.Orientation.Vertical)
-        charts_split.addWidget(top)
-        charts_split.addWidget(self.tabs)
-        charts_split.setSizes([560, 240])
         self.message = QLabel()
         self.message.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.message.setWordWrap(True)
         self.stack = QStackedWidget()
-        self.stack.addWidget(charts_split)
+        self.stack.addWidget(top)
         self.stack.addWidget(self.message)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -262,6 +260,10 @@ class DashboardView(QWidget):
         ctx.filters_changed.connect(self.reload)
         ctx.catalog_updated.connect(self.reload)
         self.reload()
+
+    def _save_collapsed(self, *_args) -> None:
+        names = sorted(t for t, p in self.panels.items() if p.collapsed)
+        save_json(self.state_path, {"collapsed": names})
 
     def reload(self, *_args) -> None:
         if self.ctx.current is None:
@@ -288,8 +290,6 @@ class DashboardView(QWidget):
 
     def _on_data(self, result: DashboardData) -> None:
         self.data = result
-        for name, frame in zip(TABS, result.split):
-            self.tables[name].model().set_frame(frame)
         self._set_tiles(result.metrics)
         self.panels[FILES_PANEL].set_body(self._files_body(result))
         self.panels[SETTINGS_PANEL].set_body(self._settings_body(result.settings))
@@ -374,7 +374,5 @@ class DashboardView(QWidget):
         self._show_message(text)
 
     def _show_message(self, text: str) -> None:
-        for table in self.tables.values():
-            table.model().set_frame(pd.DataFrame())
         self.message.setText(text)
         self.stack.setCurrentWidget(self.message)

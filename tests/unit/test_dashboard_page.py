@@ -32,7 +32,7 @@ def test_load_dashboard_computes_everything(repo, make_item, tmp_path):
     result = load_dashboard(repo.db_path, None, out)
 
     assert isinstance(result, DashboardData)
-    fi, fv, fo = result.split
+    fi, fv, fo = figures.split_media(figures.load_catalog_df(repo.db_path))
     assert (len(fi), len(fv), len(fo)) == (2, 1, 1)
     assert result.metrics == figures.metrics(fi, fv, fo)
     assert result.file_types == (("Images", 2), ("Videos", 1), ("Others", 1))
@@ -79,7 +79,9 @@ def test_load_dashboard_empty_catalog(repo, tmp_path):
 
 def test_plotly_js_written_once(repo, make_item, tmp_path):
     _catalog(repo, make_item)
-    fig = figures.photo_map(load_dashboard(repo.db_path, None, tmp_path).split[0])
+    load_dashboard(repo.db_path, None, tmp_path)
+    images = figures.split_media(figures.load_catalog_df(repo.db_path))[0]
+    fig = figures.photo_map(images)
     js = tmp_path / "plotly.min.js"
     os.utime(js, ns=(1_000_000_000, 1_000_000_000))
     assert write_map_page(tmp_path, fig) == tmp_path / "map.html"

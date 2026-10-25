@@ -71,7 +71,7 @@ def _import(ctx: AppContext) -> QWidget:
 AREAS: list[Area] = [
     Area("library", "Library", "image", _library),
     Area("import", "Import", "download", _import),
-    Area("dashboard", "Dashboard", "chart", _dashboard),
+    Area("dashboard", "Stats", "chart", _dashboard),
     Area("people", "People", "people", _people),
     Area("actions", "Actions", "play", _actions),
     Area("history", "History", "history", _history),

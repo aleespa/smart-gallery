@@ -11,7 +11,7 @@ from PySide6.QtCharts import QChartView  # noqa: E402
 from PySide6.QtCore import QCoreApplication, QEvent  # noqa: E402
 from PySide6.QtGui import QColor  # noqa: E402
 from PySide6.QtWebEngineWidgets import QWebEngineView  # noqa: E402
-from PySide6.QtWidgets import QLabel  # noqa: E402
+from PySide6.QtWidgets import QLabel, QTableView, QTabWidget  # noqa: E402
 
 from smart_gallery.gui.dashboard.view import (  # noqa: E402
     FILES_PANEL,
@@ -86,8 +86,8 @@ def test_dashboard_native_panels(qtbot, repo, make_item):
     assert view.stack.currentIndex() == 0
     assert [tile.caption.text() for tile in view.tiles] == METRIC_LABELS
     assert view.tiles[0].value.text() == "3"
-    assert view.tables["Images"].model().rowCount() == 2
-    assert view.tables["Videos"].model().rowCount() == 1
+    assert not view.findChildren(QTableView)
+    assert not view.findChildren(QTabWidget)
 
     assert all(_shown(view, title) for title in PANELS)
     assert len(_charts(view, FILES_PANEL)) == 3
@@ -206,3 +206,39 @@ def test_map_page_may_fetch_its_tiles_and_plotly(qtbot, repo):
     # turns off the second, so both must hold.
     assert settings.testAttribute(attrs.LocalContentCanAccessRemoteUrls)
     assert settings.testAttribute(attrs.LocalContentCanAccessFileUrls)
+
+
+def test_panel_collapses_to_its_title(qtbot, repo, make_item):
+    repo.upsert_many([make_item("a/1.jpg", focal_length=50)])
+    view, _ = _view(qtbot, repo.db_path)
+    _loaded(qtbot, view)
+    panel = view.panels[FILES_PANEL]
+    panel.title.click()
+    assert panel.collapsed and panel.isVisibleTo(view)
+    assert not panel.body.isVisibleTo(view)
+    assert panel.title.text() == "▸ " + FILES_PANEL
+    panel.title.click()
+    assert not panel.collapsed and panel.body.isVisibleTo(view)
+
+
+def test_collapse_survives_reload_and_restart(qtbot, repo, make_item):
+    repo.upsert_many([make_item("a/1.jpg", focal_length=50)])
+    view, _ = _view(qtbot, repo.db_path)
+    first = _loaded(qtbot, view)
+    view.panels[SETTINGS_PANEL].title.click()
+    view.reload()
+    qtbot.waitUntil(lambda: view.data is not first)
+    assert not view.panels[SETTINGS_PANEL].body.isVisibleTo(
+        view
+    )  # new body stays hidden
+    again, _ = _view(qtbot, repo.db_path)  # same SG_APP_DATA
+    _loaded(qtbot, again)
+    assert again.panels[SETTINGS_PANEL].collapsed
+
+
+def test_empty_panel_stays_hidden_even_if_collapsed(qtbot, repo, make_item):
+    repo.upsert_many([_video(make_item, "v/1.mp4")])
+    view, _ = _view(qtbot, repo.db_path)
+    _loaded(qtbot, view)
+    view.panels[SETTINGS_PANEL].set_collapsed(True)
+    assert not _shown(view, SETTINGS_PANEL)

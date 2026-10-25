@@ -1,4 +1,4 @@
-"""Dashboard data for the desktop app. No Qt: everything here runs on the worker.
+"""Stats data for the desktop app. No Qt: everything here runs on the worker.
 
 The charts are drawn natively from these numbers. Only the photo map is still
 a Plotly figure, written as a page of its own that loads plotly.js from a file
@@ -12,7 +12,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-import pandas as pd
 import plotly.graph_objects as go
 from plotly.offline import get_plotlyjs
 
@@ -27,9 +26,8 @@ _MAP_STYLE = "html, body { height: 100%; } body { margin: 0; }"
 
 @dataclass(frozen=True)
 class DashboardData:
-    """Everything the Dashboard draws, computed off the GUI thread."""
+    """Everything the Stats page draws, computed off the GUI thread."""
 
-    split: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]  # images, videos, others
     metrics: list[tuple[str, str]]
     file_types: tuple[tuple[str, int], ...]
     cameras: Counts
@@ -78,7 +76,6 @@ def load_dashboard(db_path, filters, out_dir: Path) -> DashboardData:
     geotag_count = len(data.geotagged(fi))
     map_page = write_map_page(out_dir, figures.photo_map(fi)) if geotag_count else None
     return DashboardData(
-        split=(fi, fv, fo),
         metrics=figures.metrics(fi, fv, fo),
         file_types=data.file_type_counts(fi, fv, fo),
         cameras=data.top_counts(fi, "camera"),

@@ -193,15 +193,28 @@ def _month_range(periods: pd.Series) -> pd.PeriodIndex:
     return pd.period_range(periods.min(), periods.max(), freq="M")
 
 
+# A camera whose clock was reset stamps its files near the Unix epoch, and a
+# wrongly set clock can stamp them in the future. Either one stretches a
+# timeline by years, so both are left out of the monthly charts.
+_EPOCH_YEAR = 1970
+
+
+def _drop_implausible_dates(df: pd.DataFrame) -> pd.DataFrame:
+    dates = df["date_taken"]
+    now = pd.Timestamp.now(tz=dates.dt.tz)
+    return df[(dates.dt.year != _EPOCH_YEAR) & (dates <= now)]
+
+
 def monthly_by_camera(fi, n: int = 10) -> Optional[MonthSeries]:
     """Photos per month for the ``n`` top cameras, the rest as "Other".
 
     The top cameras are ranked over all of ``fi``, undated photos included,
     exactly as ``top_counts`` ranks them for the Cameras chart, so a camera
-    has the same colour on both. Only dated photos are counted per month."""
+    has the same colour on both. Only dated photos are counted per month, and
+    photos dated in 1970 (a reset camera clock) or in the future are left out."""
     if fi.empty or "date_taken" not in fi.columns or "camera" not in fi.columns:
         return None
-    tmp = fi.dropna(subset=["date_taken", "camera"])
+    tmp = _drop_implausible_dates(fi.dropna(subset=["date_taken", "camera"]))
     if tmp.empty:
         return None
     period = tmp["date_taken"].dt.to_period("M")
@@ -219,9 +232,10 @@ def monthly_by_camera(fi, n: int = 10) -> Optional[MonthSeries]:
 
 
 def video_minutes_by_month(fv) -> Optional[MonthSeries]:
+    """Video minutes per month, leaving out 1970 and future dates."""
     if fv.empty or "date_taken" not in fv.columns or "duration_ms" not in fv.columns:
         return None
-    tmp = fv.dropna(subset=["date_taken"])
+    tmp = _drop_implausible_dates(fv.dropna(subset=["date_taken"]))
     if tmp.empty:
         return None
     period = tmp["date_taken"].dt.to_period("M")

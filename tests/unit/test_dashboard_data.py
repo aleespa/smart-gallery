@@ -123,6 +123,30 @@ def test_timeline_ranks_cameras_like_the_cameras_chart():
     assert ms.series[OTHER] == (0.0, 1.0)  # cam08 is 11th overall
 
 
+def test_timeline_leaves_out_epoch_and_future_dates():
+    rows = [("1970-03-01", "A"), ("2025-12-01", "A"), ("2026-01-01", "B")]
+    rows += [("2099-06-01", "B")]
+    ms = data.monthly_by_camera(_photos(rows))
+    assert ms.months == ("2025-12", "2026-01")
+    assert ms.series["A"] == (1.0, 0.0)
+
+    assert data.monthly_by_camera(_photos([("1970-01-01", "A")])) is None
+
+
+def test_video_minutes_leave_out_epoch_and_future_dates():
+    fv = pd.DataFrame(
+        {
+            "date_taken": pd.to_datetime(
+                ["1970-01-01", "2026-01-10", "2026-02-02", "2099-01-01"]
+            ),
+            "duration_ms": [60_000] * 4,
+        }
+    )
+    ms = data.video_minutes_by_month(fv)
+    assert ms.months == ("2026-01", "2026-02")
+    assert ms.series == {"Minutes": (1.0, 1.0)}
+
+
 def test_video_minutes_by_month():
     fv = pd.DataFrame(
         {

@@ -187,7 +187,7 @@ class StorageTreeView(QWidget):
         size.setTextAlignment(_RIGHT)
         pct = QStandardItem(f"{share * 100:.0f}%")
         pct.setData(share, SHARE_ROLE)
-        files = QStandardItem(str(node.files))
+        files = QStandardItem(f"{node.files:,}")
         files.setTextAlignment(_RIGHT)
         items = [name, size, pct, files]
         for item in items:

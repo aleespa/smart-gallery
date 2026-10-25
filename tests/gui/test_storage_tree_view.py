@@ -155,3 +155,18 @@ def test_top_level_type_selects_none(qtbot, view, tree, tmp_path):
     with qtbot.waitSignal(view.folder_selected) as sig:
         view.tree.setCurrentIndex(_mp4(view))
     assert sig.args == [None]
+
+
+def test_files_column_has_thousands_separators(qtbot, view, tmp_path):
+    n = 1234
+    df = pd.DataFrame(
+        {
+            "relpath": [f"Big/{i}.jpg" for i in range(n)],
+            "ext": [".jpg"] * n,
+            "size_bytes": [1] * n,
+        }
+    )
+    view.set_tree(build_storage(df, "Drive"), tmp_path)
+    m = view.tree.model()
+    assert m.index(0, 3).data() == "1,234"
+    assert _child(m, m.index(0, 0), "Big", 3).data() == "1,234"

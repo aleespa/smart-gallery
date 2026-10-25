@@ -47,6 +47,7 @@ LABELS = {
     "report.output": "Excel file",
     "compare.output": "Report file",
     "convert-raw.sources": "RAW files/folders",
+    "recycle.list": "File list",
     "merge-persons.dest": "Keep person ID",
     "merge-persons.sources": "Merge person IDs",
     "identify-faces.samples": "Samples folder",

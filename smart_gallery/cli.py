@@ -33,15 +33,18 @@ from smart_gallery.services import (
     import_media,
     identify_faces,
     init_drive,
+    read_list,
+    recycle_files,
     scan_faces,
     split_person,
     sync_drive,
     write_compare_report,
 )
+from smart_gallery.storage.tree import format_bytes
 
 # Long-running commands whose per-file details (copied/skipped files, ExifTool
 # chatter) go to a log file for the run instead of the terminal.
-DETAIL_LOG_COMMANDS = {"init", "import", "sync", "export", "scan-faces"}
+DETAIL_LOG_COMMANDS = {"init", "import", "sync", "export", "scan-faces", "recycle"}
 LOG_DIR = Path("logs")
 
 
@@ -367,6 +370,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="CR2/CR3 files or directories to search recursively.",
     )
 
+    p_recycle = sub.add_parser(
+        "recycle",
+        help="Move listed catalog files to the Recycle Bin and drop them from the catalog.",
+    )
+    p_recycle.add_argument("drive", type=Path, help=DRIVE_HELP)
+    p_recycle.add_argument(
+        "--list",
+        required=True,
+        type=Path,
+        help="Text file with one 'relpath<TAB>size<TAB>mtime_ns' line per file.",
+    )
+
     p_dash = sub.add_parser(
         "dashboard", help="Launch the Streamlit dashboard on a catalog."
     )
@@ -625,6 +640,23 @@ def _handle_convert_cr3(args):
     convert_cr3(args.sources)
 
 
+def _handle_recycle(args):
+    entries = read_list(args.list)
+    cb = progress_reporter()
+    with GalleryRepository.open(args.drive) as repo:
+        try:
+            report = recycle_files(repo, entries, progress_callback=cb)
+        finally:
+            cb.close()
+    for failure in report.failures:
+        logger.error(f"Not recycled: {failure}")
+    logger.success(
+        f"Moved {report.recycled:,} file(s) to the Recycle Bin, freeing "
+        f"{format_bytes(report.freed_bytes)}; {report.skipped:,} skipped, "
+        f"{len(report.failures):,} failed."
+    )
+
+
 def _handle_dashboard(args):
     from smart_gallery import dashboard
 
@@ -821,6 +853,7 @@ _HANDLERS = {
     "export": _handle_export,
     "convert-raw": _handle_convert_cr3,
     "convert-cr3": _handle_convert_cr3,
+    "recycle": _handle_recycle,
     "dashboard": _handle_dashboard,
     "ui": _handle_ui,
     "tui": _handle_ui,

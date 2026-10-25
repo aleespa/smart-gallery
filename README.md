@@ -39,6 +39,7 @@ Commands:
   compare       Compare two gallery catalogs.
   export        Copy a filtered subset out to another directory.
   convert-raw   Extract embedded JPEG previews from CR2/CR3 files.
+  recycle       Move listed catalog files to the Recycle Bin and drop them from the catalog.
   dashboard     Launch the Streamlit dashboard on a catalog.
   ui            Open the interactive terminal interface.
   gui           Open the Windows desktop app.
@@ -221,6 +222,43 @@ remains available as an alias.
 ```bash
 smart-gallery convert-raw F:/DCIM
 smart-gallery convert-raw F:/DCIM/IMG_0001.CR3
+```
+
+### `recycle` — move catalog files to the Recycle Bin
+
+```bash
+smart-gallery recycle <drive> --list <file>
+```
+
+Moves each listed file to the Windows Recycle Bin and removes its row from the
+catalog. The desktop app's Storage page writes the list and runs this command
+when you choose which copy of a RAW + JPEG pair to keep.
+
+The list is a UTF-8 text file with one line per file: the catalog relpath, its
+size in bytes and its modification time in nanoseconds, separated by tabs
+(`relpath<TAB>size<TAB>mtime_ns`). Blank lines are ignored.
+
+| Arg | Meaning |
+|---|---|
+| `<drive>` | Drive whose catalog lists the files. |
+| `--list FILE` | required. The list of files to recycle. |
+
+It never deletes a file permanently:
+
+- On a drive without a Recycle Bin (anything but a fixed local drive on
+  Windows), it refuses before touching anything.
+- A file is skipped, and kept, when it has no catalog row, is missing, or its
+  size or modification time on disk or in the catalog differs from the list.
+- If the Recycle Bin can't take a file, the file stays where it is, keeps its
+  catalog row, and is reported as failed.
+- Each recycled file's row is removed as soon as the file is gone, so a
+  cancelled run leaves the catalog matching the drive.
+
+Files moved this way can be restored from the Recycle Bin; run `sync`
+afterwards to put restored files back in the catalog.
+
+```bash
+smart-gallery recycle E:/ --list recycle.txt
 ```
 
 ### `dashboard` — explore the catalog

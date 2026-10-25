@@ -31,6 +31,7 @@ FINDING = "Finding files"
 READING = "Reading metadata"
 COPYING = "Copying files"
 SCANNING = "Scanning faces"
+RECYCLING = "Moving files to Recycle Bin"
 
 
 @dataclass(frozen=True)

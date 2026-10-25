@@ -18,6 +18,11 @@ from smart_gallery.services.identify_faces import (
     identify_faces,
 )
 from smart_gallery.services.init_db import init_drive
+from smart_gallery.services.recycle import (
+    RecycleReport,
+    read_list,
+    recycle_files,
+)
 from smart_gallery.services.scan_faces import ScanFacesReport, scan_faces
 from smart_gallery.services.sync import SyncReport, diff_drive, sync_drive
 
@@ -44,4 +49,7 @@ __all__ = [
     "CompareRow",
     "convert_cr3",
     "ConvertCr3Report",
+    "recycle_files",
+    "RecycleReport",
+    "read_list",
 ]

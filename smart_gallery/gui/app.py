@@ -217,6 +217,9 @@ class MainWindow(QMainWindow):
         return super().event(event)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if not self.ctx.can_leave():
+            event.ignore()
+            return
         jobs = self.ctx.jobs
         if jobs is None or not jobs.running:
             event.accept()

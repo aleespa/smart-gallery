@@ -62,6 +62,12 @@ def _dashboard(ctx: AppContext) -> QWidget:
     return DashboardView(ctx)
 
 
+def _storage(ctx: AppContext) -> QWidget:
+    from smart_gallery.gui.storage.view import StorageView
+
+    return StorageView(ctx)
+
+
 def _import(ctx: AppContext) -> QWidget:
     from smart_gallery.gui.imports.view import ImportView
 
@@ -72,6 +78,7 @@ AREAS: list[Area] = [
     Area("library", "Library", "image", _library),
     Area("import", "Import", "download", _import),
     Area("dashboard", "Stats", "chart", _dashboard),
+    Area("storage", "Storage", "drive", _storage),
     Area("people", "People", "people", _people),
     Area("actions", "Actions", "play", _actions),
     Area("history", "History", "history", _history),

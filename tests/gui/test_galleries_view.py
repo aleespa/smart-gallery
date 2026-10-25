@@ -269,3 +269,51 @@ def test_main_window_activation_rechecks_galleries(qtbot, monkeypatch):
     )
     QApplication.sendEvent(win, QEvent(QEvent.Type.WindowActivate))
     assert activations == [True]
+
+
+def test_can_leave_true_without_guards():
+    assert AppContext().can_leave()
+
+
+def test_can_leave_asks_every_guard():
+    ctx = AppContext()
+    calls = []
+    ctx.add_leave_guard(lambda: calls.append("a") or True)
+    assert ctx.can_leave()
+    ctx.add_leave_guard(lambda: calls.append("b") or False)
+    assert not ctx.can_leave()
+    assert calls == ["a", "a", "b"]
+
+
+def test_close_blocked_by_leave_guard(qtbot):
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.show()
+    win.ctx.add_leave_guard(lambda: False)
+    assert not win.close()
+    assert win.isVisible()
+
+
+def test_gallery_switch_blocked_by_leave_guard(qtbot, tmp_path):
+    a = _catalog(tmp_path / "a", "A")
+    b = _catalog(tmp_path / "b", "B")
+    panel, ctx, store = _panel(qtbot, tmp_path, a, b)
+    first = ctx.current
+    ctx.add_leave_guard(lambda: False)
+    panel.gallery_actions()[1].trigger()
+    assert ctx.current == first
+    assert panel.gallery_actions()[0].isChecked()
+    assert not panel.gallery_actions()[1].isChecked()
+    assert panel.button.text() == "A"
+
+
+def test_refresh_does_not_ask_leave_guards(qtbot, tmp_path):
+    a = _catalog(tmp_path / "a", "A")
+    panel, ctx, store = _panel(qtbot, tmp_path, a)
+
+    def fail():
+        raise AssertionError("must not ask")
+
+    ctx.add_leave_guard(fail)
+    panel.refresh()
+    panel.recheck()

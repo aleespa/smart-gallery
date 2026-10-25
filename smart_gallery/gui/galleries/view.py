@@ -105,10 +105,13 @@ class GalleriesPanel(QWidget):
         """The menu's gallery entries, in store order."""
         return list(self._group.actions())
 
-    def refresh(self, select: str | None = None) -> None:
+    def refresh(self, select: str | None = None, ask: bool = False) -> bool:
         """Rebuild the menu from the store.
 
         Selects ``select`` (a db_uuid), else the open gallery, else the last one.
+        With ``ask``, a switch first asks the leave guards (a drive coming or
+        going is not the user leaving, so the default does not). Returns False
+        when a guard kept the open gallery.
         """
         galleries = self.store.all()
         current = self.ctx.current.db_uuid if self.ctx.current else None
@@ -138,15 +141,21 @@ class GalleriesPanel(QWidget):
         self.menu.addAction(self.refresh_action)
         index = next((i for i, g in enumerate(galleries) if g.db_uuid == wanted), 0)
         if galleries:
-            self._select(galleries[index])
-        else:
-            self._show_current()
+            return self._select(galleries[index], ask=ask)
+        self._show_current()
+        return True
 
-    def _select(self, gallery: Gallery) -> None:
+    def _select(self, gallery: Gallery, ask: bool = True) -> bool:
+        """Open ``gallery``. Unless ``ask`` is False, a leave guard can refuse:
+        the open gallery stays ticked and False is returned."""
         if self.ctx.current != gallery:
+            if ask and not self.ctx.can_leave():
+                self._show_current()
+                return False
             self.ctx.set_gallery(gallery)
         self.store.set_last(gallery.db_uuid)
         self._show_current()
+        return True
 
     def _show_current(self, *_args) -> None:
         """Name the open gallery on the button and tick it in the menu."""
@@ -181,7 +190,7 @@ class GalleriesPanel(QWidget):
         except (OSError, ValueError, sqlite3.Error) as exc:
             QMessageBox.warning(self, "Add existing gallery", str(exc))
             return
-        self.refresh(select=gallery.db_uuid)
+        self.refresh(select=gallery.db_uuid, ask=True)
 
     def _create_on_drive(self) -> None:
         folder = QFileDialog.getExistingDirectory(
@@ -204,6 +213,7 @@ class GalleriesPanel(QWidget):
         except (OSError, ValueError, sqlite3.Error) as exc:
             QMessageBox.warning(self, "Create on drive", str(exc))
             return
-        self.refresh(select=gallery.db_uuid)
+        if not self.refresh(select=gallery.db_uuid, ask=True):
+            return  # a leave guard kept the open gallery
         if self.ctx.current != gallery:  # refresh opens it unless it is already open
             self.ctx.set_gallery(gallery)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -29,10 +29,26 @@ class AppContext(QObject):
         self.thumbs = None
         self.current = None  # Gallery | None
         self.filters = FilterOptions()
+        self._leave_guards: list[Callable[[], bool]] = []
 
     def set_gallery(self, gallery) -> None:
         self.current = gallery
         self.gallery_changed.emit(gallery)
+
+    def add_leave_guard(self, guard: Callable[[], bool]) -> None:
+        """Ask ``guard`` before the user closes the app or switches gallery.
+
+        A guard returns True when leaving is fine (it may ask the user first).
+        """
+        self._leave_guards.append(guard)
+
+    def remove_leave_guard(self, guard: Callable[[], bool]) -> None:
+        if guard in self._leave_guards:
+            self._leave_guards.remove(guard)
+
+    def can_leave(self) -> bool:
+        """True when every guard agrees; stops asking at the first refusal."""
+        return all(guard() for guard in list(self._leave_guards))
 
     def set_filters(self, filters: FilterOptions) -> None:
         self.filters = filters

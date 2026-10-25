@@ -357,3 +357,20 @@ def test_skips_and_failures_logged_as_warnings(
     texts = [(r["level"].name, r["message"]) for r in records]
     assert ("WARNING", "Skipped: gone.jpg (not in the catalog)") in texts
     assert ("WARNING", "Not recycled: a.jpg: Recycle Bin refused") in texts
+
+
+def test_read_list_keeps_unicode_line_separators_in_names(tmp_path):
+    # \x85, U+2028 and U+2029 are legal in NTFS names; only "\n" ends a line.
+    entries = [
+        RecycleEntry("odd name.jpg", 1, 2),
+        RecycleEntry("a\x85b c.CR3", 3, 4),
+    ]
+    p = tmp_path / "list.txt"
+    write_list(p, entries)
+    assert read_list(p) == entries
+
+
+def test_read_list_accepts_crlf(tmp_path):
+    p = tmp_path / "list.txt"
+    p.write_bytes(b"a.jpg\t1\t2\r\nb.jpg\t3\t\r\n")
+    assert read_list(p) == [RecycleEntry("a.jpg", 1, 2), RecycleEntry("b.jpg", 3, None)]

@@ -44,10 +44,13 @@ class RecycleReport:
 
 def read_list(path: Path) -> list[RecycleEntry]:
     """Parse a UTF-8 list of ``relpath<TAB>size<TAB>mtime_ns`` lines. An empty
-    mtime reads as None; blank lines are skipped."""
+    mtime reads as None; blank lines are skipped. Only LF (or CRLF) ends a
+    line: other Unicode line breaks are legal in file names."""
     entries = []
-    text = Path(path).read_text(encoding="utf-8")
-    for number, line in enumerate(text.splitlines(), 1):
+    with open(path, encoding="utf-8", newline="") as handle:
+        text = handle.read()
+    for number, line in enumerate(text.split("\n"), 1):
+        line = line.removesuffix("\r")
         if not line.strip():
             continue
         parts = line.split("\t")

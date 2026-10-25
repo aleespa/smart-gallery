@@ -34,7 +34,7 @@ from smart_gallery.gui import theme
 from smart_gallery.gui.library.model import RowGroup
 
 HEADER_HEIGHT = 40
-HEADER_PT = 13
+HEADER_PT = theme.HEADER_PT
 HEADER_PAD = 6  # px left of the chevron
 CHEVRON = 10  # px across the collapse chevron
 CHEVRON_GAP = 8  # px between the chevron and the heading text

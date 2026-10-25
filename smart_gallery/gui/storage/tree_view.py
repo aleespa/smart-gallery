@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from smart_gallery.gui import theme
 from smart_gallery.gui.library.viewer import open_folder
 from smart_gallery.storage.tree import TYPE, StorageNode, StorageTree, format_bytes
 
@@ -89,6 +90,7 @@ class StorageTreeView(QWidget):
         bar.addStretch(1)
 
         self.tree = QTreeView()
+        self.tree.setIndentation(theme.TREE_INDENT)  # as in the Library
         self.tree.setSortingEnabled(False)
         self.tree.setUniformRowHeights(True)
         self.tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)

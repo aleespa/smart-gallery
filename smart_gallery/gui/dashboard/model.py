@@ -29,7 +29,6 @@ class DashboardData:
     """Everything the Stats page draws, computed off the GUI thread."""
 
     metrics: list[tuple[str, str]]
-    file_types: tuple[tuple[str, int], ...]
     cameras: Counts
     lenses: Counts
     settings: dict  # spec name -> stop buckets, non-empty specs only
@@ -77,7 +76,6 @@ def load_dashboard(db_path, filters, out_dir: Path) -> DashboardData:
     map_page = write_map_page(out_dir, figures.photo_map(fi)) if geotag_count else None
     return DashboardData(
         metrics=figures.metrics(fi, fv, fo),
-        file_types=data.file_type_counts(fi, fv, fo),
         cameras=data.top_counts(fi, "camera"),
         lenses=data.top_counts(fi, "lens"),
         settings=data.settings_buckets(fi),

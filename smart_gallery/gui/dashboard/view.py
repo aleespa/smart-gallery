@@ -28,11 +28,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from smart_gallery.dashboard.data import (
-    SETTINGS_COLORS,
-    VIDEO_COLOR,
-    file_type_colors,
-)
+from smart_gallery.dashboard.data import SETTINGS_COLORS, VIDEO_COLOR
+from smart_gallery.gui import theme
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.dashboard import charts
 from smart_gallery.gui.dashboard.model import DashboardData, load_dashboard
@@ -50,7 +47,7 @@ STATE_FILE = "dashboard.json"  # {"collapsed": [sorted panel titles]}
 
 logger = logging.getLogger(__name__)
 
-FILES_PANEL = "File Types, Cameras, Lenses"
+FILES_PANEL = "Cameras and Lenses"
 SETTINGS_PANEL = "Camera Settings Distribution"
 TIMELINE_PANEL = "Photography Timeline"
 VIDEO_PANEL = "Video Recording Summary"
@@ -59,7 +56,7 @@ PANELS = (FILES_PANEL, SETTINGS_PANEL, TIMELINE_PANEL, VIDEO_PANEL, MAP_PANEL)
 
 # Chart-area widths (px) at which a grid goes multi-column. The ranked camera
 # and lens bars need the width for their long names.
-FILES_WIDE = 1300
+FILES_WIDE = 1000
 SETTINGS_WIDE = 700
 
 # Chart heights (px).
@@ -139,10 +136,7 @@ class Panel(QFrame):
         self.title = QToolButton()
         self.title.setAutoRaise(True)  # flat
         self.title.setCursor(Qt.CursorShape.PointingHandCursor)
-        font = self.title.font()
-        font.setPointSizeF(font.pointSizeF() * 1.3)
-        font.setBold(True)
-        self.title.setFont(font)
+        self.title.setFont(theme.serif_font(theme.HEADER_PT))  # as Library groups
         self.title.clicked.connect(lambda: self.set_collapsed(not self._collapsed))
         self._refresh_title()
         self.body: QWidget | None = None
@@ -330,23 +324,26 @@ class DashboardView(QWidget):
         layout = QVBoxLayout(cell)
         layout.setContentsMargins(0, 0, 0, 0)
         label = QLabel(title)
-        _scaled_font(label, 1.0, bold=True)
+        label.setFont(theme.serif_font(theme.SECTION_PT))  # as filter group titles
         layout.addWidget(label)
         layout.addWidget(view)
         return cell
 
     def _files_body(self, result: DashboardData) -> QWidget | None:
-        if not result.file_types:
+        ranked = [
+            (title, counts)
+            for title, counts in (
+                ("Cameras", result.cameras),
+                ("Lenses", result.lenses),
+            )
+            if counts.items
+        ]
+        if not ranked:
             return None
-        grid = ReflowGrid(3, FILES_WIDE)
-        donut = charts.donut_chart(
-            result.file_types, file_type_colors(result.file_types)
-        )
-        grid.add(self._titled("File Types", self._chart(donut, FILES_HEIGHT)))
-        for title, counts in (("Cameras", result.cameras), ("Lenses", result.lenses)):
-            if counts.items:
-                bars = self._chart(charts.ranked_bar_chart(counts), FILES_HEIGHT)
-                grid.add(self._titled(title, bars))
+        grid = ReflowGrid(2, FILES_WIDE)
+        for title, counts in ranked:
+            bars = self._chart(charts.ranked_bar_chart(counts), FILES_HEIGHT)
+            grid.add(self._titled(title, bars))
         return grid
 
     def _settings_body(self, settings: dict) -> QWidget | None:

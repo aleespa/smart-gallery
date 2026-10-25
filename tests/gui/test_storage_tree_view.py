@@ -170,3 +170,9 @@ def test_files_column_has_thousands_separators(qtbot, view, tmp_path):
     m = view.tree.model()
     assert m.index(0, 3).data() == "1,234"
     assert _child(m, m.index(0, 0), "Big", 3).data() == "1,234"
+
+
+def test_tree_indents_like_the_library(qtbot, view):
+    from smart_gallery.gui import theme
+
+    assert view.tree.indentation() == theme.TREE_INDENT

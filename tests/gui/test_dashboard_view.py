@@ -1,7 +1,6 @@
 import pytest
 import shiboken6
 
-from smart_gallery import colors
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.galleries.store import Gallery
 
@@ -9,10 +8,10 @@ pytest.importorskip("PySide6.QtWebEngineWidgets")
 
 from PySide6.QtCharts import QChartView  # noqa: E402
 from PySide6.QtCore import QCoreApplication, QEvent  # noqa: E402
-from PySide6.QtGui import QColor  # noqa: E402
 from PySide6.QtWebEngineWidgets import QWebEngineView  # noqa: E402
 from PySide6.QtWidgets import QLabel, QTableView, QTabWidget  # noqa: E402
 
+from smart_gallery.gui import theme  # noqa: E402
 from smart_gallery.gui.dashboard.view import (  # noqa: E402
     FILES_PANEL,
     MAP_PANEL,
@@ -90,7 +89,7 @@ def test_dashboard_native_panels(qtbot, repo, make_item):
     assert not view.findChildren(QTabWidget)
 
     assert all(_shown(view, title) for title in PANELS)
-    assert len(_charts(view, FILES_PANEL)) == 3
+    assert len(_charts(view, FILES_PANEL)) == 2  # cameras and lenses
     assert len(_charts(view, SETTINGS_PANEL)) == 4
     assert len(_charts(view, TIMELINE_PANEL)) == 1
     assert len(_charts(view, VIDEO_PANEL)) == 1
@@ -109,9 +108,7 @@ def test_dashboard_videos_only_hides_image_panels(qtbot, repo, make_item):
     _loaded(qtbot, view)
 
     assert view.stack.currentIndex() == 0
-    assert _shown(view, FILES_PANEL)
-    assert len(_charts(view, FILES_PANEL)) == 1  # the donut; no cameras or lenses
-    for title in (SETTINGS_PANEL, TIMELINE_PANEL, MAP_PANEL):
+    for title in (FILES_PANEL, SETTINGS_PANEL, TIMELINE_PANEL, MAP_PANEL):
         assert not _shown(view, title)
     assert _shown(view, VIDEO_PANEL)
     assert len(_charts(view, VIDEO_PANEL)) == 1
@@ -141,22 +138,6 @@ def test_dashboard_empty_catalog(qtbot, repo):
     assert not any(_shown(view, title) for title in PANELS)
 
 
-def test_dashboard_file_type_colors_without_images(qtbot, repo, make_item):
-    repo.upsert_many(
-        [_video(make_item, "b/v.mp4"), make_item("c/notes.txt", media_type="other")]
-    )
-    view, _ = _view(qtbot, repo.db_path)
-    _loaded(qtbot, view)
-    donut = _charts(view, FILES_PANEL)[0]
-    (series,) = donut.chart().series()
-    # Videos stays green, as in the Streamlit dashboard.
-    assert [s.property("sg_name") for s in series.slices()] == ["Videos", "Others"]
-    assert [s.color() for s in series.slices()] == [
-        QColor(colors.FILE_TYPE_COLORS["Videos"]),
-        QColor(colors.FILE_TYPE_COLORS["Others"]),
-    ]
-
-
 def test_dashboard_rebuild_deletes_old_chart_views(qtbot, repo, make_item):
     repo.upsert_many([make_item("a/1.jpg"), _video(make_item, "b/v.mp4")])
     view, _ = _view(qtbot, repo.db_path)
@@ -182,8 +163,8 @@ def test_dashboard_files_row_reflows_with_width(qtbot, repo, make_item):
     qtbot.waitExposed(view)
 
     view.charts_area.resize(1400, 800)
-    assert (files.columns, settings.columns) == (3, 2)
-    view.charts_area.resize(1000, 800)
+    assert (files.columns, settings.columns) == (2, 2)
+    view.charts_area.resize(900, 800)
     assert (files.columns, settings.columns) == (1, 2)
     view.charts_area.resize(600, 800)
     assert (files.columns, settings.columns) == (1, 1)
@@ -257,3 +238,17 @@ def test_unwritable_state_file_is_only_logged(qtbot, repo, make_item, monkeypatc
     panel = view.panels[FILES_PANEL]
     panel.set_collapsed(True)  # must not raise from the slot
     assert panel.collapsed
+
+
+def test_headings_use_the_serif_face(qtbot, repo, make_item):
+    repo.upsert_many([make_item("a/1.jpg", focal_length=50)])
+    view, _ = _view(qtbot, repo.db_path)
+    _loaded(qtbot, view)
+    panel = view.panels[FILES_PANEL]
+    assert panel.title.font().families()[0] == theme.SERIF[0]
+    assert panel.title.font().pointSizeF() == theme.HEADER_PT
+    (cameras,) = [
+        label for label in panel.body.findChildren(QLabel) if label.text() == "Cameras"
+    ]
+    assert cameras.font().families()[0] == theme.SERIF[0]
+    assert cameras.font().pointSizeF() == theme.SECTION_PT

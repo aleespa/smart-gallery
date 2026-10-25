@@ -38,7 +38,9 @@ SERIF = ["Georgia", "Times New Roman", "serif"]
 BRAND_PT = 17
 TAB_PT = 11
 TITLE_PT = 22
+HEADER_PT = 13  # a heading inside a page: Library groups, Stats panels
 SECTION_PT = 10.5
+TREE_INDENT = 12  # px per tree level (Qt's default is about 20)
 
 WARNING_BANNER_STYLE = f"background: {WARNING}; color: {ON_WARNING}; padding: 6px;"
 ERROR_TEXT_STYLE = f"color: {ERROR};"

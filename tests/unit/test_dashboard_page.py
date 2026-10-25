@@ -35,7 +35,6 @@ def test_load_dashboard_computes_everything(repo, make_item, tmp_path):
     fi, fv, fo = figures.split_media(figures.load_catalog_df(repo.db_path))
     assert (len(fi), len(fv), len(fo)) == (2, 1, 1)
     assert result.metrics == figures.metrics(fi, fv, fo)
-    assert result.file_types == (("Images", 2), ("Videos", 1), ("Others", 1))
     assert result.cameras == data.top_counts(fi, "camera")
     assert result.cameras.total == 2
     assert result.lenses == data.top_counts(fi, "lens")
@@ -70,7 +69,6 @@ def test_load_dashboard_no_geotags_writes_no_map(repo, make_item, tmp_path):
 
 def test_load_dashboard_empty_catalog(repo, tmp_path):
     result = load_dashboard(repo.db_path, None, tmp_path / "dash")
-    assert result.file_types == ()
     assert result.cameras.items == () and result.lenses.items == ()
     assert result.settings == {}
     assert result.timeline is None and result.video is None

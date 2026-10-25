@@ -63,7 +63,7 @@ ICON_EDGE = 150
 GRID_SIZE = QSize(ICON_EDGE + 20, ICON_EDGE + 40)
 THUMB_DEBOUNCE_MS = 120
 PIXMAP_CACHE_SIZE = 600  # ~55 MB of tile pixmaps
-TREE_INDENT = 12  # px per folder level (Qt's default is about 20)
+TREE_INDENT = theme.TREE_INDENT
 # (label, sort, descending by default): newest, A to Z, largest first.
 SORTS = (("Date taken", "date", True), ("Name", "name", False), ("Size", "size", True))
 ASCENDING_ARROW = "↑"

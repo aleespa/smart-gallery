@@ -86,6 +86,9 @@ class StorageView(QWidget):
         self.data: StorageData | None = None
         self._root = Path()
         self._loading_root = Path()
+        # The gallery whose choices are held; a different one starts afresh.
+        self._gallery_uuid = getattr(ctx.current, "db_uuid", None)
+        self._fresh = True  # next data starts on all folders
         self._query = RepoQuery(ctx, self)
 
         # Shown on the page header's right (MainWindow takes header_controls).
@@ -170,10 +173,17 @@ class StorageView(QWidget):
         self._loading_root = drive_root_of(current.db_path)
         self._query.run(load_storage)
 
-    def _on_gallery_changed(self, *_args) -> None:
+    def _on_gallery_changed(self, gallery=None, *_args) -> None:
+        uuid = getattr(gallery, "db_uuid", None)
+        if uuid is not None and uuid == self._gallery_uuid:
+            # The same gallery again (its drive came back or moved): reload it
+            # like a catalog update and keep the choices and the scope.
+            self.reload()
+            return
+        self._gallery_uuid = uuid
         self.checker.cancel()
         self.pairs_view.clear_choices()
-        self._root = Path()  # a new gallery starts on all folders
+        self._fresh = True  # a new gallery starts on all folders
         self.pairs_view.set_scope(None)
         self.reload()
 
@@ -187,7 +197,8 @@ class StorageView(QWidget):
             self._show_message(EMPTY)
             return
         # Keep the folder only when the same gallery reloaded and it is still there.
-        previous = self._scope_folder() if root == self._root else None
+        previous = None if self._fresh else self._scope_folder()
+        self._fresh = False
         self._root = root
         self.tree_view.set_tree(result.tree, root)
         self.pairs_view.set_pairs(result.pairs, root)

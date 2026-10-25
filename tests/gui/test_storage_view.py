@@ -243,3 +243,32 @@ def test_bad_state_is_ignored(qtbot, repo, make_item, state):
     view.show()
     assert view.tree_view.grouping() == "folder"
     assert abs(view.splitter.sizes()[0] - view.splitter.sizes()[1]) <= 2
+
+
+def test_same_gallery_again_keeps_choices_and_scope(qtbot, repo, make_item):
+    _fill(repo, make_item)
+    ctx = _ctx(repo)
+    view = _view(qtbot, ctx)
+    p1, p2 = view.data.pairs
+    view.pairs_view.choose(p2.key, KEEP_JPEG)
+    view.tree_view.tree.setCurrentIndex(_child(view, "b"))
+    again = Gallery("uuid", str(repo.db_path), "test")  # a new object, same db_uuid
+    _reload(qtbot, view, lambda: ctx.set_gallery(again))
+    assert view.pairs_view.choices() == {p2.key: KEEP_JPEG}
+    assert view.pairs_view.scope_label.text() == "In b · 1 pairs"
+
+
+def test_disconnected_same_gallery_keeps_choices(qtbot, repo, make_item, tmp_path):
+    _fill(repo, make_item)
+    ctx = _ctx(repo)
+    view = _view(qtbot, ctx)
+    p1, _ = view.data.pairs
+    view.pairs_view.choose(p1.key, KEEP_RAW)
+    gone = Gallery("uuid", str(tmp_path / "missing" / "gallery.db"), "test")
+    ctx.set_gallery(gone)
+    qtbot.waitUntil(lambda: view.stack.currentWidget() is view.message)
+    assert view.message.text().startswith("Drive not connected.")
+    assert view.pairs_view.choices() == {p1.key: KEEP_RAW}
+    _reload(qtbot, view, lambda: ctx.set_gallery(_ctx(repo).current))
+    assert view.pairs_view.choices() == {p1.key: KEEP_RAW}
+    assert view.stack.currentIndex() == 0

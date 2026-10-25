@@ -40,6 +40,7 @@ Commands:
   export        Copy a filtered subset out to another directory.
   convert-raw   Extract embedded JPEG previews from CR2/CR3 files.
   recycle       Move listed catalog files to the Recycle Bin and drop them from the catalog.
+  rename        Give a gallery a new name; it is stored in the catalog on the drive.
   dashboard     Launch the Streamlit dashboard on a catalog.
   ui            Open the interactive terminal interface.
   gui           Open the Windows desktop app.
@@ -264,6 +265,23 @@ time.
 
 ```bash
 smart-gallery recycle E:/ --list recycle.txt
+```
+
+### `rename` — name a gallery
+
+```bash
+smart-gallery rename <drive> "<name>"
+```
+
+Stores the gallery's name in its catalog (the same name `init --label` sets),
+so it follows the drive to any computer and shows in the CLI and the app.
+Surrounding and repeated spaces are dropped; a blank name, or one over 80
+characters, is refused. In the desktop app, use **Rename gallery…** in the
+gallery menu. Until two galleries have different names, that menu shows each
+one's drive after the name, for example `Archive (D:)`.
+
+```bash
+smart-gallery rename D:/ "Archive 2026"
 ```
 
 ### `dashboard` — explore the catalog

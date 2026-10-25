@@ -35,6 +35,7 @@ from smart_gallery.services import (
     init_drive,
     read_list,
     recycle_files,
+    rename_gallery,
     scan_faces,
     split_person,
     sync_drive,
@@ -386,6 +387,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    p_rename = sub.add_parser(
+        "rename",
+        help="Give a gallery a new name; it is stored in the catalog on the drive.",
+    )
+    p_rename.add_argument("drive", type=Path, help=DRIVE_HELP)
+    p_rename.add_argument("name", help='The gallery\'s new name, e.g. "Archive 2026".')
+
     p_dash = sub.add_parser(
         "dashboard", help="Launch the Streamlit dashboard on a catalog."
     )
@@ -669,6 +677,12 @@ def _handle_recycle(args):
     )
 
 
+def _handle_rename(args):
+    with GalleryRepository.open(args.drive) as repo:
+        name = rename_gallery(repo, args.name)
+    logger.success(f"Renamed the gallery to {name!r}.")
+
+
 def _handle_dashboard(args):
     from smart_gallery import dashboard
 
@@ -866,6 +880,7 @@ _HANDLERS = {
     "convert-raw": _handle_convert_cr3,
     "convert-cr3": _handle_convert_cr3,
     "recycle": _handle_recycle,
+    "rename": _handle_rename,
     "dashboard": _handle_dashboard,
     "ui": _handle_ui,
     "tui": _handle_ui,

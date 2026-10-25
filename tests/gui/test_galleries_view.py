@@ -2,7 +2,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
 
 from smart_gallery.db import GalleryRepository
 from smart_gallery.gui.app import MainWindow
@@ -53,7 +53,12 @@ def test_button_names_the_open_gallery_and_menu_holds_commands(qtbot, tmp_path):
     assert panel.button.text() == "A"
     assert panel.gallery_actions()[0].isChecked()
     texts = [a.text() for a in panel.menu.actions() if not a.isSeparator()]
-    assert texts[-3:] == ["Add existing…", "Create on drive…", "Refresh drives"]
+    assert texts[-4:] == [
+        "Add existing…",
+        "Create on drive…",
+        "Rename gallery…",
+        "Refresh drives",
+    ]
 
 
 def test_selecting_sets_gallery_and_remembers_it(qtbot, tmp_path):
@@ -317,3 +322,55 @@ def test_refresh_does_not_ask_leave_guards(qtbot, tmp_path):
     ctx.add_leave_guard(fail)
     panel.refresh()
     panel.recheck()
+
+
+def test_same_names_show_their_drive(qtbot, tmp_path):
+    a = _catalog(tmp_path / "a", "Archive")
+    b = _catalog(tmp_path / "b", "Archive")
+    c = _catalog(tmp_path / "c", "Phone")
+    panel, ctx, store = _panel(qtbot, tmp_path, a, b, c)
+    drive = Path(tmp_path).anchor.rstrip("\\/")
+    texts = [action.text() for action in panel.gallery_actions()]
+    assert texts == [f"Archive ({drive})", f"Archive ({drive})", "Phone"]
+
+
+def test_rename_needs_jobs_and_a_connected_gallery(qtbot, tmp_path):
+    a = _catalog(tmp_path / "a", "A")
+    panel, ctx, store = _panel(qtbot, tmp_path, a)
+    assert not panel.rename_action.isEnabled()  # no job runner
+
+
+def test_rename_runs_the_cli_and_shows_the_new_name(qtbot, tmp_path, monkeypatch):
+    root = _catalog(tmp_path / "arch", "Archive")
+    panel, ctx, store, runner = _jobs_panel(qtbot, tmp_path, monkeypatch, root)
+    store.add(root)
+    panel.refresh()
+    assert panel.rename_action.isEnabled()
+    runner._program = [sys.executable, "-m", "smart_gallery.cli"]  # the real command
+    monkeypatch.setattr(
+        QInputDialog, "getText", lambda *a, **k: ("  Archive   2026 ", True)
+    )
+    changed = []
+    ctx.gallery_changed.connect(changed.append)
+    seen = []
+    runner.started.connect(seen.append)
+    with qtbot.waitSignal(runner.finished, timeout=30000):
+        panel.rename_action.trigger()
+    assert seen[0].argvs == (("rename", ctx.current.db_path, "Archive 2026"),)
+    qtbot.waitUntil(lambda: ctx.current.label == "Archive 2026", timeout=5000)
+    assert [g.label for g in store.all()] == ["Archive 2026"]
+    assert panel.button.text() == "Archive 2026"
+    assert changed and changed[-1].db_uuid == store.all()[0].db_uuid
+
+
+def test_rename_cancelled_or_unchanged_starts_nothing(qtbot, tmp_path, monkeypatch):
+    root = _catalog(tmp_path / "arch", "Archive")
+    panel, ctx, store, runner = _jobs_panel(qtbot, tmp_path, monkeypatch, root)
+    store.add(root)
+    panel.refresh()
+    seen = []
+    runner.started.connect(seen.append)
+    for answer in (("New", False), ("Archive", True), ("   ", True)):
+        monkeypatch.setattr(QInputDialog, "getText", lambda *a, r=answer, **k: r)
+        panel.rename_action.trigger()
+    assert seen == []

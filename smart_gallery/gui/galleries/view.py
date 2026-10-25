@@ -1,17 +1,21 @@
 """Gallery picker in the top bar: pick, add or create the open catalog.
 
 One drop-down button names the open gallery; its menu lists every gallery,
-then the commands that add one, create one or look for drives again.
+then the commands that add one, create one, rename the open one or look for
+drives again.
 """
 
 from __future__ import annotations
 
 import sqlite3
 import time
+from collections import Counter
+from pathlib import Path
 
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
     QFileDialog,
+    QInputDialog,
     QMenu,
     QMessageBox,
     QPushButton,
@@ -32,6 +36,8 @@ NOT_CONNECTED = " (not connected)"
 NO_GALLERY = "No gallery"
 CREATE_DISABLED_TIP = "Available once jobs are wired"
 JOB_RUNNING = "A job is already running."
+RENAME_TITLE = "Rename gallery"
+RENAME_PROMPT = "Name (stored on the drive, so it follows the gallery):"
 # Switching back to the window re-checks the drives at most this often.
 RECHECK_INTERVAL_S = 2.0
 
@@ -55,11 +61,14 @@ class GalleriesPanel(QWidget):
         self.create_action.setEnabled(ctx.jobs is not None)
         if ctx.jobs is None:
             self.create_action.setToolTip(CREATE_DISABLED_TIP)
+        self.rename_action = QAction("Rename gallery…", self)
+        self.rename_action.setToolTip("Give the open gallery a new name")
         self.refresh_action = QAction("Refresh drives", self)
         self.refresh_action.setToolTip("Look again for drives plugged in or removed")
         self._group = QActionGroup(self)  # the gallery entries, one checked
         self._group.setExclusive(True)
         self._creating: str | None = None  # folder of the init job we started
+        self._renaming: str | None = None  # catalog of the rename job we started
         # db_uuid -> connected, as the menu last showed it.
         self._connected: dict[str, bool] = {}
 
@@ -70,6 +79,7 @@ class GalleriesPanel(QWidget):
         self.refresh_action.triggered.connect(self.recheck)
         self.add_action.triggered.connect(self._add_existing)
         self.create_action.triggered.connect(self._create_on_drive)
+        self.rename_action.triggered.connect(self._rename_current)
         ctx.gallery_changed.connect(self._show_current)
         if ctx.jobs is not None:
             ctx.jobs.finished.connect(self._on_job_finished)
@@ -122,9 +132,11 @@ class GalleriesPanel(QWidget):
         self.menu.clear()
         self._connected.clear()
         self.menu.addSection("Galleries")
+        repeated = Counter(g.label for g in galleries)
         for g in galleries:
             connected = self._connected[g.db_uuid] = is_connected(g)
-            action = QAction(g.label if connected else g.label + NOT_CONNECTED, self)
+            name = menu_name(g) if repeated[g.label] > 1 else g.label
+            action = QAction(name if connected else name + NOT_CONNECTED, self)
             action.setCheckable(True)
             action.setData(g)
             if not connected:
@@ -138,6 +150,7 @@ class GalleriesPanel(QWidget):
         self.menu.addSeparator()
         self.menu.addAction(self.add_action)
         self.menu.addAction(self.create_action)
+        self.menu.addAction(self.rename_action)
         self.menu.addAction(self.refresh_action)
         index = next((i for i, g in enumerate(galleries) if g.db_uuid == wanted), 0)
         if galleries:
@@ -167,6 +180,12 @@ class GalleriesPanel(QWidget):
             if mine:
                 text = action.text()
         self.button.setText(text)
+        current = self.ctx.current
+        self.rename_action.setEnabled(
+            self.ctx.jobs is not None
+            and current is not None
+            and self._connected.get(current.db_uuid, False)
+        )
 
     def _relocate_disconnected(self) -> None:
         """Look for galleries whose drive came back under another letter."""
@@ -204,7 +223,28 @@ class GalleriesPanel(QWidget):
             self._creating = None
             QMessageBox.information(self, "Create on drive", JOB_RUNNING)
 
+    def _rename_current(self) -> None:
+        gallery = self.ctx.current
+        if gallery is None:
+            return
+        name, ok = QInputDialog.getText(
+            self, RENAME_TITLE, RENAME_PROMPT, text=gallery.label
+        )
+        name = " ".join(name.split())
+        if not ok or not name or name == gallery.label:
+            return
+        self._renaming = gallery.db_path  # set first, as for create
+        spec = JobSpec(RENAME_TITLE, (("rename", gallery.db_path, name),))
+        if not self.ctx.jobs.start(spec):
+            self._renaming = None
+            QMessageBox.information(self, RENAME_TITLE, JOB_RUNNING)
+
     def _on_job_finished(self, record) -> None:
+        renamed, self._renaming = self._renaming, None
+        if renamed is not None:
+            if record.status == "ok":
+                self._reload_name(renamed)
+            return
         folder, self._creating = self._creating, None
         if folder is None or record.status != "ok":
             return
@@ -217,3 +257,20 @@ class GalleriesPanel(QWidget):
             return  # a leave guard kept the open gallery
         if self.ctx.current != gallery:  # refresh opens it unless it is already open
             self.ctx.set_gallery(gallery)
+
+    def _reload_name(self, db_path: str) -> None:
+        """Read the new name back from the catalog and show it everywhere."""
+        try:
+            gallery = self.store.add(db_path)
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            QMessageBox.warning(self, RENAME_TITLE, str(exc))
+            return
+        # Same db_uuid, so this is not leaving the gallery: no guard asks, and
+        # areas reload as for a drive that came back.
+        self.refresh(select=gallery.db_uuid)
+
+
+def menu_name(gallery: Gallery) -> str:
+    """The name with its drive, for telling apart galleries named alike."""
+    anchor = Path(gallery.db_path).anchor.rstrip("\\/")
+    return f"{gallery.label} ({anchor})" if anchor else gallery.label

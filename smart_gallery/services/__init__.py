@@ -23,6 +23,7 @@ from smart_gallery.services.recycle import (
     read_list,
     recycle_files,
 )
+from smart_gallery.services.rename import rename_gallery
 from smart_gallery.services.scan_faces import ScanFacesReport, scan_faces
 from smart_gallery.services.sync import SyncReport, diff_drive, sync_drive
 
@@ -52,4 +53,5 @@ __all__ = [
     "recycle_files",
     "RecycleReport",
     "read_list",
+    "rename_gallery",
 ]

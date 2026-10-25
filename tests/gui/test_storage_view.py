@@ -356,3 +356,33 @@ def test_unwritable_state_file_is_only_logged(qtbot, repo, make_item, monkeypatc
     view.tree_view.set_grouping("type")  # saves at once: must not raise
     view.splitter.splitterMoved.emit(300, 1)
     qtbot.waitUntil(lambda: len(calls) == 2)
+
+
+def test_thumbnails_asked_again_when_page_is_shown(qtbot, repo, make_item):
+    from PySide6.QtCore import QObject, Signal
+
+    class Thumbs(QObject):
+        ready = Signal(str, int, str)
+
+        def __init__(self):
+            super().__init__()
+            self.ids = []
+
+        def request(self, root, media_id, *_args):
+            self.ids.append(media_id)
+
+    _fill(repo, make_item)
+    ctx = _ctx(repo)
+    ctx.thumbs = Thumbs()
+    view = _view(qtbot, ctx)
+    view.resize(1000, 600)
+    view.show()
+    qtbot.waitExposed(view)
+    qtbot.waitUntil(lambda: bool(ctx.thumbs.ids))
+    first = list(ctx.thumbs.ids)
+    assert first
+    # The shared loader dropped its queue (cancel_pending) while away.
+    view.hide()
+    ctx.thumbs.ids.clear()
+    view.show()
+    qtbot.waitUntil(lambda: sorted(ctx.thumbs.ids) == sorted(first))

@@ -168,6 +168,7 @@ class StorageView(QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt API)
         super().showEvent(event)
+        self.pairs_view.forget_thumb_requests()
         if self._split_applied:
             return
         self._split_applied = True

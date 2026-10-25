@@ -527,6 +527,12 @@ class PairsView(QWidget):
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.open()
 
+    def forget_thumb_requests(self) -> None:
+        """Ask again for thumbnails still outstanding: the shared loader may
+        have dropped them (``cancel_pending``) while the page was away."""
+        self._requested.clear()
+        self.list.viewport().update()
+
     def _thumb(self, ref: FileRef) -> QPixmap | None:
         """The cached thumbnail, or None after asking for it."""
         key = (ref.id, ref.mtime_ns)

@@ -241,21 +241,26 @@ size in bytes and its modification time in nanoseconds, separated by tabs
 | Arg | Meaning |
 |---|---|
 | `<drive>` | Drive whose catalog lists the files. |
-| `--list FILE` | required. The list of files to recycle. |
+| `--list FILE` | required. The list of files to recycle. Deleted after the run (kept only when the drive is refused), so the same list can't be replayed. |
 
 It never deletes a file permanently:
 
 - On a drive without a Recycle Bin (anything but a fixed local drive on
-  Windows), it refuses before touching anything.
+  Windows, or one whose Recycle Bin is turned off in its properties or by
+  policy), it refuses before touching anything.
 - A file is skipped, and kept, when it has no catalog row, is missing, or its
   size or modification time on disk or in the catalog differs from the list.
 - If the Recycle Bin can't take a file, the file stays where it is, keeps its
-  catalog row, and is reported as failed.
+  catalog row, and is reported as failed. So does a file larger than the
+  drive's Recycle Bin size limit.
 - Each recycled file's row is removed as soon as the file is gone, so a
   cancelled run leaves the catalog matching the drive.
 
 Files moved this way can be restored from the Recycle Bin; run `sync`
-afterwards to put restored files back in the catalog.
+afterwards to put restored files back in the catalog. The list file is deleted
+once a run has started, so running the same job again from the app's History
+fails with a missing-list error instead of recycling restored files a second
+time.
 
 ```bash
 smart-gallery recycle E:/ --list recycle.txt
@@ -357,7 +362,7 @@ rights, adds a Start-menu shortcut, and registers an uninstaller.
 Face recognition is bundled only when the faces stack is installed (via
 `uv sync --extra faces`) at build time. InsightFace models are not bundled; the
 app loads them from `~/.insightface/models`. The installed CLI does not include
-the Streamlit `dashboard` or the Textual `ui`; use the app's Dashboard area
+the Streamlit `dashboard` or the Textual `ui`; use the app's Stats page
 instead.
 
 ## Per-device import recipes

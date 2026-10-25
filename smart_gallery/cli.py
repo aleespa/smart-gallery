@@ -379,7 +379,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--list",
         required=True,
         type=Path,
-        help="Text file with one 'relpath<TAB>size<TAB>mtime_ns' line per file.",
+        help=(
+            "Text file with one 'relpath<TAB>size<TAB>mtime_ns' line per file. "
+            "It is deleted once the run starts moving files, so it can't be "
+            "replayed; it is kept when the drive has no Recycle Bin."
+        ),
     )
 
     p_dash = sub.add_parser(
@@ -644,10 +648,18 @@ def _handle_recycle(args):
     entries = read_list(args.list)
     cb = progress_reporter()
     with GalleryRepository.open(args.drive) as repo:
+        refused = False
         try:
             report = recycle_files(repo, entries, progress_callback=cb)
+        except ValueError:  # no Recycle Bin: nothing moved, the list may be retried
+            refused = True
+            raise
         finally:
             cb.close()
+            if not refused:
+                # A list is used once: running it again after the files were
+                # restored (and synced) would recycle them a second time.
+                args.list.unlink(missing_ok=True)
     for failure in report.failures:
         logger.error(f"Not recycled: {failure}")
     logger.success(

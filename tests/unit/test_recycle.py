@@ -374,3 +374,35 @@ def test_read_list_accepts_crlf(tmp_path):
     p = tmp_path / "list.txt"
     p.write_bytes(b"a.jpg\t1\t2\r\nb.jpg\t3\t\r\n")
     assert read_list(p) == [RecycleEntry("a.jpg", 1, 2), RecycleEntry("b.jpg", 3, None)]
+
+
+def test_cli_recycle_deletes_its_list_after_a_run(
+    repo, drive, drive_file, make_item, recorder, monkeypatch, tmp_path
+):
+    _, a = _catalogued(repo, drive, drive_file, make_item, "a.jpg")
+    list_file = tmp_path / "recycle.txt"
+    write_list(list_file, [a, RecycleEntry("gone.jpg", 1, 1)])
+    monkeypatch.setattr(cli, "LOG_DIR", tmp_path / "logs")
+
+    cli.main(["recycle", str(drive), "--list", str(list_file)])
+
+    assert not list_file.exists()
+    # Run again (e.g. from History) after a restore: fails, moves nothing.
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["recycle", str(drive), "--list", str(list_file)])
+    assert exc.value.code == 1
+
+
+def test_cli_recycle_keeps_its_list_when_refused(
+    repo, drive, drive_file, make_item, recorder, monkeypatch, tmp_path
+):
+    _, a = _catalogued(repo, drive, drive_file, make_item, "a.jpg")
+    list_file = tmp_path / "recycle.txt"
+    write_list(list_file, [a])
+    monkeypatch.setattr(recycle, "supports_recycle_bin", lambda path: False)
+    monkeypatch.setattr(cli, "LOG_DIR", tmp_path / "logs")
+
+    with pytest.raises(SystemExit):
+        cli.main(["recycle", str(drive), "--list", str(list_file)])
+
+    assert list_file.exists()

@@ -242,3 +242,18 @@ def test_empty_panel_stays_hidden_even_if_collapsed(qtbot, repo, make_item):
     _loaded(qtbot, view)
     view.panels[SETTINGS_PANEL].set_collapsed(True)
     assert not _shown(view, SETTINGS_PANEL)
+
+
+def test_unwritable_state_file_is_only_logged(qtbot, repo, make_item, monkeypatch):
+    from smart_gallery.gui.dashboard import view as dashboard_view
+
+    def locked(path, data):
+        raise PermissionError("locked by the indexer")
+
+    monkeypatch.setattr(dashboard_view, "save_json", locked)
+    repo.upsert_many([make_item("a/1.jpg", focal_length=50)])
+    view, _ = _view(qtbot, repo.db_path)
+    _loaded(qtbot, view)
+    panel = view.panels[FILES_PANEL]
+    panel.set_collapsed(True)  # must not raise from the slot
+    assert panel.collapsed

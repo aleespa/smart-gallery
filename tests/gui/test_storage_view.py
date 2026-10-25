@@ -7,6 +7,7 @@ from smart_gallery.db import GalleryRepository
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.galleries.store import Gallery
 from smart_gallery.gui.paths import app_data_dir
+from smart_gallery.gui.state_store import load_json
 from smart_gallery.gui.storage.pairs_view import PAIR_ROLE
 from smart_gallery.gui.storage.tree_view import NODE_ROLE
 from smart_gallery.gui.storage.view import (
@@ -15,6 +16,7 @@ from smart_gallery.gui.storage.view import (
     JOB_TITLE,
     LISTS_DIR,
     NO_GALLERY,
+    SAVE_DELAY_MS,
     STATE_FILE,
     StorageView,
     load_storage,
@@ -220,6 +222,7 @@ def test_grouping_and_split_remembered(qtbot, repo, make_item):
     view.splitter.setSizes([300, 690])
     view.splitter.splitterMoved.emit(300, 1)
     saved = view.splitter.sizes()
+    qtbot.waitUntil(lambda: load_json(view.state_path).get("split") == saved)
 
     again = _view(qtbot, _ctx(repo, "u2"))
     again.resize(1000, 600)
@@ -319,3 +322,37 @@ def test_pair_folders_follow_tree_sizes(qtbot, repo, make_item):
     ]
     assert headings == ["B", "A"]  # b holds more on disk; find_pairs says a, b
     assert [p.folder for p in view.data.pairs] == ["a", "b"]
+
+
+def test_splitter_drag_saves_once_after_it_settles(qtbot, repo, make_item, monkeypatch):
+    from smart_gallery.gui.storage import view as storage_view
+
+    saves = []
+    monkeypatch.setattr(storage_view, "save_json", lambda p, d: saves.append(d))
+    _fill(repo, make_item)
+    view = _view(qtbot, _ctx(repo))
+    view.resize(1000, 600)
+    view.show()
+    for x in range(200, 260):
+        view.splitter.splitterMoved.emit(x, 1)
+    assert saves == []  # not on every pixel, not on the GUI thread's hot path
+    qtbot.waitUntil(lambda: len(saves) == 1)
+    qtbot.wait(SAVE_DELAY_MS + 100)
+    assert len(saves) == 1
+
+
+def test_unwritable_state_file_is_only_logged(qtbot, repo, make_item, monkeypatch):
+    from smart_gallery.gui.storage import view as storage_view
+
+    calls = []
+
+    def locked(path, data):
+        calls.append(data)
+        raise PermissionError("locked by the indexer")
+
+    monkeypatch.setattr(storage_view, "save_json", locked)
+    _fill(repo, make_item)
+    view = _view(qtbot, _ctx(repo))
+    view.tree_view.set_grouping("type")  # saves at once: must not raise
+    view.splitter.splitterMoved.emit(300, 1)
+    qtbot.waitUntil(lambda: len(calls) == 2)

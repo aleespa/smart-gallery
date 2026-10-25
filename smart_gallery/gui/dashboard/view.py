@@ -9,6 +9,8 @@ when they arrive, the panels are rebuilt here on the GUI thread.
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QEvent, Qt, QUrl, Signal
 from PySide6.QtGui import QPalette
 from PySide6.QtWebEngineCore import QWebEngineSettings
@@ -45,6 +47,8 @@ DISCONNECTED = "Drive not connected. Plug in {label} to see its stats."
 READ_ERROR = "Could not read the catalog: {error}"
 MAP_CAPTION = "Displaying {count:,} geotagged photos"
 STATE_FILE = "dashboard.json"  # {"collapsed": [sorted panel titles]}
+
+logger = logging.getLogger(__name__)
 
 FILES_PANEL = "File Types, Cameras, Lenses"
 SETTINGS_PANEL = "Camera Settings Distribution"
@@ -263,7 +267,10 @@ class DashboardView(QWidget):
 
     def _save_collapsed(self, *_args) -> None:
         names = sorted(t for t, p in self.panels.items() if p.collapsed)
-        save_json(self.state_path, {"collapsed": names})
+        try:
+            save_json(self.state_path, {"collapsed": names})
+        except OSError as exc:  # e.g. the file is locked; the next save retries
+            logger.warning("Could not save %s: %s", self.state_path, exc)
 
     def reload(self, *_args) -> None:
         if self.ctx.current is None:

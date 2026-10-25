@@ -9,11 +9,12 @@ become a ``recycle`` job; nothing here writes the catalog or touches a file.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QModelIndex, Qt
+from PySide6.QtCore import QModelIndex, Qt, QTimer
 from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
@@ -47,6 +48,7 @@ from smart_gallery.storage.tree import (
 )
 
 STATE_FILE = "storage.json"  # {"grouping": "folder"|"type", "split": [int, int]}
+SAVE_DELAY_MS = 300  # a splitter drag is saved once it settles
 CHECKS_DIR = "pair_checks"  # app_data_dir() / CHECKS_DIR / f"{db_uuid}.json"
 LISTS_DIR = "recycle_lists"  # app_data_dir() / LISTS_DIR / f"{timestamp}.tsv"
 CAPTION = "{root} · {size} in {files:,} files"
@@ -57,6 +59,8 @@ DISCONNECTED = "Drive not connected. Plug in {label} to see its storage."
 READ_ERROR = "Could not read the catalog: {error}"
 EMPTY = "This gallery's catalog has no files yet."
 LIST_ERROR = "Could not write the list of files to move: {error}"
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -138,7 +142,12 @@ class StorageView(QWidget):
         self.checker.progress.connect(self.pairs_view.set_progress)
         self.checker.finished.connect(self.pairs_view.check_finished)
         self.checker.failed.connect(self.pairs_view.check_failed)
-        self.splitter.splitterMoved.connect(self._save_state)
+        # A drag moves the splitter on every pixel: save once it settles.
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(SAVE_DELAY_MS)
+        self._save_timer.timeout.connect(self._save_state)
+        self.splitter.splitterMoved.connect(self._save_timer.start)
 
         self._query.finished.connect(self._on_data)
         self._query.failed.connect(self._on_failed)
@@ -278,10 +287,12 @@ class StorageView(QWidget):
         self._save_state()
 
     def _save_state(self, *_args) -> None:
-        save_json(
-            self.state_path,
-            {"grouping": self.tree_view.grouping(), "split": self.splitter.sizes()},
-        )
+        self._save_timer.stop()  # this save covers a pending one
+        state = {"grouping": self.tree_view.grouping(), "split": self.splitter.sizes()}
+        try:
+            save_json(self.state_path, state)
+        except OSError as exc:  # e.g. the file is locked; the next save retries
+            logger.warning("Could not save %s: %s", self.state_path, exc)
 
     # ── moving ──────────────────────────────────────────────────────────────
     def _on_move(self, files: list[FileRef]) -> None:

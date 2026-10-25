@@ -1,0 +1,108 @@
+<style>
+  .app { background:#1e1e1e; color:#e8e8e8; font-family:"Segoe UI",sans-serif; border-radius:8px; overflow:hidden; font-size:12.5px; border:1px solid #333 }
+  .app .top { display:flex; align-items:center; gap:4px; background:#151515; padding:0 10px; height:38px }
+  .app .brand { font-family:Georgia,serif; font-size:15px; margin-right:18px; background:linear-gradient(90deg,#FF5F6D,#FFA552); -webkit-background-clip:text; color:transparent }
+  .app .tab { padding:10px 12px; color:#aaa }
+  .app .tab.on { color:#fff; border-bottom:2px solid #FF5F6D }
+  .app .tab.new { color:#fff }
+  .app .tab small { color:#FFA552; font-size:9px; vertical-align:super }
+  .app .win { margin-left:auto; color:#777; letter-spacing:10px }
+  .app .hdr { display:flex; align-items:baseline; gap:12px; padding:14px 16px 10px }
+  .app h4 { font-family:Georgia,serif; font-weight:normal; font-size:22px; margin:0 }
+  .app .muted { color:#999; font-size:11.5px }
+  .app .cols { display:flex; gap:14px; padding:0 16px 16px }
+  .app .col { flex:1; background:#232323; border:1px solid #333; border-radius:6px; min-width:0; display:flex; flex-direction:column }
+  .app .colh { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border-bottom:1px solid #333 }
+  .app .colh b { font-family:Georgia,serif; font-weight:normal; font-size:15px }
+  .app .seg span { padding:3px 9px; border:1px solid #555; font-size:11px }
+  .app .seg span:first-child { border-radius:4px 0 0 4px }
+  .app .seg span:last-child { border-radius:0 4px 4px 0; border-left:none }
+  .app .seg .on { background:#FF5F6D; color:#1a1a1a; border-color:#FF5F6D }
+  .app table { width:100%; border-collapse:collapse }
+  .app th { text-align:left; color:#888; font-weight:normal; font-size:10.5px; padding:6px 8px; border-bottom:1px solid #333 }
+  .app td { padding:5px 8px; border-bottom:1px solid #2a2a2a; white-space:nowrap }
+  .app td.r, .app th.r { text-align:right; font-variant-numeric:tabular-nums }
+  .app tr.sel td { background:#FF5F6D22 }
+  .app tr.sel td:first-child { box-shadow:inset 3px 0 #FF5F6D }
+  .app .bar { display:inline-block; height:7px; border-radius:2px; vertical-align:middle; margin-right:6px }
+  .app .chip { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:6px }
+  .app .photo { background:linear-gradient(135deg,#5a6b7d,#c9a77c); border-radius:3px; width:48px; height:32px }
+  .app .photo.alt { background:linear-gradient(135deg,#6b5a7d,#d6b48a); filter:saturate(1.4) }
+  .app .pill { padding:2px 8px; border-radius:10px; border:1px solid #555; font-size:10.5px; margin-left:3px }
+  .app .pill.on { background:#FF5F6D; color:#1a1a1a; border-color:#FF5F6D }
+  .app .scope { padding:7px 12px; background:#2b2b2b; font-size:11.5px; color:#ccc; display:flex; justify-content:space-between }
+  .app .scope a { color:#FFA552 }
+  .app .grp td { color:#888; font-size:10px; text-transform:uppercase; letter-spacing:.05em; padding-top:9px }
+  .app .warn { color:#ffd27a; font-size:11px }
+  .app .foot { margin-top:auto; display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border-top:1px solid #333 }
+  .app .btn { padding:6px 12px; border-radius:4px; background:#FF5F6D; color:#1a1a1a; font-size:12px }
+  .app .btn.ghost { background:none; border:1px solid #555; color:#ddd }
+</style>
+
+<h2>The new Storage page</h2>
+<p class="subtitle">Dashboard is renamed Stats, and Storage gets its own tab. The left column is the folder tree from the existing plan. The right column is the RAW + JPEG pairs. Clicking a folder on the left shows only that folder's pairs on the right.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Storage tab · desktop app</div>
+  <div class="mockup-body" style="padding:0">
+    <div class="app">
+      <div class="top">
+        <span class="brand">Smart Gallery</span>
+        <span class="tab">Library</span><span class="tab">Import</span><span class="tab">Stats<small> renamed</small></span>
+        <span class="tab on">Storage<small> new</small></span>
+        <span class="tab">People</span><span class="tab">Actions</span><span class="tab">History</span>
+        <span class="win">— ▢ ✕</span>
+      </div>
+      <div class="hdr"><h4>Storage</h4><span class="muted">E:  ·  1.82 TB in 48,210 files</span></div>
+
+      <div class="cols">
+        <!-- LEFT: storage tree -->
+        <div class="col">
+          <div class="colh"><b>Where the space is</b>
+            <span class="seg"><span class="on">Folder ▸ Type</span><span>Type ▸ Folder</span></span></div>
+          <table>
+            <tr><th>Name</th><th class="r">Size</th><th>Share of parent</th><th class="r">Files</th></tr>
+            <tr><td>▾ E:</td><td class="r">1.82 TB</td><td><span class="bar" style="width:80px;background:#FF5F6D"></span>100%</td><td class="r">48,210</td></tr>
+            <tr><td>&nbsp;&nbsp;&nbsp;▸ Drone</td><td class="r">912 GB</td><td><span class="bar" style="width:39px;background:#FF5F6D"></span>49%</td><td class="r">1,204</td></tr>
+            <tr><td>&nbsp;&nbsp;&nbsp;▾ Canon</td><td class="r">745 GB</td><td><span class="bar" style="width:32px;background:#FF5F6D"></span>40%</td><td class="r">31,880</td></tr>
+            <tr class="sel"><td>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;▾ 2026-02 Valentines</td><td class="r">45.6 GB</td><td><span class="bar" style="width:5px;background:#FF5F6D"></span>6%</td><td class="r">1,312</td></tr>
+            <tr><td>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="chip" style="background:#7aa2ff"></span>CR3</td><td class="r">31.2 GB</td><td><span class="bar" style="width:55px;background:#7aa2ff"></span>68%</td><td class="r">656</td></tr>
+            <tr><td>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="chip" style="background:#5fd1a8"></span>JPG</td><td class="r">14.4 GB</td><td><span class="bar" style="width:25px;background:#5fd1a8"></span>32%</td><td class="r">656</td></tr>
+            <tr><td>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;▸ 2026-03 Mexico</td><td class="r">38.1 GB</td><td><span class="bar" style="width:4px;background:#FF5F6D"></span>5%</td><td class="r">980</td></tr>
+            <tr><td>&nbsp;&nbsp;&nbsp;▸ Phone</td><td class="r">164 GB</td><td><span class="bar" style="width:7px;background:#FF5F6D"></span>9%</td><td class="r">15,126</td></tr>
+          </table>
+          <div class="foot"><span class="muted">Double-click a folder to open it in Explorer</span></div>
+        </div>
+
+        <!-- RIGHT: pairs -->
+        <div class="col">
+          <div class="colh"><b>RAW + JPEG pairs</b><span class="muted">Checking pictures… 412 / 656</span></div>
+          <div class="scope"><span>In <b>Canon/2026-02 Valentines</b> · 656 pairs</span><a>Show all 4,930 pairs</a></div>
+          <table>
+            <tr class="grp"><td colspan="3">Canon/2026-02 Valentines</td></tr>
+            <tr><td style="width:104px"><span style="display:flex;gap:4px"><span class="photo"></span><span class="photo"></span></span></td>
+                <td>IMG_0001<br><span class="muted">CR3 24 MB · JPG 9.8 MB</span></td>
+                <td class="r"><span class="pill on">RAW</span><span class="pill">JPEG</span><span class="pill">Both</span></td></tr>
+            <tr><td><span style="display:flex;gap:4px"><span class="photo"></span><span class="photo alt"></span></span></td>
+                <td>IMG_0007 <span class="warn">⚠ look different</span><br><span class="muted">CR3 24 MB · JPG 9.8 MB</span></td>
+                <td class="r"><span class="pill">RAW</span><span class="pill">JPEG</span><span class="pill on">Both</span></td></tr>
+            <tr><td><span style="display:flex;gap:4px"><span class="photo"></span><span class="photo"></span></span></td>
+                <td>IMG_0008<br><span class="muted">CR3 23 MB · JPG 9.1 MB</span></td>
+                <td class="r"><span class="pill">RAW</span><span class="pill on">JPEG</span><span class="pill">Both</span></td></tr>
+            <tr><td><span style="display:flex;gap:4px"><span class="photo"></span><span class="photo"></span></span></td>
+                <td>IMG_0009 <span class="muted">· checking…</span><br><span class="muted">CR3 24 MB · JPG 9.6 MB</span></td>
+                <td class="r"><span class="pill">RAW</span><span class="pill">JPEG</span><span class="pill">Both</span></td></tr>
+          </table>
+          <div class="foot">
+            <span class="muted">2 chosen · frees 33.1 MB<br>Undecided pairs are left alone</span>
+            <span><span class="btn ghost">Clear choices</span>&nbsp; <span class="btn">Move 2 files to Recycle Bin</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:14px">
+  <p class="subtitle">Still on the Stats tab, from the existing plan: the data tables at the bottom are removed, and every panel can be collapsed. Only the Storage panel moves to this page.</p>
+</div>

@@ -1,0 +1,100 @@
+<style>
+  .sg { background:#1e1e1e; color:#e8e8e8; font-family:"Segoe UI",sans-serif; border-radius:8px; overflow:hidden; font-size:13px }
+  .sg .bar { display:flex; gap:18px; padding:8px 14px; background:#151515; color:#aaa; font-size:12px }
+  .sg .bar b { color:#FF5F6D }
+  .sg h4 { font-family:Georgia,serif; font-weight:normal; font-size:18px; margin:0 }
+  .sg .head { display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-bottom:1px solid #333 }
+  .sg .muted { color:#999; font-size:12px }
+  .sg .photo { background:linear-gradient(135deg,#5a6b7d,#c9a77c); border-radius:4px; display:flex; align-items:center; justify-content:center; color:#fff8; font-size:11px }
+  .sg .photo.alt { background:linear-gradient(135deg,#6b5a7d,#d6b48a); filter:saturate(1.4) contrast(1.1) }
+  .sg .btn { display:inline-block; padding:6px 12px; border-radius:4px; border:1px solid #555; font-size:12px; margin-right:6px }
+  .sg .btn.acc { background:#FF5F6D; color:#1a1a1a; border-color:#FF5F6D }
+  .sg .warn { background:#4a3a14; color:#ffd27a; padding:7px 12px; border-radius:4px; margin:10px 14px 0; font-size:12px }
+  .sg .side { width:190px; border-right:1px solid #333; padding:8px 0 }
+  .sg .side div { padding:5px 12px; font-size:12px; color:#bbb }
+  .sg .side .on { background:#FF5F6D22; color:#fff; border-left:3px solid #FF5F6D }
+  .sg .side .grp { color:#888; text-transform:uppercase; font-size:10px; letter-spacing:.06em; padding-top:10px }
+  .sg table { width:100%; border-collapse:collapse }
+  .sg td { padding:8px 10px; border-bottom:1px solid #2c2c2c; vertical-align:middle }
+  .sg .pill { padding:2px 8px; border-radius:10px; border:1px solid #555; font-size:11px; margin-right:4px }
+  .sg .pill.on { background:#FF5F6D; color:#1a1a1a; border-color:#FF5F6D }
+</style>
+
+<h2>How should reviewing a pair look?</h2>
+<p class="subtitle">Both live in the desktop app. Click the one closer to what you picture. Comments in the terminal.</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>One pair at a time, big</h3>
+      <p>The two copies fill the screen side by side. Choose one and the next pair appears. A list on the left shows where you are, grouped by folder. Arrow keys pick a side and Enter confirms.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>A list of pairs, small</h3>
+      <p>Each row is one pair with small previews and Keep buttons. You go down the list choosing. Clicking a row opens it big when you need a closer look.</p>
+    </div>
+  </div>
+</div>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">A · One pair at a time</div>
+    <div class="mockup-body" style="padding:0">
+      <div class="sg">
+        <div class="head"><h4>Duplicates</h4><span class="muted">Pair 7 of 312 · 2.1 GB could be freed</span></div>
+        <div style="display:flex">
+          <div class="side">
+            <div class="grp">2026/02 Valentines</div>
+            <div>✓ IMG_0001</div><div>✓ IMG_0002</div>
+            <div class="on">IMG_0007 ⚠</div><div>IMG_0008</div>
+            <div class="grp">2026/03 Mexico</div>
+            <div>IMG_1201</div><div>IMG_1202</div>
+          </div>
+          <div style="flex:1">
+            <div class="warn">⚠ These two pictures look different. One may be an edited export or a different shot that has the same name.</div>
+            <div style="display:flex; gap:12px; padding:12px 14px">
+              <div style="flex:1">
+                <div class="photo" style="height:150px">RAW preview</div>
+                <p style="margin:6px 0 2px"><b>IMG_0007.CR3</b></p>
+                <p class="muted" style="margin:0">RAW · 24.1 MB · 6000×4000 · 14 Feb 14:00</p>
+              </div>
+              <div style="flex:1">
+                <div class="photo alt" style="height:150px">JPEG</div>
+                <p style="margin:6px 0 2px"><b>IMG_0007.JPG</b></p>
+                <p class="muted" style="margin:0">JPEG · 9.8 MB · 6000×4000 · 14 Feb 14:00</p>
+              </div>
+            </div>
+            <div style="padding:0 14px 14px">
+              <span class="btn acc">Keep RAW</span><span class="btn">Keep JPEG</span><span class="btn">Keep both</span><span class="btn">Skip</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">B · List of pairs</div>
+    <div class="mockup-body" style="padding:0">
+      <div class="sg">
+        <div class="head"><h4>Duplicates</h4><span class="muted">312 pairs · 2.1 GB could be freed</span></div>
+        <table>
+          <tr><td colspan="3" class="muted" style="text-transform:uppercase;font-size:10px">2026/02 Valentines</td></tr>
+          <tr><td style="width:120px"><div style="display:flex;gap:4px"><div class="photo" style="width:52px;height:36px"></div><div class="photo" style="width:52px;height:36px"></div></div></td>
+              <td>IMG_0001<br><span class="muted">CR3 24 MB · JPG 9.8 MB</span></td>
+              <td><span class="pill on">RAW</span><span class="pill">JPEG</span><span class="pill">Both</span></td></tr>
+          <tr><td><div style="display:flex;gap:4px"><div class="photo" style="width:52px;height:36px"></div><div class="photo alt" style="width:52px;height:36px"></div></div></td>
+              <td>IMG_0007 <span style="color:#ffd27a">⚠ look different</span><br><span class="muted">CR3 24 MB · JPG 9.8 MB</span></td>
+              <td><span class="pill">RAW</span><span class="pill">JPEG</span><span class="pill">Both</span></td></tr>
+          <tr><td><div style="display:flex;gap:4px"><div class="photo" style="width:52px;height:36px"></div><div class="photo" style="width:52px;height:36px"></div></div></td>
+              <td>IMG_0008<br><span class="muted">CR3 23 MB · JPG 9.1 MB</span></td>
+              <td><span class="pill">RAW</span><span class="pill">JPEG</span><span class="pill">Both</span></td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>

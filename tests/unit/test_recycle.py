@@ -1,5 +1,6 @@
 """The recycle service and command: catalog files go to the Recycle Bin."""
 
+import os
 import sys
 
 import pytest
@@ -222,8 +223,16 @@ def test_unsupported_drives(tmp_path, monkeypatch):
     assert recycle_bin.supports_recycle_bin(tmp_path) is False
 
 
+@pytest.mark.recycle_bin
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows Recycle Bin")
+@pytest.mark.skipif(
+    os.environ.get("SG_TEST_RECYCLE_BIN") != "1",
+    reason="moves a file to the real Recycle Bin; set SG_TEST_RECYCLE_BIN=1",
+)
 def test_real_recycle_bin(tmp_path):
+    """Sends one temp file to the user's real Recycle Bin, so it only runs
+    with ``SG_TEST_RECYCLE_BIN=1`` set (a default ``-m`` deselect would be
+    overridden by any ``-m`` passed on the command line)."""
     if not recycle_bin.supports_recycle_bin(tmp_path):
         pytest.skip(f"No Recycle Bin on {tmp_path.anchor}")
     target = tmp_path / "smart_gallery_recycle_test.txt"

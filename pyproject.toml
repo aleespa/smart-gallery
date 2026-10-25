@@ -71,4 +71,5 @@ markers = [
     "exiftool: integration tests that require the ExifTool binary on PATH",
     "faces: tests that require the optional 'faces' extra (insightface/GPU)",
     "gui: tests that need the optional 'gui' extra (PySide6)",
+    "recycle_bin: tests that move a temp file to the real Windows Recycle Bin",
 ]

@@ -39,7 +39,12 @@ from smart_gallery.gui.storage.tree_view import (
 )
 from smart_gallery.services.recycle import RecycleEntry, write_list
 from smart_gallery.storage.pairs import FileRef, Pair, find_pairs
-from smart_gallery.storage.tree import StorageTree, build_storage, format_bytes
+from smart_gallery.storage.tree import (
+    StorageTree,
+    build_storage,
+    folder_sizes,
+    format_bytes,
+)
 
 STATE_FILE = "storage.json"  # {"grouping": "folder"|"type", "split": [int, int]}
 CHECKS_DIR = "pair_checks"  # app_data_dir() / CHECKS_DIR / f"{db_uuid}.json"
@@ -202,7 +207,7 @@ class StorageView(QWidget):
         self._fresh = False
         self._root = root
         self.tree_view.set_tree(result.tree, root)
-        self.pairs_view.set_pairs(result.pairs, root)
+        self.pairs_view.set_pairs(result.pairs, root, folder_sizes(result.tree))
         self.pairs_view.set_scope(None)
         if previous is not None:
             index = self._find_folder(previous)

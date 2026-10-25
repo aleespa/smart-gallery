@@ -1,6 +1,7 @@
 """The Storage page's right column: RAW + JPEG pairs and the keep choices.
 
-Pairs are grouped under folder headings. Each row shows both thumbnails, the
+Pairs are grouped under folder headings, biggest folder first (as the tree
+in Folder mode orders them), and by name within a folder. Each row shows both thumbnails, the
 picture check's verdict and three pills (RAW / JPEG / Both). Choices add up in
 the footer, and one confirmed button reports the files to send to the Recycle
 Bin. Nothing here touches the disk or the catalog.
@@ -289,6 +290,7 @@ class PairsView(QWidget):
         super().__init__(parent)
         self.ctx = ctx
         self._pairs: list[Pair] = []
+        self._folder_bytes: dict[str, int] = {}
         self._by_key: dict[PairKey, Pair] = {}
         self._choices: dict[PairKey, str] = {}
         self._verdicts: dict[PairKey, str] = {}
@@ -364,8 +366,16 @@ class PairsView(QWidget):
         self._refresh()
 
     # ── API ─────────────────────────────────────────────────────────────────
-    def set_pairs(self, pairs: list[Pair], root: Path) -> None:
+    def set_pairs(
+        self,
+        pairs: list[Pair],
+        root: Path,
+        folder_bytes: dict[str, int] | None = None,
+    ) -> None:
+        """Show ``pairs`` (in ``find_pairs`` order). ``folder_bytes`` maps a
+        case-folded folder relpath to its size in the tree, for the order."""
         root = Path(root)
+        self._folder_bytes = dict(folder_bytes or {})
         if root != self._root:
             self._pixmaps.clear()
             self._missing.clear()
@@ -455,7 +465,8 @@ class PairsView(QWidget):
         groups: dict[str, list[Pair | str]] = {}
         for p in shown:
             groups.setdefault(p.folder.casefold(), [p.folder]).append(p)
-        self.model.set_rows([row for rows in groups.values() for row in rows])
+        order = sorted(groups, key=lambda f: (-self._group_bytes(f), f))
+        self.model.set_rows([row for f in order for row in groups[f]])
 
         if self._scope:
             label = SCOPE_ONE.format(folder=self._scope, n=len(shown))
@@ -471,6 +482,20 @@ class PairsView(QWidget):
             self.empty_label.setText(EMPTY_FOLDER)
         self._stack.setCurrentWidget(self.list if shown else self.empty_label)
         self._update_footer()
+
+    def _group_bytes(self, folder: str) -> int:
+        """The folder's size in the tree, else the combined bytes of the pairs
+        in it and under it (a folder's tree size includes its subfolders)."""
+        size = self._folder_bytes.get(folder)
+        if size is not None:
+            return size
+        return sum(
+            f.size_bytes
+            for p in self._pairs
+            if in_scope(p, folder)
+            for f in (p.raw, p.jpeg, p.sidecar)
+            if f is not None
+        )
 
     def _update_footer(self) -> None:
         removals = self.removals()

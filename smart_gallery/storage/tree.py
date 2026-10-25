@@ -150,3 +150,17 @@ def build_storage(df: pd.DataFrame, root_name: str) -> StorageTree | None:
         root_name, FOLDER, "", total_bytes, total_files, children=type_rows
     )
     return StorageTree(by_folder, by_type, type_colors, total_bytes, total_files)
+
+
+def folder_sizes(tree: StorageTree | None) -> dict[str, int]:
+    """Each folder's total bytes (its subfolders included), keyed by its
+    case-folded relpath (``""`` = root)."""
+    sizes: dict[str, int] = {}
+    pending = [tree.by_folder] if tree is not None else []
+    while pending:
+        node = pending.pop()
+        if node.kind != FOLDER:
+            continue
+        sizes[(node.relpath or "").casefold()] = node.bytes
+        pending.extend(node.children)
+    return sizes

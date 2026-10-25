@@ -120,6 +120,29 @@ def test_rows_grouped_by_folder(qtbot, loaded, pairs):
     ]
 
 
+def test_folders_ordered_biggest_first(qtbot, view, pairs, tmp_path):
+    p1, p2, p3 = pairs
+    # Folder sizes from the tree: B holds more than A on disk.
+    view.set_pairs(pairs, tmp_path, folder_bytes={"a": 10 * MB, "b": 99 * MB})
+    assert _rows(view) == [
+        ("B", None),
+        ("IMG_0003", p3.key),
+        ("A", None),
+        ("IMG_0001", p1.key),
+        ("IMG_0002", p2.key),
+    ]
+
+
+def test_folder_order_ties_by_name_and_falls_back_to_pair_bytes(qtbot, view, tmp_path):
+    c = _pair(4, "C", "IMG_0004")
+    b = _pair(5, "b", "IMG_0005")
+    d1, d2 = _pair(6, "D", "IMG_0006"), _pair(7, "D", "IMG_0007")
+    # find_pairs order is by folder; C and b tie on the mapping, D is unknown
+    # to it and falls back to its pairs' combined bytes (two pairs > one).
+    view.set_pairs([b, c, d1, d2], tmp_path, folder_bytes={"b": 1, "c": 1})
+    assert [r for r, k in _rows(view) if k is None] == ["D", "B", "C"]
+
+
 def test_scope_filters_and_labels(qtbot, loaded, pairs):
     view = loaded
     view.set_scope("a")

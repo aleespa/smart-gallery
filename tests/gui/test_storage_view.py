@@ -7,6 +7,7 @@ from smart_gallery.db import GalleryRepository
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.galleries.store import Gallery
 from smart_gallery.gui.paths import app_data_dir
+from smart_gallery.gui.storage.pairs_view import PAIR_ROLE
 from smart_gallery.gui.storage.tree_view import NODE_ROLE
 from smart_gallery.gui.storage.view import (
     CAPTION,
@@ -304,3 +305,17 @@ def test_finished_check_leaves_no_row_checking(qtbot, repo, make_item, monkeypat
     key = view.data.pairs[0].key
     qtbot.waitUntil(lambda: view.pairs_view.status_for(key)[0] != STATUS[None])
     assert view.pairs_view.status.text() == ""
+
+
+def test_pair_folders_follow_tree_sizes(qtbot, repo, make_item):
+    _fill(repo, make_item)
+    repo.upsert_many([make_item("b/big.mp4", media_type="video", size_bytes=99999)])
+    view = _view(qtbot, _ctx(repo))
+    model = view.pairs_view.list.model()
+    headings = [
+        model.index(r).data()
+        for r in range(model.rowCount())
+        if model.index(r).data(PAIR_ROLE) is None
+    ]
+    assert headings == ["B", "A"]  # b holds more on disk; find_pairs says a, b
+    assert [p.folder for p in view.data.pairs] == ["a", "b"]

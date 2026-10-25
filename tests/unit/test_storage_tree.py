@@ -136,3 +136,16 @@ def test_missing_size_counts_as_zero():
 def test_empty_frame_is_none():
     empty = pd.DataFrame(columns=["relpath", "ext", "size_bytes"])
     assert storage.build_storage(empty, "E:") is None
+
+
+def test_folder_sizes_by_casefolded_relpath():
+    tree = storage.build_storage(_main_frame(), "E:")
+    sizes = storage.folder_sizes(tree)
+    assert sizes == {
+        "": 957,
+        "drone": 500,
+        "canon": 450,
+        "canon/2025": 400,
+        "canon/2024": 50,
+    }
+    assert storage.folder_sizes(None) == {}

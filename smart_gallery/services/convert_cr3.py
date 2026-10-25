@@ -36,18 +36,44 @@ def _input_files(sources) -> list[tuple[Path, Path | None]]:
     return found
 
 
+def _run_exiftool(args: list[str]) -> str:
+    """Run one ExifTool process over an argfile and return its stderr.
+
+    An argfile keeps any number of paths off the command line, and
+    ``-charset filename=utf8`` lets it carry non-ASCII paths on Windows.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        argfile = Path(tmp) / "args.txt"
+        argfile.write_text("\n".join(args) + "\n", encoding="utf-8")
+        result = subprocess.run(
+            [_get_exiftool_path(), "-charset", "filename=utf8", "-@", str(argfile)],
+            capture_output=True,
+        )
+    return result.stderr.decode(errors="replace")
+
+
+def _extract_previews(sources: list[Path]) -> str:
+    """Write each RAW's ``JpgFromRaw`` beside it as ``<stem>.jpg``.
+
+    One process for the whole batch: starting ExifTool costs far more than
+    extracting a preview. ``-w`` never overwrites, and writes nothing for a
+    file without the tag, so callers detect failures by the missing output.
+    Returns ExifTool's stderr.
+    """
+    return _run_exiftool(["-b", "-JpgFromRaw", "-w", "%d%f.jpg", *map(str, sources)])
+
+
 def _copy_metadata(pairs: list[tuple[Path, Path]]) -> list[str]:
     """Copy every tag from each RAW into its extracted JPEG.
 
     The embedded image carries no EXIF of its own, so without this a vertical
     shot displays sideways and the date, lens and GPS are lost. All pairs go
-    through one ExifTool process via an argfile (``-execute`` per pair),
-    which keeps the extra cost to a single process start. Returns ExifTool's
+    through one ExifTool process (``-execute`` per pair). Returns ExifTool's
     error lines.
     """
-    lines = []
+    args = []
     for source, output in pairs:
-        lines += [
+        args += [
             "-tagsFromFile",
             str(source),
             "-all:all",
@@ -56,14 +82,7 @@ def _copy_metadata(pairs: list[tuple[Path, Path]]) -> list[str]:
             str(output),
             "-execute",
         ]
-    with tempfile.TemporaryDirectory() as tmp:
-        argfile = Path(tmp) / "args.txt"
-        argfile.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        result = subprocess.run(
-            [_get_exiftool_path(), "-charset", "filename=utf8", "-@", str(argfile)],
-            capture_output=True,
-        )
-    stderr = result.stderr.decode(errors="replace")
+    stderr = _run_exiftool(args)
     return [line for line in stderr.splitlines() if line.startswith("Error")]
 
 
@@ -77,42 +96,47 @@ def convert_cr3(sources) -> ConvertCr3Report:
     """
     files = _input_files(sources)
     report = ConvertCr3Report()
-    pairs = []
 
+    # One listing per directory, not per RAW: a card folder holds thousands.
+    jpeg_names: dict[Path, set[str]] = {}
+    pending = []
     for source, _relative_path in files:
-        output = source.with_suffix(".jpg")
-        jpeg_stems = {source.stem.casefold() + ext for ext in (".jpg", ".jpeg")}
-        jpeg_exists = any(
-            path.is_file() and path.name.casefold() in jpeg_stems
-            for path in source.parent.iterdir()
-        )
-        if jpeg_exists:
+        if source.parent not in jpeg_names:
+            jpeg_names[source.parent] = {
+                path.name.casefold()
+                for path in source.parent.iterdir()
+                if path.suffix.lower() in {".jpg", ".jpeg"} and path.is_file()
+            }
+        stem = source.stem.casefold()
+        if {stem + ".jpg", stem + ".jpeg"} & jpeg_names[source.parent]:
             report.skipped += 1
             continue
+        pending.append(source)
 
-        result = subprocess.run(
-            [_get_exiftool_path(), "-b", "-JpgFromRaw", str(source)],
-            capture_output=True,
-        )
-        if result.returncode != 0 or not result.stdout:
-            detail = result.stderr.decode(errors="replace").strip()
-            reason = detail or "no embedded JpgFromRaw image was returned"
+    if pending:
+        stderr = _extract_previews(pending).splitlines()
+        pairs = []
+        for source in pending:
+            output = source.with_suffix(".jpg")
+            if output.is_file() and output.stat().st_size:
+                pairs.append((source, output))
+                continue
+            output.unlink(missing_ok=True)
+            reason = next(
+                (line for line in stderr if source.name in line),
+                "no embedded JpgFromRaw image was returned",
+            )
             message = f"Could not extract JPEG from {source}: {reason}"
             logger.warning(message)
             report.failures.append(message)
-            continue
 
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(result.stdout)
-        report.outputs.append(output)
-        report.converted += 1
-        pairs.append((source, output))
-
-    if pairs:
-        for error in _copy_metadata(pairs):
-            message = f"Could not copy metadata: {error}"
-            logger.warning(message)
-            report.failures.append(message)
+        report.outputs = [output for _source, output in pairs]
+        report.converted = len(pairs)
+        if pairs:
+            for error in _copy_metadata(pairs):
+                message = f"Could not copy metadata: {error}"
+                logger.warning(message)
+                report.failures.append(message)
 
     logger.success(
         f"Converted {report.converted} RAW file(s); skipped {report.skipped} "

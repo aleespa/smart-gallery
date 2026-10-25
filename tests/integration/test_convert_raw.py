@@ -42,3 +42,16 @@ def test_existing_jpeg_is_left_alone(tmp_path, copy_image):
 
     assert report.skipped == 1 and report.converted == 0
     assert existing.read_bytes() == b"not touched"
+
+
+def test_unreadable_raw_fails_alone(tmp_path, copy_image):
+    good = copy_image(tmp_path, "test.CR3", "IMG_0003.CR3")
+    bad = tmp_path / "IMG_0004.CR3"
+    bad.write_bytes(b"not a raw file")
+
+    report = convert_cr3([tmp_path])
+
+    assert report.converted == 1
+    assert report.outputs == [good.with_suffix(".jpg")]
+    assert len(report.failures) == 1 and "IMG_0004.CR3" in report.failures[0]
+    assert not bad.with_suffix(".jpg").exists()

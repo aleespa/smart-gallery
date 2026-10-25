@@ -16,6 +16,7 @@ from smart_gallery.gui.storage.pairs_view import (
     KEY_ROLE,
     LEAVE,
     CHECK_FAILED,
+    CHECK_HINT,
     MOVE_NONE,
     STATUS,
     VERDICT_ROLE,
@@ -331,6 +332,7 @@ def test_confirm_leave(qtbot, loaded, pairs, monkeypatch):
 
 
 def test_progress_text(qtbot, loaded):
+    loaded.set_scope("A")
     loaded.set_progress(412, 656)
     assert loaded.status.text() == "Checking pictures… 412 / 656"
     loaded.set_progress(656, 656)
@@ -432,28 +434,95 @@ def test_checker_failure_of_a_cancelled_run_is_dropped(
 
 
 def test_unchecked_rows_while_checking(qtbot, loaded, pairs):
+    # No check covers a row: it shows nothing, not "checking…".
+    assert loaded.status_for(pairs[0].key) == ("", False)
+    loaded.set_scope("A")
+    loaded.check_started([pairs[0].key, pairs[1].key])
     assert loaded.status_for(pairs[0].key) == (STATUS[None], False)
+    assert loaded.status_for(pairs[2].key) == ("", False)  # B: not checked
     loaded.set_verdict(pairs[0].key, DIFFERENT)
     assert loaded.status_for(pairs[0].key) == (STATUS[DIFFERENT], True)
     loaded.set_verdict(pairs[1].key, MATCH)
     assert loaded.status_for(pairs[1].key) == ("", False)
+    loaded.check_cancelled()
+    assert loaded.status_for(pairs[2].key) == ("", False)
 
 
 def test_check_failure_marks_unchecked_rows(qtbot, loaded, pairs):
+    loaded.set_scope("A")
+    loaded.check_started([pairs[0].key, pairs[1].key])
     loaded.set_verdict(pairs[0].key, MATCH)
-    loaded.set_progress(1, 3)
+    loaded.set_progress(1, 2)
     loaded.check_failed("exiftool not found")
     assert loaded.status.text() == CHECK_FAILED.format(reason="exiftool not found")
     assert loaded.status_for(pairs[0].key) == ("", False)
     assert loaded.status_for(pairs[1].key) == (STATUS[UNREADABLE], True)
+    assert loaded.status_for(pairs[2].key) == ("", False)  # outside the run
     loaded.list.viewport().repaint()
-    # A new load starts a new check: back to "checking…".
+    # A reload forgets the failure: nothing is checking or failed.
     loaded.set_pairs(pairs, loaded._root)
-    assert loaded.status_for(pairs[1].key) == (STATUS[None], False)
+    assert loaded.status_for(pairs[1].key) == ("", False)
 
 
 def test_check_finished_never_leaves_checking(qtbot, loaded, pairs):
-    loaded.set_progress(0, 3)
+    loaded.set_scope("B")
+    loaded.check_started([pairs[2].key])
     loaded.check_finished()
     assert loaded.status.text() == ""
     assert loaded.status_for(pairs[2].key) == (STATUS[UNREADABLE], True)
+
+
+def test_hint_with_all_folders_and_unchecked_pairs(qtbot, loaded, pairs):
+    assert loaded.status.text() == CHECK_HINT
+    loaded.set_scope("A")
+    assert loaded.status.text() == ""
+    loaded.set_scope(None)
+    for p in pairs:
+        loaded.set_verdict(p.key, MATCH)
+    assert loaded.status.text() == ""  # everything already checked
+
+
+def test_scope_changed_only_on_change(qtbot, loaded):
+    seen = []
+    loaded.scope_changed.connect(seen.append)
+    loaded.set_scope("A")
+    loaded.set_scope("A")
+    loaded.set_scope("")
+    loaded.set_scope(None)
+    assert seen == ["A", None]
+
+
+def test_checker_load_cached_reads_only_the_cache(qtbot, tmp_path, monkeypatch, pairs):
+    from smart_gallery.storage.check_cache import CheckCache
+
+    def no_check(*_args, **_kwargs):
+        raise AssertionError("load_cached must not check pictures")
+
+    monkeypatch.setattr(checker_module, "check_pairs", no_check)
+    cache = CheckCache(tmp_path / "checks.json")
+    cache.put(pairs[2], DIFFERENT)
+    cache.save()
+    checker = PairChecker()
+    checked = []
+    checker.checked.connect(lambda k, v: checked.append((k, v)))
+    checker.load_cached(pairs, tmp_path / "checks.json")
+    assert checker.wait(5000)
+    qtbot.waitUntil(lambda: checked == [(pairs[2].key, DIFFERENT)])
+    assert not checker.running
+
+
+def test_checker_cancel_keeps_a_queued_cache_read(qtbot, tmp_path, monkeypatch, pairs):
+    from smart_gallery.storage.check_cache import CheckCache
+
+    monkeypatch.setattr(checker_module, "check_pairs", lambda *a, **k: None)
+    cache = CheckCache(tmp_path / "checks.json")
+    cache.put(pairs[0], MATCH)
+    cache.save()
+    checker = PairChecker()
+    checked = []
+    checker.checked.connect(lambda k, v: checked.append(k))
+    checker.load_cached(pairs, tmp_path / "checks.json")
+    checker.start(pairs[:1], tmp_path, tmp_path / "checks.json")
+    checker.cancel()  # the check only
+    assert checker.wait(5000)
+    qtbot.waitUntil(lambda: checked == [pairs[0].key])

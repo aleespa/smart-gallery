@@ -80,6 +80,23 @@ def compare_images(preview: Path, jpeg: Path) -> str:
     return MATCH if float((x * y).sum()) / denom >= MATCH_CORRELATION else DIFFERENT
 
 
+def report_cached(
+    pairs: Sequence[Pair],
+    cache: CheckCache,
+    on_result: Callable[[PairKey, str], None],
+) -> list[Pair]:
+    """Report each cached verdict; return the pairs the cache doesn't know.
+    Reads no image file and runs no ExifTool."""
+    todo: list[Pair] = []
+    for pair in pairs:
+        verdict = cache.get(pair)
+        if verdict is None:
+            todo.append(pair)
+        else:
+            on_result(pair.key, verdict)
+    return todo
+
+
 def check_pairs(
     pairs: Sequence[Pair],
     root: Path,
@@ -89,13 +106,7 @@ def check_pairs(
     batch: int = 50,
 ) -> None:
     root = Path(root)
-    todo: list[Pair] = []
-    for pair in pairs:
-        verdict = cache.get(pair)
-        if verdict is None:
-            todo.append(pair)
-        else:
-            on_result(pair.key, verdict)
+    todo = report_cached(pairs, cache, on_result)
 
     for start in range(0, len(todo), batch):
         if cancelled():

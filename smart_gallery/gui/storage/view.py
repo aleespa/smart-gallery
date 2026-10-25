@@ -3,7 +3,8 @@
 The left column is the size tree (``StorageTreeView``), the right the pairs and
 their keep choices (``PairsView``). Clicking a folder on the left scopes the
 pairs on the right. The catalog is read off the GUI thread (``load_storage``);
-the picture check runs on its own worker (``PairChecker``). Confirmed choices
+the picture check runs on its own worker (``PairChecker``), only for the pairs
+in the selected folder; remembered verdicts show everywhere. Confirmed choices
 become a ``recycle`` job; nothing here writes the catalog or touches a file.
 """
 
@@ -142,6 +143,8 @@ class StorageView(QWidget):
         self.checker.progress.connect(self.pairs_view.set_progress)
         self.checker.finished.connect(self.pairs_view.check_finished)
         self.checker.failed.connect(self.pairs_view.check_failed)
+        self.pairs_view.scope_changed.connect(self._check_scope)
+        self._loading = False  # _on_data checks the scope once, at its end
         # A drag moves the splitter on every pixel: save once it settles.
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
@@ -160,7 +163,7 @@ class StorageView(QWidget):
 
         def teardown(*_args) -> None:
             # Before the children go: the checker's pool waits for its task.
-            checker.cancel()
+            checker.cancel_all()
             ctx.remove_leave_guard(guard)
 
         self.destroyed.connect(teardown)
@@ -183,7 +186,7 @@ class StorageView(QWidget):
         current = self.ctx.current
         if current is None:
             self._query.cancel()
-            self.checker.cancel()
+            self.checker.cancel_all()
             self._show_message(NO_GALLERY)
             return
         self._loading_root = drive_root_of(current.db_path)
@@ -197,7 +200,7 @@ class StorageView(QWidget):
             self.reload()
             return
         self._gallery_uuid = uuid
-        self.checker.cancel()
+        self.checker.cancel_all()
         self.pairs_view.clear_choices()
         self._fresh = True  # a new gallery starts on all folders
         self.pairs_view.set_scope(None)
@@ -207,7 +210,7 @@ class StorageView(QWidget):
         self.data = result
         root = self._loading_root
         if result.tree is None:
-            self.checker.cancel()
+            self.checker.cancel_all()
             self.pairs_view.set_pairs([], root)
             self._root = root
             self._show_message(EMPTY)
@@ -216,14 +219,21 @@ class StorageView(QWidget):
         previous = None if self._fresh else self._scope_folder()
         self._fresh = False
         self._root = root
-        self.tree_view.set_tree(result.tree, root)
-        self.pairs_view.set_pairs(result.pairs, root, folder_sizes(result.tree))
-        self.pairs_view.set_scope(None)
-        if previous is not None:
-            index = self._find_folder(previous)
-            if index is not None:
-                self.tree_view.tree.setCurrentIndex(index)  # scopes the pairs
-        self.checker.start(result.pairs, root, self._cache_path())
+        self.checker.cancel()  # its pairs are gone; the new scope decides
+        # Remembered verdicts for every pair, read on the worker: cheap.
+        self.checker.load_cached(result.pairs, self._cache_path())
+        self._loading = True
+        try:
+            self.tree_view.set_tree(result.tree, root)
+            self.pairs_view.set_pairs(result.pairs, root, folder_sizes(result.tree))
+            self.pairs_view.set_scope(None)
+            if previous is not None:
+                index = self._find_folder(previous)
+                if index is not None:
+                    self.tree_view.tree.setCurrentIndex(index)  # scopes the pairs
+        finally:
+            self._loading = False
+        self._check_scope()
         self.caption.setText(
             CAPTION.format(
                 root=result.root_name,
@@ -233,8 +243,19 @@ class StorageView(QWidget):
         )
         self.stack.setCurrentWidget(self.splitter)
 
-    def _on_failed(self, error) -> None:
+    def _check_scope(self, *_args) -> None:
+        """Check the pictures of the folder in scope, and nothing else."""
+        if self._loading:
+            return
         self.checker.cancel()
+        self.pairs_view.check_cancelled()
+        todo = self.pairs_view.unchecked_in_scope()  # [] with no folder
+        if todo:
+            self.pairs_view.check_started(p.key for p in todo)
+            self.checker.start(todo, self._root, self._cache_path())
+
+    def _on_failed(self, error) -> None:
+        self.checker.cancel_all()
         if self.ctx.current is None:
             text = NO_GALLERY
         elif isinstance(error, FileNotFoundError):

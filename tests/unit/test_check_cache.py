@@ -50,3 +50,22 @@ def test_unknown_verdicts_dropped_but_valid_kept(tmp_path):
         encoding="utf-8",
     )
     assert CheckCache(path).get(pair) == "match"
+
+
+def test_report_cached_reports_hits_and_returns_misses(tmp_path):
+    from smart_gallery.storage.check_cache import CheckCache
+    from smart_gallery.storage.compare import report_cached
+    from smart_gallery.storage.pairs import FileRef, Pair
+
+    def pair(stem):
+        raw = FileRef(1, f"a/{stem}.CR3", ".cr3", 10, 1, "image")
+        jpeg = FileRef(2, f"a/{stem}.JPG", ".jpg", 5, 1, "image")
+        return Pair("a", stem, raw, jpeg, None)
+
+    known, unknown = pair("IMG_1"), pair("IMG_2")
+    cache = CheckCache(tmp_path / "c.json")
+    cache.put(known, "match")
+    seen = []
+    todo = report_cached([known, unknown], cache, lambda k, v: seen.append((k, v)))
+    assert seen == [(known.key, "match")]
+    assert todo == [unknown]

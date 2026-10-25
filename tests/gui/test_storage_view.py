@@ -278,33 +278,166 @@ def test_disconnected_same_gallery_keeps_choices(qtbot, repo, make_item, tmp_pat
     assert view.stack.currentIndex() == 0
 
 
-def test_failed_check_is_shown(qtbot, repo, make_item, monkeypatch):
+class _FakeCheck:
+    """Stands in for check_pairs: records each run's folders, optionally
+    holding a run until ``gate`` opens, and can fail or report verdicts."""
+
+    def __init__(self, verdict=None, error=None):
+        import threading
+
+        self.runs = []  # one sorted list of folders per run
+        self.cancelled = []  # what each run saw at its end
+        self.verdict, self.error = verdict, error
+        self.gate = threading.Event()
+        self.gate.set()
+
+    def __call__(
+        self, pairs, root, cache, on_result, cancelled=lambda: False, batch=50
+    ):
+        self.runs.append(sorted(p.folder for p in pairs))
+        self.gate.wait(5)
+        self.cancelled.append(cancelled())
+        if self.error is not None:
+            raise self.error
+        if self.verdict is not None:
+            for p in pairs:
+                on_result(p.key, self.verdict)
+
+
+@pytest.fixture
+def fake_check(monkeypatch):
     from smart_gallery.gui.storage import checker as checker_module
+
+    fake = _FakeCheck()
+    monkeypatch.setattr(checker_module, "check_pairs", fake)
+    return fake
+
+
+def _fill_nested(repo, make_item):
+    _fill(repo, make_item)
+    repo.upsert_many(
+        [
+            make_item("a/sub/IMG_3.CR3", size_bytes=3000),
+            make_item("a/sub/IMG_3.JPG", size_bytes=1000),
+        ]
+    )
+
+
+def _settled(qtbot, view):
+    view.checker.wait(5000)
+    qtbot.wait(50)
+
+
+def test_no_check_without_a_folder(qtbot, repo, make_item, fake_check):
+    from smart_gallery.gui.storage.pairs_view import CHECK_HINT
+
+    _fill_nested(repo, make_item)
+    view = _view(qtbot, _ctx(repo))
+    _settled(qtbot, view)
+    assert fake_check.runs == []
+    assert view.pairs_view.status.text() == CHECK_HINT
+    for pair in view.data.pairs:
+        assert view.pairs_view.status_for(pair.key) == ("", False)
+    # Selecting the root is the same as all folders.
+    model = view.tree_view.tree.model()
+    view.tree_view.tree.setCurrentIndex(model.index(0, 0))
+    _settled(qtbot, view)
+    assert fake_check.runs == []
+
+
+def test_folder_selection_checks_only_its_pairs(qtbot, repo, make_item, fake_check):
+    from smart_gallery.gui.storage.pairs_view import CHECK_HINT, STATUS
+
+    _fill_nested(repo, make_item)
+    view = _view(qtbot, _ctx(repo))
+    fake_check.gate.clear()  # hold a's run while switching
+    view.tree_view.tree.setCurrentIndex(_child(view, "a"))
+    qtbot.waitUntil(lambda: fake_check.runs == [["a", "a/sub"]])
+    a1, a3, b2 = (
+        next(p for p in view.data.pairs if p.stem == s)
+        for s in ("IMG_1", "IMG_3", "IMG_2")
+    )
+    assert view.pairs_view.status_for(a3.key) == (STATUS[None], False)
+    assert view.pairs_view.status_for(b2.key) == ("", False)
+
+    view.tree_view.tree.setCurrentIndex(_child(view, "b"))  # cancels a's run
+    assert view.pairs_view.status_for(a1.key) == ("", False)
+    assert view.pairs_view.status_for(b2.key) == (STATUS[None], False)
+    fake_check.gate.set()
+    _settled(qtbot, view)
+    assert fake_check.runs == [["a", "a/sub"], ["b"]]
+    assert fake_check.cancelled == [True, False]
+
+    fake_check.gate.clear()
+    view.tree_view.tree.setCurrentIndex(_child(view, "a"))
+    qtbot.waitUntil(lambda: len(fake_check.runs) == 3)
+    view.pairs_view.show_all.click()  # cancels, checks nothing
+    assert view.pairs_view.status.text() == CHECK_HINT
+    fake_check.gate.set()
+    _settled(qtbot, view)
+    assert len(fake_check.runs) == 3 and fake_check.cancelled[-1] is True
+
+
+def test_cached_verdicts_show_without_a_check(qtbot, repo, make_item, fake_check):
+    from smart_gallery.gui.storage.pairs_view import STATUS
+    from smart_gallery.gui.storage.view import CHECKS_DIR
+    from smart_gallery.storage.check_cache import CheckCache
+    from smart_gallery.storage.compare import DIFFERENT
+
+    _fill(repo, make_item)
+    pairs = load_storage(repo).pairs
+    cache = CheckCache(app_data_dir() / CHECKS_DIR / "uuid.json")
+    cache.put(pairs[1], DIFFERENT)  # b's pair
+    cache.save()
+
+    view = _view(qtbot, _ctx(repo))
+    b2 = view.data.pairs[1]
+    qtbot.waitUntil(
+        lambda: view.pairs_view.status_for(b2.key) == (STATUS[DIFFERENT], True)
+    )
+    assert fake_check.runs == []
+    # Scoping to a checks only a's pair, the one without a verdict.
+    view.tree_view.tree.setCurrentIndex(_child(view, "a"))
+    _settled(qtbot, view)
+    assert fake_check.runs == [["a"]]
+    view.tree_view.tree.setCurrentIndex(_child(view, "b"))
+    _settled(qtbot, view)
+    assert fake_check.runs == [["a"]]  # b is known: no run
+
+
+def test_same_gallery_reload_checks_the_kept_scope(qtbot, repo, make_item, fake_check):
+    _fill(repo, make_item)
+    ctx = _ctx(repo)
+    view = _view(qtbot, ctx)
+    view.tree_view.tree.setCurrentIndex(_child(view, "b"))
+    _settled(qtbot, view)
+    again = Gallery("uuid", str(repo.db_path), "test")
+    _reload(qtbot, view, lambda: ctx.set_gallery(again))
+    _settled(qtbot, view)
+    assert fake_check.runs == [["b"], ["b"]]
+
+
+def test_failed_check_is_shown(qtbot, repo, make_item, fake_check):
     from smart_gallery.gui.storage.pairs_view import CHECK_FAILED, STATUS
     from smart_gallery.storage.compare import UNREADABLE
 
-    def fake(pairs, root, cache, on_result, cancelled=lambda: False, batch=50):
-        raise FileNotFoundError("exiftool is not on PATH")
-
-    monkeypatch.setattr(checker_module, "check_pairs", fake)
+    fake_check.error = FileNotFoundError("exiftool is not on PATH")
     _fill(repo, make_item)
     view = _view(qtbot, _ctx(repo))
+    view.tree_view.tree.setCurrentIndex(_child(view, "a"))
     expected = CHECK_FAILED.format(reason="exiftool is not on PATH")
     qtbot.waitUntil(lambda: view.pairs_view.status.text() == expected)
-    for pair in view.data.pairs:
-        assert view.pairs_view.status_for(pair.key) == (STATUS[UNREADABLE], True)
+    a1, b2 = view.data.pairs
+    assert view.pairs_view.status_for(a1.key) == (STATUS[UNREADABLE], True)
+    assert view.pairs_view.status_for(b2.key) == ("", False)  # not in the run
 
 
-def test_finished_check_leaves_no_row_checking(qtbot, repo, make_item, monkeypatch):
-    from smart_gallery.gui.storage import checker as checker_module
+def test_finished_check_leaves_no_row_checking(qtbot, repo, make_item, fake_check):
     from smart_gallery.gui.storage.pairs_view import STATUS
 
-    def fake(pairs, root, cache, on_result, cancelled=lambda: False, batch=50):
-        pass  # reports nothing, yet succeeds
-
-    monkeypatch.setattr(checker_module, "check_pairs", fake)
-    _fill(repo, make_item)
+    _fill(repo, make_item)  # the fake reports nothing, yet succeeds
     view = _view(qtbot, _ctx(repo))
+    view.tree_view.tree.setCurrentIndex(_child(view, "a"))
     key = view.data.pairs[0].key
     qtbot.waitUntil(lambda: view.pairs_view.status_for(key)[0] != STATUS[None])
     assert view.pairs_view.status.text() == ""

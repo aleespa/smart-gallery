@@ -58,6 +58,7 @@ EMPTY_FOLDER = "No RAW + JPEG pairs in this folder"
 EMPTY_ALL = "No RAW + JPEG pairs in this gallery"
 CHECKING = "Checking pictures… {done:,} / {total:,}"
 CHECK_FAILED = "Couldn't check pictures: {reason}"
+CHECK_HINT = "Select a folder to check its pictures"
 STATUS = {
     None: "checking…",
     DIFFERENT: "⚠ look different",
@@ -285,6 +286,7 @@ class PairsDelegate(QStyledItemDelegate):
 class PairsView(QWidget):
     move_requested = Signal(list)  # list[FileRef] confirmed by the user
     pair_activated = Signal(object)  # PairKey; opens PairDialog
+    scope_changed = Signal(object)  # str | None; the folder shown changed
 
     def __init__(self, ctx, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -294,8 +296,11 @@ class PairsView(QWidget):
         self._by_key: dict[PairKey, Pair] = {}
         self._choices: dict[PairKey, str] = {}
         self._verdicts: dict[PairKey, str] = {}
-        # The check ended (done or failed): an unknown verdict stays unknown.
-        self._check_over = False
+        # Pictures are checked only for the folder in scope (StorageView).
+        self._checking: set[PairKey] = set()  # covered by the running check
+        self._failed: set[PairKey] = set()  # a finished check left no verdict
+        self._progress: tuple[int, int] | None = None
+        self._failure: str | None = None
         self._scope: str | None = None
         self._root = Path()
         self._pixmaps: OrderedDict[tuple[int, int | None], QPixmap] = OrderedDict()
@@ -391,43 +396,101 @@ class PairsView(QWidget):
             if _same_files(old.get(k), self._by_key.get(k))
         }
         self._verdicts = {}
-        self._check_over = False  # the page starts a new check
+        self._checking, self._failed = set(), set()
+        self._progress = self._failure = None
         self._refresh()
 
     def root_name(self) -> str:
         return self._root.name or self._root.as_posix()
 
+    def scope(self) -> str | None:
+        return self._scope
+
     def set_scope(self, folder: str | None) -> None:
-        self._scope = folder or None
+        folder = folder or None
+        changed = folder != self._scope
+        self._scope = folder
+        if changed:
+            self._failure = None  # a failure belongs to the folder it was in
         self._refresh()
+        if changed:
+            self.scope_changed.emit(folder)
+
+    def unchecked_in_scope(self) -> list[Pair]:
+        """Pairs in the current folder scope that have no verdict yet."""
+        if not self._scope:
+            return []
+        return [
+            p
+            for p in self._pairs
+            if in_scope(p, self._scope) and p.key not in self._verdicts
+        ]
 
     def set_verdict(self, key: PairKey, verdict: str) -> None:
         if key not in self._by_key:
             return
         self._verdicts[key] = verdict
+        self._failed.discard(key)
         self.model.refresh(key)
+        self._update_status()
+
+    def check_started(self, keys) -> None:
+        """A check of these pairs is running: they read "checking…"."""
+        self._checking = set(keys)
+        self._failed -= self._checking
+        self._failure = None
+        self._progress = (0, len(self._checking))
+        self._repaint_status()
 
     def set_progress(self, done: int, total: int) -> None:
-        text = CHECKING.format(done=done, total=total) if done < total else ""
-        self.status.setText(text)
+        self._progress = (done, total) if done < total else None
+        self._update_status()
 
     def check_finished(self) -> None:
-        self._check_over = True
-        self.status.setText("")
-        self.list.viewport().update()
+        self._end_check()
 
     def check_failed(self, reason: str) -> None:
         """The check stopped: say why, and mark rows it never reached."""
-        self._check_over = True
-        self.status.setText(CHECK_FAILED.format(reason=reason))
-        self.list.viewport().update()
+        self._end_check(reason)
+
+    def check_cancelled(self) -> None:
+        """No check runs any more: rows it hadn't reached show nothing."""
+        self._checking.clear()
+        self._progress = None
+        self._repaint_status()
 
     def status_for(self, key: PairKey) -> tuple[str, bool]:
         """The row's check text and whether it is a warning."""
         verdict = self._verdicts.get(key)
-        if verdict is None and self._check_over:
+        if verdict is None:
+            if key in self._checking:
+                return STATUS[None], False
+            if key not in self._failed:
+                return "", False
             verdict = UNREADABLE  # shown only; never written to the cache
         return STATUS.get(verdict, ""), verdict in (DIFFERENT, UNREADABLE)
+
+    def _end_check(self, failure: str | None = None) -> None:
+        self._failed |= {k for k in self._checking if k not in self._verdicts}
+        self._checking.clear()
+        self._progress = None
+        self._failure = failure
+        self._repaint_status()
+
+    def _repaint_status(self) -> None:
+        self._update_status()
+        self.list.viewport().update()
+
+    def _update_status(self) -> None:
+        if self._progress is not None:
+            text = CHECKING.format(done=self._progress[0], total=self._progress[1])
+        elif self._failure is not None:
+            text = CHECK_FAILED.format(reason=self._failure)
+        elif not self._scope and len(self._verdicts) < len(self._by_key):
+            text = CHECK_HINT
+        else:
+            text = ""
+        self.status.setText(text)
 
     def choose(self, key: PairKey, choice: str | None) -> None:
         if key not in self._by_key:
@@ -482,6 +545,7 @@ class PairsView(QWidget):
             self.empty_label.setText(EMPTY_FOLDER)
         self._stack.setCurrentWidget(self.list if shown else self.empty_label)
         self._update_footer()
+        self._update_status()
 
     def _group_bytes(self, folder: str) -> int:
         """The folder's size in the tree, else the combined bytes of the pairs

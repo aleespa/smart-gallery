@@ -205,8 +205,8 @@ a **JPEG** (`.jpg`, `.jpeg`).
 
 ### The picture check
 
-Every pair is checked to see whether the two files show the same picture.
-Same name does not guarantee it: the camera counter rolls over, a second
+Each pair in the selected folder is checked to see whether the two files
+show the same picture. Same name does not guarantee it: the camera counter rolls over, a second
 camera can use the same names, or the JPEG can be an edited Lightroom export
 saved over the camera JPEG.
 
@@ -229,10 +229,27 @@ saved over the camera JPEG.
   the preview extraction (`-w` into a temp or cache folder, or one
   `-stay_open` process). Aim for a fifth of a second per pair or better on
   the user's machine.
-- **In the background:** the list shows at once with every pair as
-  "checking…". The checks run off the GUI thread and fill in rows as they
+- **Only the selected folder.** Pictures are checked only for the pairs in
+  the folder selected in the tree (that folder and every folder under it).
+  With no folder selected, the root selected, or after Show all, no check
+  runs at all, and the column header reads "Select a folder to check its
+  pictures" while some pairs have no result. Selecting another folder
+  cancels the running check and starts one for that folder's pairs that
+  have no result yet. A reload of the same gallery that keeps the selected
+  folder checks it again the same way.
+- **In the background:** the list shows at once. Rows covered by the
+  running check read "checking…"; other rows without a result show
+  nothing. The checks run off the GUI thread and fill in rows as they
   finish. The column header shows "Checking pictures… n / N". The user can
   choose before checking is done.
+- **Remembered results show everywhere.** When the pairs load, the
+  remembered results (see below) are read off the GUI thread for every
+  pair, in or out of the selected folder, without running ExifTool or
+  opening any picture.
+- **When the check fails** (ExifTool missing, the drive pulled, the cache
+  folder unwritable), the column header reads "Couldn't check pictures:
+  <reason>", and the rows of that run that got no result show "⚠ couldn't
+  compare". Those are not remembered, so the next check tries them again.
 - **Remembered between visits (my call, changed from the conversation).**
   In the conversation, the plan was to store results in the catalog in a
   table of their own. That would make the GUI write to the catalog outside
@@ -260,7 +277,8 @@ saved over the camera JPEG.
   - the stem, then "CR3 24 MB · JPG 9.8 MB" (type labels and
     `format_bytes`, as in the tree);
   - the check status: nothing for a match, "⚠ look different", "⚠ couldn't
-    compare", or "checking…";
+    compare", "checking…" while a check covering the row runs, or nothing
+    when no check covers it;
   - three exclusive choice buttons: **RAW**, **JPEG**, **Both**. RAW means
     keep the RAW and remove the JPEG, and so on. No button is selected at
     first (undecided). Clicking the selected button again returns the pair

@@ -72,7 +72,6 @@ MOVE_TITLE = "Move to Recycle Bin"
 CONFIRM = "Move {n:,} files ({size}) to the Recycle Bin?"
 LEAVE_TITLE = "Unapplied choices"
 LEAVE = "You have {n:,} unapplied choices. Discard them?"
-ROOT_HEADING = "Top folder"
 KEY_ROLE, CHOICE_ROLE, VERDICT_ROLE = (Qt.ItemDataRole.UserRole + i for i in (1, 2, 3))
 PAIR_ROLE = Qt.ItemDataRole.UserRole + 4
 
@@ -94,6 +93,12 @@ def details(pair: Pair) -> str:
         f"{type_label(raw.ext)} {format_bytes(raw.size_bytes)}{side} · "
         f"{type_label(jpeg.ext)} {format_bytes(jpeg.size_bytes)}"
     )
+
+
+def _same_files(a: Pair | None, b: Pair | None) -> bool:
+    if a is None or b is None:
+        return False
+    return (a.raw, a.jpeg, a.sidecar) == (b.raw, b.jpeg, b.sidecar)
 
 
 class _PairsModel(QAbstractListModel):
@@ -132,7 +137,8 @@ class _PairsModel(QAbstractListModel):
         row = self.rows[index.row()]
         if isinstance(row, str):
             if role == Qt.ItemDataRole.DisplayRole:
-                return row or ROOT_HEADING
+                # Small upper-case heading; a root pair shows the root name.
+                return (row or self._view.root_name()).upper()
             return None
         if role == Qt.ItemDataRole.DisplayRole:
             return row.stem
@@ -365,10 +371,19 @@ class PairsView(QWidget):
             self._requested.clear()
         self._root = root
         self._pairs = list(pairs)
+        old = self._by_key
         self._by_key = {p.key: p for p in self._pairs}
-        self._choices = {k: c for k, c in self._choices.items() if k in self._by_key}
+        # A choice survives only when its files are exactly the ones seen.
+        self._choices = {
+            k: c
+            for k, c in self._choices.items()
+            if _same_files(old.get(k), self._by_key.get(k))
+        }
         self._verdicts = {}
         self._refresh()
+
+    def root_name(self) -> str:
+        return self._root.name or self._root.as_posix()
 
     def set_scope(self, folder: str | None) -> None:
         self._scope = folder or None

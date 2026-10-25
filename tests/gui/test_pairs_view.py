@@ -1,3 +1,5 @@
+import dataclasses
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -252,6 +254,43 @@ def test_set_pairs_keeps_existing_choices(qtbot, loaded, pairs, tmp_path):
     loaded.set_pairs([p2, p3], tmp_path)
     assert loaded.choices() == {p2.key: KEEP_BOTH}
     assert loaded.footer_label.text() == "1 chosen · frees 0 B"
+
+
+def test_set_pairs_drops_choices_for_changed_files(qtbot, loaded, pairs, tmp_path):
+    p1, p2, p3 = pairs
+    loaded.choose(p2.key, KEEP_RAW)
+    loaded.choose(p3.key, KEEP_JPEG)
+    changed = dataclasses.replace(
+        p2, jpeg=dataclasses.replace(p2.jpeg, mtime_ns=p2.jpeg.mtime_ns + 1)
+    )
+    assert changed.key == p2.key
+    loaded.set_pairs([p1, changed, p3], tmp_path)
+    assert loaded.choices() == {p3.key: KEEP_JPEG}
+    assert loaded.footer_label.text() == "1 chosen · frees 24.0 MB"
+
+
+def test_headings_upper_case_and_root_name(qtbot, view, tmp_path):
+    canon = _pair(1, "Canon", "IMG_0001")
+    top = Pair(
+        "", "IMG_0009", _ref(91, "IMG_0009.CR3", MB), _ref(92, "IMG_0009.JPG", MB), None
+    )
+    root = tmp_path / "Photos"
+    view.set_pairs([top, canon], root)
+    assert _rows(view) == [
+        ("PHOTOS", None),
+        ("IMG_0009", top.key),
+        ("CANON", None),
+        ("IMG_0001", canon.key),
+    ]
+    view.set_scope("")
+    assert top.key in [k for _, k in _rows(view)]
+    view.set_scope("canon")
+    assert top.key not in [k for _, k in _rows(view)]
+    view.set_scope(None)
+    assert top.key in [k for _, k in _rows(view)]
+    view.list.viewport().repaint()
+    view.set_pairs([top], Path("E:/"))
+    assert _rows(view)[0] == ("E:/", None)
 
 
 def test_confirm_leave(qtbot, loaded, pairs, monkeypatch):

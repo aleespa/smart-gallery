@@ -1,14 +1,12 @@
 """Extract embedded JPEG images from Canon CR2/CR3 files with ExifTool."""
 
-import subprocess
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List
 
 from loguru import logger
 
-from smart_gallery.analysis.extract import _get_exiftool_path
+from smart_gallery.analysis.extract import run_exiftool_argfile
 
 
 @dataclass
@@ -36,22 +34,6 @@ def _input_files(sources) -> list[tuple[Path, Path | None]]:
     return found
 
 
-def _run_exiftool(args: list[str]) -> str:
-    """Run one ExifTool process over an argfile and return its stderr.
-
-    An argfile keeps any number of paths off the command line, and
-    ``-charset filename=utf8`` lets it carry non-ASCII paths on Windows.
-    """
-    with tempfile.TemporaryDirectory() as tmp:
-        argfile = Path(tmp) / "args.txt"
-        argfile.write_text("\n".join(args) + "\n", encoding="utf-8")
-        result = subprocess.run(
-            [_get_exiftool_path(), "-charset", "filename=utf8", "-@", str(argfile)],
-            capture_output=True,
-        )
-    return result.stderr.decode(errors="replace")
-
-
 def _extract_previews(sources: list[Path]) -> str:
     """Write each RAW's ``JpgFromRaw`` beside it as ``<stem>.jpg``.
 
@@ -60,7 +42,9 @@ def _extract_previews(sources: list[Path]) -> str:
     file without the tag, so callers detect failures by the missing output.
     Returns ExifTool's stderr.
     """
-    return _run_exiftool(["-b", "-JpgFromRaw", "-w", "%d%f.jpg", *map(str, sources)])
+    return run_exiftool_argfile(
+        ["-b", "-JpgFromRaw", "-w", "%d%f.jpg", *map(str, sources)]
+    )
 
 
 def _copy_metadata(pairs: list[tuple[Path, Path]]) -> list[str]:
@@ -82,7 +66,7 @@ def _copy_metadata(pairs: list[tuple[Path, Path]]) -> list[str]:
             str(output),
             "-execute",
         ]
-    stderr = _run_exiftool(args)
+    stderr = run_exiftool_argfile(args)
     return [line for line in stderr.splitlines() if line.startswith("Error")]
 
 

@@ -246,3 +246,19 @@ def analyze_paths(
     _run(image_files, "image")
     _run(video_files, "video")
     return items
+
+
+def run_exiftool_argfile(args: list[str]) -> str:
+    """Run one ExifTool process over an argfile and return its stderr.
+
+    An argfile keeps any number of paths off the command line, and
+    ``-charset filename=utf8`` lets it carry non-ASCII paths on Windows.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        argfile = Path(tmp) / "args.txt"
+        argfile.write_text("\n".join(args) + "\n", encoding="utf-8")
+        result = subprocess.run(
+            [_get_exiftool_path(), "-charset", "filename=utf8", "-@", str(argfile)],
+            capture_output=True,
+        )
+    return result.stderr.decode(errors="replace")

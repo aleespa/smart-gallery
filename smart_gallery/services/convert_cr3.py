@@ -1,6 +1,7 @@
 """Extract embedded JPEG images from Canon CR2/CR3 files with ExifTool."""
 
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List
@@ -35,15 +36,48 @@ def _input_files(sources) -> list[tuple[Path, Path | None]]:
     return found
 
 
+def _copy_metadata(pairs: list[tuple[Path, Path]]) -> list[str]:
+    """Copy every tag from each RAW into its extracted JPEG.
+
+    The embedded image carries no EXIF of its own, so without this a vertical
+    shot displays sideways and the date, lens and GPS are lost. All pairs go
+    through one ExifTool process via an argfile (``-execute`` per pair),
+    which keeps the extra cost to a single process start. Returns ExifTool's
+    error lines.
+    """
+    lines = []
+    for source, output in pairs:
+        lines += [
+            "-tagsFromFile",
+            str(source),
+            "-all:all",
+            "-overwrite_original",
+            "-m",
+            str(output),
+            "-execute",
+        ]
+    with tempfile.TemporaryDirectory() as tmp:
+        argfile = Path(tmp) / "args.txt"
+        argfile.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        result = subprocess.run(
+            [_get_exiftool_path(), "-charset", "filename=utf8", "-@", str(argfile)],
+            capture_output=True,
+        )
+    stderr = result.stderr.decode(errors="replace")
+    return [line for line in stderr.splitlines() if line.startswith("Error")]
+
+
 def convert_cr3(sources) -> ConvertCr3Report:
     """Write the embedded ``JpgFromRaw`` image from each CR2/CR3 as JPEG.
 
     Directory inputs are searched recursively. Each JPEG is written beside
     its source, unless a same-stem JPEG already exists, in which case the RAW
-    file is skipped.
+    file is skipped. The RAW's metadata (orientation, capture date, camera,
+    lens, exposure, GPS) is then copied into each new JPEG.
     """
     files = _input_files(sources)
     report = ConvertCr3Report()
+    pairs = []
 
     for source, _relative_path in files:
         output = source.with_suffix(".jpg")
@@ -72,6 +106,13 @@ def convert_cr3(sources) -> ConvertCr3Report:
         output.write_bytes(result.stdout)
         report.outputs.append(output)
         report.converted += 1
+        pairs.append((source, output))
+
+    if pairs:
+        for error in _copy_metadata(pairs):
+            message = f"Could not copy metadata: {error}"
+            logger.warning(message)
+            report.failures.append(message)
 
     logger.success(
         f"Converted {report.converted} RAW file(s); skipped {report.skipped} "

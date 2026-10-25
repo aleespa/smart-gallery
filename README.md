@@ -211,7 +211,10 @@ Each source can be a CR2/CR3 file or a directory. Directories are searched
 recursively. ExifTool extracts the embedded `JpgFromRaw` image and writes a
 same-named `.jpg` beside each RAW file. This is typically the full-resolution
 embedded JPEG; it may still be more compressed than the separate JPEG produced
-by the camera's RAW+JPEG mode. If a same-stem `.jpg` or `.jpeg` already
+by the camera's RAW+JPEG mode. The embedded image has no EXIF of its own, so
+the RAW's metadata (orientation, capture date, camera, lens, exposure, GPS) is
+copied into each new JPEG; vertical shots display upright and galleries sort
+them by capture date. If a same-stem `.jpg` or `.jpeg` already
 exists, that RAW file is skipped. The previous `convert-cr3` command name
 remains available as an alias.
 

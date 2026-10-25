@@ -131,7 +131,8 @@ class StorageView(QWidget):
         self.pairs_view.move_requested.connect(self._on_move)
         self.checker.checked.connect(self.pairs_view.set_verdict)
         self.checker.progress.connect(self.pairs_view.set_progress)
-        self.checker.finished.connect(lambda: self.pairs_view.status.setText(""))
+        self.checker.finished.connect(self.pairs_view.check_finished)
+        self.checker.failed.connect(self.pairs_view.check_failed)
         self.splitter.splitterMoved.connect(self._save_state)
 
         self._query.finished.connect(self._on_data)

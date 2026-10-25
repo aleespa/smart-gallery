@@ -56,6 +56,7 @@ SHOW_ALL = "Show all {n:,} pairs"
 EMPTY_FOLDER = "No RAW + JPEG pairs in this folder"
 EMPTY_ALL = "No RAW + JPEG pairs in this gallery"
 CHECKING = "Checking pictures… {done:,} / {total:,}"
+CHECK_FAILED = "Couldn't check pictures: {reason}"
 STATUS = {
     None: "checking…",
     DIFFERENT: "⚠ look different",
@@ -233,11 +234,9 @@ class PairsDelegate(QStyledItemDelegate):
         flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         painter.drawText(first, flags, pair.stem)
 
-        verdict = index.data(VERDICT_ROLE)
-        status = STATUS.get(verdict, "")
+        status, warn = self._view.status_for(pair.key)
         painter.setFont(option.font)
         if status:
-            warn = verdict in (DIFFERENT, UNREADABLE)
             colour = (
                 QColor(colors.WARNING) if warn else palette.placeholderText().color()
             )
@@ -293,6 +292,8 @@ class PairsView(QWidget):
         self._by_key: dict[PairKey, Pair] = {}
         self._choices: dict[PairKey, str] = {}
         self._verdicts: dict[PairKey, str] = {}
+        # The check ended (done or failed): an unknown verdict stays unknown.
+        self._check_over = False
         self._scope: str | None = None
         self._root = Path()
         self._pixmaps: OrderedDict[tuple[int, int | None], QPixmap] = OrderedDict()
@@ -380,6 +381,7 @@ class PairsView(QWidget):
             if _same_files(old.get(k), self._by_key.get(k))
         }
         self._verdicts = {}
+        self._check_over = False  # the page starts a new check
         self._refresh()
 
     def root_name(self) -> str:
@@ -398,6 +400,24 @@ class PairsView(QWidget):
     def set_progress(self, done: int, total: int) -> None:
         text = CHECKING.format(done=done, total=total) if done < total else ""
         self.status.setText(text)
+
+    def check_finished(self) -> None:
+        self._check_over = True
+        self.status.setText("")
+        self.list.viewport().update()
+
+    def check_failed(self, reason: str) -> None:
+        """The check stopped: say why, and mark rows it never reached."""
+        self._check_over = True
+        self.status.setText(CHECK_FAILED.format(reason=reason))
+        self.list.viewport().update()
+
+    def status_for(self, key: PairKey) -> tuple[str, bool]:
+        """The row's check text and whether it is a warning."""
+        verdict = self._verdicts.get(key)
+        if verdict is None and self._check_over:
+            verdict = UNREADABLE  # shown only; never written to the cache
+        return STATUS.get(verdict, ""), verdict in (DIFFERENT, UNREADABLE)
 
     def choose(self, key: PairKey, choice: str | None) -> None:
         if key not in self._by_key:

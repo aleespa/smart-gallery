@@ -272,3 +272,35 @@ def test_disconnected_same_gallery_keeps_choices(qtbot, repo, make_item, tmp_pat
     _reload(qtbot, view, lambda: ctx.set_gallery(_ctx(repo).current))
     assert view.pairs_view.choices() == {p1.key: KEEP_RAW}
     assert view.stack.currentIndex() == 0
+
+
+def test_failed_check_is_shown(qtbot, repo, make_item, monkeypatch):
+    from smart_gallery.gui.storage import checker as checker_module
+    from smart_gallery.gui.storage.pairs_view import CHECK_FAILED, STATUS
+    from smart_gallery.storage.compare import UNREADABLE
+
+    def fake(pairs, root, cache, on_result, cancelled=lambda: False, batch=50):
+        raise FileNotFoundError("exiftool is not on PATH")
+
+    monkeypatch.setattr(checker_module, "check_pairs", fake)
+    _fill(repo, make_item)
+    view = _view(qtbot, _ctx(repo))
+    expected = CHECK_FAILED.format(reason="exiftool is not on PATH")
+    qtbot.waitUntil(lambda: view.pairs_view.status.text() == expected)
+    for pair in view.data.pairs:
+        assert view.pairs_view.status_for(pair.key) == (STATUS[UNREADABLE], True)
+
+
+def test_finished_check_leaves_no_row_checking(qtbot, repo, make_item, monkeypatch):
+    from smart_gallery.gui.storage import checker as checker_module
+    from smart_gallery.gui.storage.pairs_view import STATUS
+
+    def fake(pairs, root, cache, on_result, cancelled=lambda: False, batch=50):
+        pass  # reports nothing, yet succeeds
+
+    monkeypatch.setattr(checker_module, "check_pairs", fake)
+    _fill(repo, make_item)
+    view = _view(qtbot, _ctx(repo))
+    key = view.data.pairs[0].key
+    qtbot.waitUntil(lambda: view.pairs_view.status_for(key)[0] != STATUS[None])
+    assert view.pairs_view.status.text() == ""

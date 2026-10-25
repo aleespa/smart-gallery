@@ -3,6 +3,7 @@
 ``check_pairs`` runs in one ``QRunnable`` on a private one-thread pool. Results
 cross back to the GUI thread through signals tagged with a generation, as in
 ``RepoQuery``: a run that a newer ``start`` or a ``cancel`` replaced is dropped.
+A run that raises reports ``failed(reason)`` instead of ``finished``.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 class _Signals(QObject):
     result = Signal(int, object, str)  # generation, PairKey, verdict
     done = Signal(int)  # generation
+    failed = Signal(int, str)  # generation, reason
 
 
 class _Task(QRunnable):
@@ -46,15 +48,18 @@ class _Task(QRunnable):
                     lambda key, verdict: signals.result.emit(gen, key, verdict),
                     cancelled=self._stop.is_set,
                 )
-        except Exception as exc:  # logged, never raised on the worker
+        except Exception as exc:  # reported, never raised on the worker
             logger.warning("Picture check failed: %s", exc)
-        signals.done.emit(gen)
+            signals.failed.emit(gen, str(exc) or type(exc).__name__)
+        else:
+            signals.done.emit(gen)
 
 
 class PairChecker(QObject):
     checked = Signal(object, str)  # PairKey, verdict
     progress = Signal(int, int)  # done, total
     finished = Signal()
+    failed = Signal(str)  # reason; sent instead of finished
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
@@ -68,6 +73,7 @@ class PairChecker(QObject):
         self._signals = _Signals()
         self._signals.result.connect(self._on_result)
         self._signals.done.connect(self._on_done)
+        self._signals.failed.connect(self._on_failed)
 
     def start(self, pairs: list[Pair], root: Path, cache_path: Path) -> None:
         self.cancel()
@@ -103,3 +109,7 @@ class PairChecker(QObject):
     def _on_done(self, generation: int) -> None:
         if generation == self._generation:
             self.finished.emit()
+
+    def _on_failed(self, generation: int, reason: str) -> None:
+        if generation == self._generation:
+            self.failed.emit(reason)

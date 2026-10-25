@@ -15,12 +15,14 @@ from smart_gallery.gui.storage.pairs_view import (
     EMPTY_FOLDER,
     KEY_ROLE,
     LEAVE,
+    CHECK_FAILED,
     MOVE_NONE,
+    STATUS,
     VERDICT_ROLE,
     PairDialog,
     PairsView,
 )
-from smart_gallery.storage.compare import DIFFERENT, MATCH
+from smart_gallery.storage.compare import DIFFERENT, MATCH, UNREADABLE
 from smart_gallery.storage.pairs import (
     KEEP_BOTH,
     KEEP_JPEG,
@@ -341,11 +343,13 @@ def test_checker_reports_cached_and_new(qtbot, tmp_path, monkeypatch, pairs):
 def test_checker_drops_cancelled_results(qtbot, tmp_path, monkeypatch, pairs):
     import threading
 
-    gate = threading.Event()
+    started, gate = threading.Event(), threading.Event()
+    seen_cancelled = []
 
     def fake(pairs_, root, cache, on_result, cancelled=lambda: False, batch=50):
+        started.set()
         gate.wait(5)
-        assert cancelled()
+        seen_cancelled.append(cancelled())  # asserted on the test thread
         on_result(pairs_[0].key, MATCH)
 
     monkeypatch.setattr(checker_module, "check_pairs", fake)
@@ -354,8 +358,79 @@ def test_checker_drops_cancelled_results(qtbot, tmp_path, monkeypatch, pairs):
     checker.checked.connect(lambda k, v: seen.append(k))
     checker.finished.connect(lambda: seen.append("finished"))
     checker.start(pairs[:1], tmp_path, tmp_path / "checks.json")
+    assert started.wait(5)  # the run is under way before it is cancelled
     checker.cancel()
     gate.set()
     assert checker.wait(5000)
     qtbot.wait(50)
+    assert seen_cancelled == [True]
     assert seen == []
+
+
+def test_checker_reports_failure(qtbot, tmp_path, monkeypatch, pairs):
+    def fake(pairs_, root, cache, on_result, cancelled=lambda: False, batch=50):
+        on_result(pairs_[0].key, MATCH)
+        raise FileNotFoundError("exiftool not found")
+
+    monkeypatch.setattr(checker_module, "check_pairs", fake)
+    checker = PairChecker()
+    finished = []
+    checker.finished.connect(lambda: finished.append(True))
+    with qtbot.waitSignal(checker.failed, timeout=5000) as blocker:
+        checker.start(pairs[:2], tmp_path, tmp_path / "checks.json")
+    assert blocker.args == ["exiftool not found"]
+    qtbot.wait(50)
+    assert finished == []
+
+
+def test_checker_failure_of_a_cancelled_run_is_dropped(
+    qtbot, tmp_path, monkeypatch, pairs
+):
+    import threading
+
+    started, gate = threading.Event(), threading.Event()
+
+    def fake(pairs_, root, cache, on_result, cancelled=lambda: False, batch=50):
+        started.set()
+        gate.wait(5)
+        raise OSError("drive gone")
+
+    monkeypatch.setattr(checker_module, "check_pairs", fake)
+    checker = PairChecker()
+    failed = []
+    checker.failed.connect(failed.append)
+    checker.start(pairs[:1], tmp_path, tmp_path / "checks.json")
+    assert started.wait(5)
+    checker.cancel()
+    gate.set()
+    assert checker.wait(5000)
+    qtbot.wait(50)
+    assert failed == []
+
+
+def test_unchecked_rows_while_checking(qtbot, loaded, pairs):
+    assert loaded.status_for(pairs[0].key) == (STATUS[None], False)
+    loaded.set_verdict(pairs[0].key, DIFFERENT)
+    assert loaded.status_for(pairs[0].key) == (STATUS[DIFFERENT], True)
+    loaded.set_verdict(pairs[1].key, MATCH)
+    assert loaded.status_for(pairs[1].key) == ("", False)
+
+
+def test_check_failure_marks_unchecked_rows(qtbot, loaded, pairs):
+    loaded.set_verdict(pairs[0].key, MATCH)
+    loaded.set_progress(1, 3)
+    loaded.check_failed("exiftool not found")
+    assert loaded.status.text() == CHECK_FAILED.format(reason="exiftool not found")
+    assert loaded.status_for(pairs[0].key) == ("", False)
+    assert loaded.status_for(pairs[1].key) == (STATUS[UNREADABLE], True)
+    loaded.list.viewport().repaint()
+    # A new load starts a new check: back to "checking…".
+    loaded.set_pairs(pairs, loaded._root)
+    assert loaded.status_for(pairs[1].key) == (STATUS[None], False)
+
+
+def test_check_finished_never_leaves_checking(qtbot, loaded, pairs):
+    loaded.set_progress(0, 3)
+    loaded.check_finished()
+    assert loaded.status.text() == ""
+    assert loaded.status_for(pairs[2].key) == (STATUS[UNREADABLE], True)

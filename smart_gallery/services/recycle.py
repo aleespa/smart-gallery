@@ -19,7 +19,12 @@ from loguru import logger
 from smart_gallery.config import drive_root_of
 from smart_gallery.db.repository import GalleryRepository
 from smart_gallery.progress import RECYCLING, ProgressCallback, ProgressEvent
-from smart_gallery.recycle_bin import move_to_recycle_bin, supports_recycle_bin
+from smart_gallery.recycle_bin import (
+    move_to_recycle_bin,
+    recycle_bin_capacity,
+    supports_recycle_bin,
+)
+from smart_gallery.storage.tree import format_bytes
 
 
 @dataclass(frozen=True)
@@ -112,6 +117,7 @@ def recycle_files(
         raise ValueError(
             f"The Recycle Bin is not available on {root}; nothing was moved."
         )
+    capacity = recycle_bin_capacity(root)  # None: no limit known
     report = RecycleReport()
     total = len(entries)
 
@@ -136,13 +142,20 @@ def recycle_files(
         reason, path = _skip_reason(root, entry, catalog)
         if reason is not None:
             report.skipped += 1
-            logger.debug(f"Skipped: {entry.relpath} ({reason})")
+            logger.warning(f"Skipped: {entry.relpath} ({reason})")
+        elif capacity is not None and entry.size_bytes > capacity:
+            # Windows would delete it for good rather than keep it.
+            report.failures.append(
+                f"{entry.relpath}: too big for the Recycle Bin "
+                f"(limit {format_bytes(capacity)})"
+            )
+            logger.warning(f"Not recycled: {report.failures[-1]}")
         else:
             try:
                 move_to_recycle_bin(path)
             except OSError as exc:
                 report.failures.append(f"{entry.relpath}: {exc}")
-                logger.debug(f"Not recycled: {entry.relpath}: {exc}")
+                logger.warning(f"Not recycled: {entry.relpath}: {exc}")
             else:
                 repo.delete_by_relpaths([entry.relpath])
                 catalog.pop(entry.relpath, None)

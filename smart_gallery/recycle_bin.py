@@ -1,9 +1,12 @@
 """Move files to the Windows Recycle Bin, never deleting them for good.
 
 ``supports_recycle_bin`` is the guard callers run first: only fixed local drives
-on Windows have a Recycle Bin. ``move_to_recycle_bin`` asks the shell to delete
-with undo (``FOF_ALLOWUNDO``); ``FOF_WANTNUKEWARNING`` makes Windows ask rather
-than delete permanently if the Recycle Bin can't take a file.
+on Windows have a Recycle Bin, and only while it is turned on for the drive (its
+``NukeOnDelete`` setting) and not switched off by policy (``NoRecycleFiles``).
+``recycle_bin_capacity`` is the drive's Recycle Bin size limit, when one is set.
+``move_to_recycle_bin`` asks the shell to delete with undo (``FOF_ALLOWUNDO``);
+``FOF_WANTNUKEWARNING`` makes Windows ask rather than delete permanently if the
+Recycle Bin can't take a file.
 """
 
 from __future__ import annotations
@@ -15,6 +18,13 @@ from ctypes import wintypes
 from pathlib import Path
 
 DRIVE_FIXED = 3
+
+# Per-volume Recycle Bin settings and the Explorer policy, under HKCU / HKLM.
+BITBUCKET_VOLUMES = (
+    r"Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume"
+)
+EXPLORER_POLICIES = r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
+MB = 1024 * 1024
 
 FO_DELETE = 3
 FOF_SILENT = 0x4
@@ -45,18 +55,85 @@ class SHFILEOPSTRUCTW(ctypes.Structure):
     ]
 
 
+def _anchor(path: Path) -> str:
+    return Path(os.path.abspath(path)).anchor
+
+
+def _drive_type(anchor: str) -> int:
+    return ctypes.windll.kernel32.GetDriveTypeW(ctypes.c_wchar_p(anchor))
+
+
+def _volume_guid(anchor: str) -> str:
+    """``{GUID}`` of the volume mounted at ``anchor`` (``"C:\\"``)."""
+    buf = ctypes.create_unicode_buffer(64)
+    kernel32 = ctypes.windll.kernel32
+    if not kernel32.GetVolumeNameForVolumeMountPointW(
+        ctypes.c_wchar_p(anchor), buf, len(buf)
+    ):
+        raise OSError(f"No volume name for {anchor}")
+    name = buf.value  # \\?\Volume{GUID}\
+    start, end = name.find("{"), name.find("}")
+    if start < 0 or end < start:
+        raise OSError(f"Unexpected volume name {name!r}")
+    return name[start : end + 1]
+
+
+def _volume_key(anchor: str) -> str:
+    """The drive's Recycle Bin settings key under HKCU."""
+    return BITBUCKET_VOLUMES + "\\" + _volume_guid(anchor)
+
+
+def _read_dword(hive: str, key: str, name: str) -> int | None:
+    """A registry DWORD from ``"HKCU"``/``"HKLM"``; None when key or value is missing."""
+    import winreg
+
+    root = {"HKCU": winreg.HKEY_CURRENT_USER, "HKLM": winreg.HKEY_LOCAL_MACHINE}[hive]
+    try:
+        with winreg.OpenKey(root, key) as handle:
+            value, kind = winreg.QueryValueEx(handle, name)
+    except FileNotFoundError:
+        return None
+    return int(value) if kind == winreg.REG_DWORD else None
+
+
+def _recycling_turned_off(anchor: str) -> bool:
+    if _read_dword("HKCU", _volume_key(anchor), "NukeOnDelete") == 1:
+        return True
+    return any(
+        _read_dword(hive, EXPLORER_POLICIES, "NoRecycleFiles") == 1
+        for hive in ("HKCU", "HKLM")
+    )
+
+
 def supports_recycle_bin(path: Path) -> bool:
-    """True only on Windows, for a path on a fixed local drive."""
+    """True only on Windows, for a path on a fixed local drive whose Recycle Bin
+    is turned on. If its settings can't be read, a fixed drive counts."""
     if sys.platform != "win32":
         return False
-    anchor = Path(os.path.abspath(path)).anchor
+    anchor = _anchor(path)
     if not anchor:
         return False
     try:
-        drive_type = ctypes.windll.kernel32.GetDriveTypeW(ctypes.c_wchar_p(anchor))
+        if _drive_type(anchor) != DRIVE_FIXED:
+            return False
     except (AttributeError, OSError):
         return False
-    return drive_type == DRIVE_FIXED
+    try:
+        return not _recycling_turned_off(anchor)
+    except Exception:  # unreadable settings: keep the fixed-drive answer
+        return True
+
+
+def recycle_bin_capacity(path: Path) -> int | None:
+    """The drive's Recycle Bin limit in bytes (``MaxCapacity``), or None when
+    it isn't set or can't be read. Best effort."""
+    if sys.platform != "win32":
+        return None
+    try:
+        megabytes = _read_dword("HKCU", _volume_key(_anchor(path)), "MaxCapacity")
+    except Exception:
+        return None
+    return None if megabytes is None else megabytes * MB
 
 
 def move_to_recycle_bin(path: Path) -> None:

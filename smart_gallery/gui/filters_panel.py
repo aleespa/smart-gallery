@@ -18,6 +18,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -46,6 +47,7 @@ DEBOUNCE_MS = 300
 # Dashboard open the panel at this width.
 PANEL_WIDTH = 300
 CLEAR_TEXT = "Clear all filters"
+PEOPLE_MATCH = (("any", "Any of them"), ("all", "All of them"))
 _HOVER = QColor(theme.ACCENT).lighter(112).name()
 _PRESSED = QColor(theme.ACCENT).darker(112).name()
 CLEAR_STYLE = f"""
@@ -126,6 +128,15 @@ class FilterPanel(QWidget):
             picker.changed.connect(self._edited)
             setattr(self, name, picker)
 
+        self.people_match = QComboBox()
+        for value, label in PEOPLE_MATCH:
+            self.people_match.addItem(label, value)
+        self.people_match.setToolTip(
+            "With several people ticked: photos with any of them, or with all."
+        )
+        self.people_match.currentIndexChanged.connect(self._edited)
+        self.people.changed.connect(self._sync_people_match)
+
         content = QWidget()
         body = QVBoxLayout(content)
         body.addWidget(self._dates_box())
@@ -137,7 +148,10 @@ class FilterPanel(QWidget):
         self._boxes: dict[str, QGroupBox] = {}
         for name, title, _noun in _PICKERS:
             box = QGroupBox(title)
-            QVBoxLayout(box).addWidget(getattr(self, name))
+            box_layout = QVBoxLayout(box)
+            box_layout.addWidget(getattr(self, name))
+            if name == "people":
+                box_layout.addWidget(self.people_match)
             self._boxes[name] = box
             if name != "people":
                 body.addWidget(box)
@@ -205,6 +219,7 @@ class FilterPanel(QWidget):
             **{name: edit.text() for name, edit in self.texts.items()},
             filetypes=tuple(v for v, box in self.filetypes.items() if box.isChecked()),
             **{name: getattr(self, name).selected() for name in _LISTS},
+            people_match=self.people_match.currentData(),
         )
 
     def set_values(self, values: FilterValues) -> None:
@@ -216,9 +231,17 @@ class FilterPanel(QWidget):
                 box.setChecked(value in values.filetypes)
             for name in _LISTS:
                 getattr(self, name).set_selected(getattr(values, name))
+            self.people_match.setCurrentIndex(
+                max(0, self.people_match.findData(values.people_match))
+            )
+            self._sync_people_match()
             self._show_errors({})
         finally:
             self._syncing = False
+
+    def _sync_people_match(self) -> None:
+        """The any/all switch only means something with two or more people."""
+        self.people_match.setEnabled(len(self.people.selected()) >= 2)
 
     # ── applying ────────────────────────────────────────────────────────────
     def _edited(self, *_args) -> None:

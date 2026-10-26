@@ -36,6 +36,7 @@ class FilterValues:
     min_shutter: str = ""
     max_shutter: str = ""
     people: tuple[str, ...] = ()
+    people_match: str = "any"
 
 
 def _parse_date(text: str) -> date:
@@ -105,6 +106,7 @@ def to_filter_options(v: FilterValues) -> tuple[FilterOptions | None, dict[str, 
         cameras=list(v.cameras) or None,
         lenses=list(v.lenses) or None,
         people=list(v.people) or None,
+        people_match=v.people_match if v.people else "any",
         **ranges,
     )
     return (None if options == FilterOptions() else options), {}
@@ -132,6 +134,7 @@ def from_filter_options(options: FilterOptions | None) -> FilterValues:
         filetypes=tuple(options.filetypes or ()),
         extensions=tuple(options.extensions or ()),
         people=tuple(options.people or ()),
+        people_match=options.people_match,
         **fields,
     )
 

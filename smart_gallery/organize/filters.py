@@ -7,7 +7,7 @@ export get identical results whether they filter in SQL or in memory.
 
 from dataclasses import dataclass
 from datetime import date
-from typing import List, Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 
 from smart_gallery.models import MediaItem
 from smart_gallery.util import parse_shutter
@@ -30,6 +30,9 @@ class FilterOptions:
     # ``person_ids`` matches by cluster id (works before a cluster is named).
     people: Optional[List[str]] = None
     person_ids: Optional[List[int]] = None
+    # With several people: photos with any of them, or with all of them. SQL-only
+    # like ``people``; it only refines them, so it never makes a query non-empty.
+    people_match: Literal["any", "all"] = "any"
 
 
 def normalize_extensions(extensions) -> Optional[List[str]]:
@@ -69,6 +72,7 @@ def is_query_empty(query: Optional[FilterOptions]) -> bool:
         or query.shutter_speed_range
         or query.people
         or query.person_ids
+        # people_match is left out on purpose: it only refines people/person_ids.
     )
 
 

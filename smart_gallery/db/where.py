@@ -83,20 +83,29 @@ def build_where(query: FilterOptions) -> Tuple[str, list]:
     # People filter (face recognition): media that contain a face assigned to a
     # named person. SQL-only — there is no MediaItem-level equivalent, so this
     # clause has no counterpart in organize.filters.matches().
+    # "all" is one clause per name (persons sharing a name count as one) and per
+    # id; "any" is a single IN clause over the lot.
+    match_all = query.people_match == "all"
     if query.people:
-        clauses.append(
-            "id IN (SELECT f.media_id FROM faces f "
-            "JOIN persons p ON p.id = f.person_id "
-            f"WHERE p.name IN ({_qmarks(query.people)}))"
-        )
-        params.extend(query.people)
+        names = [[n] for n in query.people] if match_all else [list(query.people)]
+        for group in names:
+            clauses.append(
+                "id IN (SELECT f.media_id FROM faces f "
+                "JOIN persons p ON p.id = f.person_id "
+                f"WHERE p.name IN ({_qmarks(group)}))"
+            )
+            params.extend(group)
 
     if query.person_ids:
-        clauses.append(
-            "id IN (SELECT media_id FROM faces "
-            f"WHERE person_id IN ({_qmarks(query.person_ids)}))"
+        groups = (
+            [[i] for i in query.person_ids] if match_all else [list(query.person_ids)]
         )
-        params.extend(query.person_ids)
+        for group in groups:
+            clauses.append(
+                "id IN (SELECT media_id FROM faces "
+                f"WHERE person_id IN ({_qmarks(group)}))"
+            )
+            params.extend(group)
 
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     return where, params

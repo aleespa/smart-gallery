@@ -46,6 +46,7 @@ QUERIES = [
     FilterOptions(iso_range=(200, 1000)),
     FilterOptions(shutter_speed_range=("1/500", "1s")),
     FilterOptions(cameras=["Sony A7"], filetypes=["video"]),
+    FilterOptions(people_match="all"),
     FilterOptions(filetypes=["image"], aperture_range=(2.0, 9.0), iso_range=(50, 500)),
 ]
 

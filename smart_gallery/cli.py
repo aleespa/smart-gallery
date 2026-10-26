@@ -135,6 +135,13 @@ def _add_filter_args(parser: argparse.ArgumentParser) -> None:
         dest="person_ids",
         help="Only media containing these person cluster ids (works before naming).",
     )
+    g.add_argument(
+        "--people-match",
+        choices=["any", "all"],
+        default="any",
+        dest="people_match",
+        help="With several people: photos with any of them, or with all of them.",
+    )
 
 
 def _organize_args(g) -> None:
@@ -215,6 +222,7 @@ def build_filter_query(args) -> FilterOptions:
         shutter_speed_range=shutter_range,
         people=getattr(args, "people", None),
         person_ids=getattr(args, "person_ids", None),
+        people_match=getattr(args, "people_match", "any"),
     )
 
 

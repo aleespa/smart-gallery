@@ -262,3 +262,18 @@ def test_clicking_the_calendar_button_opens_a_calendar_that_stays(
     popup.calendar.clicked.emit(QDate(2024, 7, 9))
     assert edit.text() == "2024-07-09"
     assert not popup.isVisible()
+
+
+def test_people_match_switch_roundtrip(qtbot, repo, make_item):
+    from smart_gallery.gui.filters_model import FilterValues, to_filter_options
+
+    panel, _ = _panel(qtbot, repo, make_item)
+    panel.set_values(FilterValues(people=("Ann",)))
+    assert not panel.people_match.isEnabled()
+    panel.set_values(FilterValues(people=("Ann", "Bo"), people_match="all"))
+    assert panel.people_match.isEnabled()
+    options, _ = to_filter_options(panel.values())
+    assert options.people_match == "all"
+    assert options.people == ["Ann", "Bo"]
+    panel.set_values(FilterValues(people=("Ann", "Bo")))
+    assert panel.values().people_match == "any"

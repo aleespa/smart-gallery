@@ -18,6 +18,7 @@ from smart_gallery.db.schema import (
     CREATE_META,
     CREATE_PERSONS,
 )
+from smart_gallery.organize.filters import FilterOptions, is_query_empty
 from smart_gallery.models import (
     FACE_COLUMNS,
     PERSON_COLUMNS,
@@ -228,6 +229,79 @@ def test_filter_by_person_id_and_name(repo, make_item):
     # And by name once named.
     repo.set_person_name(pid, "Alice")
     assert repo.query_relpaths(FilterOptions(people=["Alice"])) == ["a.jpg"]
+
+
+def _put_faces(repo, make_item, layout):
+    """layout: {relpath: [person_id, ...]} -> one face per listed person."""
+    scans, pairs = [], []
+    for n, (relpath, pids) in enumerate(layout.items()):
+        mid = _add_media(repo, make_item, relpath)
+        faces = [
+            Face.from_detection(mid, (0, 0, 40, 40), 0.9, _unit(n * 10 + i))
+            for i, _ in enumerate(pids)
+        ]
+        scans.append((mid, faces, None))
+        pairs.append((mid, pids))
+    repo.add_scan_results(scans, FACE_DET_VERSION)
+    for mid, pids in pairs:
+        rows = repo.conn.execute(
+            "SELECT id FROM faces WHERE media_id=? ORDER BY id", (mid,)
+        ).fetchall()
+        for (fid,), pid in zip(rows, pids):
+            repo.conn.execute("UPDATE faces SET person_id=? WHERE id=?", (pid, fid))
+    repo.conn.commit()
+
+
+def _person(repo, cluster_id, name):
+    pid = repo.create_person(Person(cluster_id=cluster_id))
+    repo.set_person_name(pid, name)
+    return pid
+
+
+def test_filter_people_all_requires_every_person(repo, make_item):
+    alice = _person(repo, 0, "Alice")
+    bob = _person(repo, 1, "Bob")
+    _put_faces(repo, make_item, {"a.jpg": [alice, bob], "b.jpg": [alice]})
+    both = ["Alice", "Bob"]
+    assert repo.query_relpaths(FilterOptions(people=both, people_match="all")) == [
+        "a.jpg"
+    ]
+    assert repo.query_relpaths(FilterOptions(people=both)) == ["a.jpg", "b.jpg"]
+
+
+def test_filter_people_all_treats_shared_name_as_one(repo, make_item):
+    a1 = _person(repo, 0, "Alice")
+    a2 = _person(repo, 1, "Alice")
+    bob = _person(repo, 2, "Bob")
+    _put_faces(repo, make_item, {"a.jpg": [a1], "b.jpg": [a2, bob]})
+    query = FilterOptions(people=["Alice", "Bob"], people_match="all")
+    assert repo.query_relpaths(query) == ["b.jpg"]
+
+
+def test_filter_person_ids_all(repo, make_item):
+    alice = _person(repo, 0, "Alice")
+    bob = _person(repo, 1, "Bob")
+    _put_faces(repo, make_item, {"a.jpg": [alice, bob], "b.jpg": [bob]})
+    ids = [alice, bob]
+    assert repo.query_relpaths(FilterOptions(person_ids=ids, people_match="all")) == [
+        "a.jpg"
+    ]
+    assert repo.query_relpaths(FilterOptions(person_ids=ids)) == ["a.jpg", "b.jpg"]
+
+
+def test_people_match_alone_is_empty():
+    assert is_query_empty(FilterOptions(people_match="all"))
+
+
+def test_cli_people_match_builds_query():
+    from smart_gallery.cli import build_filter_query, build_parser
+
+    def query(*flags):
+        args = build_parser().parse_args(["report", "E:/", "--to", "r.xlsx", *flags])
+        return build_filter_query(args)
+
+    assert query("--people", "A", "B").people_match == "any"
+    assert query("--people", "A", "B", "--people-match", "all").people_match == "all"
 
 
 def test_delete_person_unassigns_faces(repo, make_item):

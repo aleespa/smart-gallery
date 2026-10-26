@@ -208,6 +208,7 @@ def test_not_person_emits_reject_entry(qtbot, repo, cat):
     view = _view(qtbot, _ctx(repo))
     page = _open_person(qtbot, view, alice)
     _open_faces(qtbot, page)
+    page.labels.disconnect(view.send_labels)  # keep the tiles for a 2nd click
     sent = []
     page.labels.connect(sent.append)
     _pick(page.faces_grid, f1)
@@ -250,6 +251,7 @@ def test_review_confirm_all_emits_confirm_entry(qtbot, repo, cat):
     page = _open_person(qtbot, view, alice)
     assert not page.suggest_strip.isHidden()
     assert page.suggest_label.text() == "Is this Alice? 2 suggestions"
+    page.labels.disconnect(view.send_labels)  # keep the tiles for a 2nd click
     sent = []
     page.labels.connect(sent.append)
     page.review_button.click()

@@ -112,6 +112,21 @@ class _FaceModel(QAbstractListModel):
         self.tiles = list(tiles)
         self.endResetModel()
 
+    def remove_ids(self, gone: set[int]) -> None:
+        """Drop these faces row by row, so scroll and selection stay put."""
+        row = len(self.tiles) - 1
+        while row >= 0:
+            if self.tiles[row].face_id not in gone:
+                row -= 1
+                continue
+            first = row
+            while first > 0 and self.tiles[first - 1].face_id in gone:
+                first -= 1
+            self.beginRemoveRows(QModelIndex(), first, row)
+            del self.tiles[first : row + 1]
+            self.endRemoveRows()
+            row = first - 1
+
     def forget_crops(self) -> None:
         self._pixmaps.clear()
         self._missing.clear()
@@ -213,8 +228,8 @@ class FaceGrid(QListView):
         return [self._model.tiles[r].face_id for r in rows]
 
     def remove_faces(self, ids: Iterable[int]) -> None:
-        gone = set(ids)
-        self.set_tiles([t for t in self._model.tiles if t.face_id not in gone])
+        self._model.remove_ids(set(ids))
+        self._on_selection()
 
     def _on_selection(self, *_args) -> None:
         self.faces_selected.emit(self.selected_face_ids())

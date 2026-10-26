@@ -11,9 +11,10 @@ nothing here writes the catalog.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
@@ -39,7 +40,7 @@ from smart_gallery.gui.people.person_view import (
     SeveralPeoplePage,
 )
 from smart_gallery.gui.repo_query import RepoQuery
-from smart_gallery.services.label_faces import LabelEntry
+from smart_gallery.services.label_faces import LabelEntry, write_label_list
 
 FIND_TITLE = "Find faces"
 FIND_BUTTON = "Find new faces"
@@ -62,6 +63,11 @@ HIDE_TITLE = "Hide group"
 UNHIDE_TITLE = "Show group"
 DELETE_TITLE = "Delete person"
 DELETE_ASK = "Delete {name}? Their faces become unassigned."
+FIX_TITLE = "Fix faces"
+SEND_DELAY_MS = 400  # a burst of clicks becomes one job
+LABELS_DIR = "face-labels"
+LEAVE_ASK = "Send the face corrections you made before leaving?"
+LIST_ERROR = "Could not save the face corrections: {error}"
 
 
 class PeopleView(QWidget):
@@ -74,6 +80,10 @@ class PeopleView(QWidget):
         self._loading_root = Path()
         self._message_callback: Callable[[], None] | None = None
         self._pending: list[LabelEntry] = []  # corrections not sent yet
+        self._send_timer = QTimer(self)
+        self._send_timer.setSingleShot(True)
+        self._send_timer.setInterval(SEND_DELAY_MS)
+        self._send_timer.timeout.connect(self._send_pending)
         self._query = RepoQuery(ctx, self)
 
         # Shown on the page header's right (MainWindow takes header_controls).
@@ -139,6 +149,11 @@ class PeopleView(QWidget):
         self._query.failed.connect(self._on_failed)
         ctx.gallery_changed.connect(self._on_gallery_changed)
         ctx.catalog_updated.connect(self.reload)
+        finished = getattr(ctx.jobs, "finished", None)
+        if finished is not None:
+            finished.connect(self._send_pending)
+        ctx.add_leave_guard(self._confirm_leave)
+        self.destroyed.connect(lambda *_: ctx.remove_leave_guard(self._confirm_leave))
         self.reload()
 
     # ── loading ─────────────────────────────────────────────────────────────
@@ -251,8 +266,77 @@ class PeopleView(QWidget):
         self.right.setCurrentWidget(self.hidden_page)
 
     def send_labels(self, entries: list) -> None:
-        """Queue face corrections; Task 12 sends them as one job."""
+        """Hide the corrected faces now and send the corrections as one job."""
+        entries = list(entries)
+        if not entries:
+            return
+        gone = {face for entry in entries for face in entry.faces}
+        for grid in (
+            self.person_page.faces_grid,
+            self.person_page.review_grid,
+            self.hidden_page.faces_grid,
+        ):
+            grid.remove_faces(gone)
         self._pending.extend(entries)
+        self._send_timer.start()
+
+    def _send_pending(self, *_args) -> bool:
+        """Start the job for the queued corrections; False when none went."""
+        if not self._pending:
+            return False
+        self._send_timer.stop()
+        jobs = self.ctx.jobs
+        if jobs is None or self.ctx.current is None or jobs.running:
+            return False  # sent when the running job finishes
+        root = str(drive_root_of(Path(self.ctx.current.db_path)))
+        try:
+            path = self._new_list_path()
+            write_label_list(path, self._pending)
+        except OSError as exc:
+            QMessageBox.warning(self, FIX_TITLE, LIST_ERROR.format(error=exc))
+            return False
+        spec = JobSpec(
+            FIX_TITLE,
+            (
+                ("label-faces", root, "--list", str(path)),
+                ("file-faces", root, "--no-group"),
+            ),
+        )
+        if not jobs.start(spec):
+            return False  # raced with another job: retry on its finish
+        self._pending = []
+        return True
+
+    @staticmethod
+    def _new_list_path() -> Path:
+        folder = paths.app_data_dir() / LABELS_DIR
+        folder.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        path = folder / f"{stamp}.json"
+        n = 1
+        while path.exists():  # never overwrite a list a job may still read
+            n += 1
+            path = folder / f"{stamp}-{n}.json"
+        return path
+
+    def _confirm_leave(self) -> bool:
+        if not self._pending:
+            return True
+        buttons = QMessageBox.StandardButton
+        answer = QMessageBox.question(
+            self,
+            FIX_TITLE,
+            LEAVE_ASK,
+            buttons.Yes | buttons.No | buttons.Cancel,
+        )
+        if answer == buttons.Cancel:
+            return False
+        if answer == buttons.Yes:
+            self._send_pending()
+        else:
+            self._pending = []
+        self._send_timer.stop()
+        return True
 
     # ── jobs ────────────────────────────────────────────────────────────────
     def _start(self, title: str, *argvs: tuple[str, ...]) -> None:

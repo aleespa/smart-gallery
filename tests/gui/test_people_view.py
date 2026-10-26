@@ -1,4 +1,7 @@
+import json
+
 import pytest
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QInputDialog, QMessageBox
 
 from smart_gallery.config import drive_root_of
@@ -7,6 +10,7 @@ from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.galleries.store import Gallery
 from smart_gallery.gui.jobspec import JOB_RUNNING
 from smart_gallery.gui.people.list_view import HEADER_ROLE, PERSON_ROLE
+from smart_gallery.services.label_faces import LabelEntry
 from smart_gallery.gui.people.view import (
     FIND_TITLE,
     NEEDS_UPGRADE,
@@ -21,9 +25,13 @@ from smart_gallery.gui.people.view import (
 _BLOB = b"\x00" * 8
 
 
-class _Jobs:
+class _Jobs(QObject):
+    finished = Signal(object)
+
     def __init__(self, result=True):
+        super().__init__()
         self.result = result
+        self.running = False
         self.specs = []
 
     def start(self, spec):
@@ -76,6 +84,11 @@ def cat(repo, make_item):
 @pytest.fixture(autouse=True)
 def _faces_extra(monkeypatch):
     monkeypatch.setattr(paths, "faces_available", lambda: True)
+
+
+@pytest.fixture(autouse=True)
+def _app_data(monkeypatch, tmp_path):
+    monkeypatch.setattr(paths, "app_data_dir", lambda: tmp_path / "appdata")
 
 
 def _ctx(repo, jobs=None):
@@ -423,3 +436,112 @@ def test_gallery_change_drops_selection(qtbot, repo, cat):
     _reload(qtbot, view, lambda: ctx.set_gallery(again))
     assert view.list.selected_ids() == []
     assert view.message.text() == PICK
+
+
+def _tiles(*ids):
+    from smart_gallery.gui.people.model import FaceTile
+
+    return [
+        FaceTile(i, i, f"p{i}.jpg", ".jpg", "auto", None, (1, 2, 3, 4), None)
+        for i in ids
+    ]
+
+
+def _grid_with(view, *ids):
+    grid = view.person_page.faces_grid
+    grid.set_tiles(_tiles(*ids))
+    return grid
+
+
+def test_burst_of_corrections_becomes_one_job(qtbot, repo, cat):
+    cat.person("Alice")
+    ctx = _ctx(repo, _Jobs())
+    view = _view(qtbot, ctx)
+    grid = _grid_with(view, 1, 2, 3)
+    first = LabelEntry("ignore", (1,))
+    second = LabelEntry("move", (2,), person_id=5)
+    view.send_labels([first])
+    view.send_labels([second])
+    assert [t.face_id for t in grid.tiles()] == [3]
+    assert ctx.jobs.specs == []
+    qtbot.waitUntil(lambda: len(ctx.jobs.specs) == 1)
+    (spec,) = ctx.jobs.specs
+    root = _root(repo)
+    label, file = spec.argvs
+    assert spec.title == "Fix faces"
+    assert label[:3] == ("label-faces", root, "--list")
+    assert file == ("file-faces", root, "--no-group")
+    data = json.loads(open(label[3], encoding="utf-8").read())
+    assert [d["action"] for d in data] == ["ignore", "move"]
+    assert data[1]["person_id"] == 5
+    assert view._pending == []
+
+
+def test_corrections_wait_for_running_job(qtbot, repo, cat):
+    cat.person("Alice")
+    jobs = _Jobs()
+    jobs.running = True
+    ctx = _ctx(repo, jobs)
+    view = _view(qtbot, ctx)
+    grid = _grid_with(view, 1, 2)
+    view.send_labels([LabelEntry("ignore", (1,))])
+    qtbot.wait(600)
+    assert jobs.specs == []
+    assert [t.face_id for t in grid.tiles()] == [2]
+    jobs.running = False
+    jobs.finished.emit(None)
+    assert len(jobs.specs) == 1
+    assert view._pending == []
+
+
+def test_refused_start_keeps_entries_for_next_finish(qtbot, repo, cat):
+    cat.person("Alice")
+    jobs = _Jobs(result=False)
+    ctx = _ctx(repo, jobs)
+    view = _view(qtbot, ctx)
+    view.send_labels([LabelEntry("ignore", (1,))])
+    qtbot.waitUntil(lambda: len(jobs.specs) == 1)
+    assert len(view._pending) == 1
+    jobs.result = True
+    jobs.finished.emit(None)
+    assert len(jobs.specs) == 2
+    assert view._pending == []
+
+
+def test_leave_guard_with_pending_corrections(qtbot, repo, cat, monkeypatch):
+    cat.person("Alice")
+    ctx = _ctx(repo, _Jobs())
+    view = _view(qtbot, ctx)
+    assert ctx.can_leave()
+    view.send_labels([LabelEntry("ignore", (1,))])
+    Btn = QMessageBox.StandardButton
+    answer = [Btn.Cancel]
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: answer[0])
+    assert not ctx.can_leave()
+    assert len(view._pending) == 1 and ctx.jobs.specs == []
+    answer[0] = Btn.Yes
+    assert ctx.can_leave()
+    assert len(ctx.jobs.specs) == 1 and view._pending == []
+    view.send_labels([LabelEntry("ignore", (2,))])
+    answer[0] = Btn.No
+    assert ctx.can_leave()
+    assert view._pending == [] and len(ctx.jobs.specs) == 1
+    qtbot.wait(500)
+    assert len(ctx.jobs.specs) == 1
+
+
+def test_remove_faces_keeps_selection_and_scroll(qtbot):
+    from smart_gallery.gui.people.faces_grid import FaceGrid
+
+    grid = FaceGrid(AppContext())
+    qtbot.addWidget(grid)
+    grid.set_tiles(_tiles(*range(1, 6)))
+    grid.selectionModel().select(
+        grid._model.index(4), grid.selectionModel().SelectionFlag.Select
+    )
+    resets = []
+    grid._model.modelReset.connect(lambda: resets.append(1))
+    grid.remove_faces([1, 2])
+    assert resets == []
+    assert [t.face_id for t in grid.tiles()] == [3, 4, 5]
+    assert grid.selected_face_ids() == [5]

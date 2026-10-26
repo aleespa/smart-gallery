@@ -10,3 +10,6 @@ class JobSpec:
     title: str
     argvs: tuple[tuple[str, ...], ...]  # run in order; stops at the first failure
     writes_catalog: bool = True
+
+
+JOB_RUNNING = "A job is already running."  # shown when JobRunner.start refuses

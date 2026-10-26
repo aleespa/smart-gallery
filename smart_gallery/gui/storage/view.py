@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 from smart_gallery.config import drive_root_of
 from smart_gallery.db.repository import GalleryRepository
 from smart_gallery.gui.context import AppContext
-from smart_gallery.gui.jobspec import JobSpec
+from smart_gallery.gui.jobspec import JOB_RUNNING, JobSpec
 from smart_gallery.gui.paths import app_data_dir
 from smart_gallery.gui.repo_query import RepoQuery
 from smart_gallery.gui.state_store import load_json, save_json
@@ -54,7 +54,6 @@ CHECKS_DIR = "pair_checks"  # app_data_dir() / CHECKS_DIR / f"{db_uuid}.json"
 LISTS_DIR = "recycle_lists"  # app_data_dir() / LISTS_DIR / f"{timestamp}.tsv"
 CAPTION = "{root} · {size} in {files:,} files"
 JOB_TITLE = "Move to Recycle Bin"
-JOB_RUNNING = "A job is already running."
 NO_GALLERY = "Open or create a gallery to see its storage."
 DISCONNECTED = "Drive not connected. Plug in {label} to see its storage."
 READ_ERROR = "Could not read the catalog: {error}"

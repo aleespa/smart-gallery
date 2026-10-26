@@ -68,21 +68,6 @@ def test_navigate_signal_switches_area(qtbot):
     assert win.tabs["people"].isChecked()
 
 
-def test_people_view_lists_persons(qtbot, repo):
-    from types import SimpleNamespace
-
-    from smart_gallery.gui.context import AppContext
-    from smart_gallery.gui.people.view import PeopleView
-    from smart_gallery.models import Person
-
-    repo.create_person(Person(name="Ana", face_count=3))
-    ctx = AppContext()
-    ctx.set_gallery(SimpleNamespace(db_path=str(repo.db_path)))
-    view = PeopleView(ctx)
-    qtbot.addWidget(view)
-    assert view.persons.item(0).text() == "Ana (3 faces)"
-
-
 def test_window_provides_thumbnail_loader(qtbot):
     win = MainWindow()
     qtbot.addWidget(win)

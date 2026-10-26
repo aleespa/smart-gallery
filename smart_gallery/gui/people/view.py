@@ -1,10 +1,11 @@
 """People area: find photos by who is in them.
 
 The left column lists named people and unnamed groups (``PeopleList``); the
-right side is a stack holding the message page (empty and missing states) and
-the person page. The catalog is read off the GUI thread (``people_list``
-through ``RepoQuery``). Every change (find, merge, rename, split, hide,
-delete) is a CLI job; nothing here writes the catalog.
+right side is a stack holding the message page (empty and missing states),
+the person page, the several-people page and the hidden faces. The catalog is
+read off the GUI thread (``people_list`` through ``RepoQuery``). Every change
+(find, merge, rename, split, hide, delete, face corrections) is a CLI job;
+nothing here writes the catalog.
 """
 
 from __future__ import annotations
@@ -32,7 +33,13 @@ from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.jobspec import JOB_RUNNING, JobSpec
 from smart_gallery.gui.people import model
 from smart_gallery.gui.people.list_view import PeopleList
+from smart_gallery.gui.people.person_view import (
+    HiddenFacesPage,
+    PersonPage,
+    SeveralPeoplePage,
+)
 from smart_gallery.gui.repo_query import RepoQuery
+from smart_gallery.services.label_faces import LabelEntry
 
 FIND_TITLE = "Find faces"
 FIND_BUTTON = "Find new faces"
@@ -66,6 +73,7 @@ class PeopleView(QWidget):
         self._root = Path()
         self._loading_root = Path()
         self._message_callback: Callable[[], None] | None = None
+        self._pending: list[LabelEntry] = []  # corrections not sent yet
         self._query = RepoQuery(ctx, self)
 
         # Shown on the page header's right (MainWindow takes header_controls).
@@ -92,11 +100,15 @@ class PeopleView(QWidget):
         page.addWidget(self.message)
         page.addWidget(self.message_action, 0, Qt.AlignmentFlag.AlignHCenter)
         page.addStretch(1)
-        self.person_page = QWidget()  # the person views (filled by Task 11)
+        self.person_page = PersonPage(ctx)
+        self.several_page = SeveralPeoplePage(ctx)
+        self.hidden_page = HiddenFacesPage(ctx)
 
         self.right = QStackedWidget()
         self.right.addWidget(self.message_page)
         self.right.addWidget(self.person_page)
+        self.right.addWidget(self.several_page)
+        self.right.addWidget(self.hidden_page)
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.setChildrenCollapsible(False)
@@ -115,6 +127,14 @@ class PeopleView(QWidget):
         self.list.split_requested.connect(self.split)
         self.list.hide_requested.connect(self.hide_person)
         self.list.delete_requested.connect(self.delete)
+        self.list.show_hidden_requested.connect(self.show_hidden_faces)
+        self.person_page.labels.connect(self.send_labels)
+        self.person_page.rename_requested.connect(self.rename)
+        self.person_page.name_entered.connect(self.name_person)
+        self.hidden_page.labels.connect(self.send_labels)
+        self.hidden_page.unhide_requested.connect(
+            lambda pid: self.hide_person(pid, False)
+        )
         self._query.finished.connect(self._on_data)
         self._query.failed.connect(self._on_failed)
         ctx.gallery_changed.connect(self._on_gallery_changed)
@@ -148,6 +168,8 @@ class PeopleView(QWidget):
         self.data = result
         self._root = self._loading_root
         self.list.set_people(result, self._root)
+        self.person_page.set_people(result)
+        self.hidden_page.set_people(result)
         n = result.pending_images
         self.status.setText(PENDING.format(n=n) if n > 0 else "")
         if not result.has_faces:
@@ -165,7 +187,10 @@ class PeopleView(QWidget):
         self._clear()
         if isinstance(error, model.NeedsUpgrade):
             self._root = self._loading_root
-            self._find_message(NEEDS_UPGRADE)
+            if paths.faces_available():
+                self._find_message(NEEDS_UPGRADE)
+            else:
+                self.show_message(NO_EXTRA)
         elif self.ctx.current is None:
             self.show_message(NO_GALLERY)
         elif isinstance(error, FileNotFoundError):
@@ -206,10 +231,28 @@ class PeopleView(QWidget):
     def _on_selection(self, ids: list) -> None:
         if self.data is None or not (self.data.named or self.data.groups):
             return
-        if ids:
+        if len(ids) == 1:
+            self.person_page.show_person(ids[0])
             self.right.setCurrentWidget(self.person_page)
+        elif ids:
+            rows = [row for row in map(self._row, ids) if row is not None]
+            self.several_page.show_people(rows)
+            self.right.setCurrentWidget(self.several_page)
+        elif self.right.currentWidget() is self.hidden_page:
+            self.hidden_page.show_hidden(self.data.hidden_groups)  # a reload
         else:
             self.show_message(PICK)
+
+    def show_hidden_faces(self) -> None:
+        if self.data is None:
+            return
+        self.list.list.clearSelection()
+        self.hidden_page.show_hidden(self.data.hidden_groups)
+        self.right.setCurrentWidget(self.hidden_page)
+
+    def send_labels(self, entries: list) -> None:
+        """Queue face corrections; Task 12 sends them as one job."""
+        self._pending.extend(entries)
 
     # ── jobs ────────────────────────────────────────────────────────────────
     def _start(self, title: str, *argvs: tuple[str, ...]) -> None:
@@ -264,6 +307,10 @@ class PeopleView(QWidget):
         name = text.strip() if ok else ""
         if not name or name == current:
             return
+        self.name_person(pid, name)
+
+    def name_person(self, pid: int, name: str) -> None:
+        """Name ``pid``; a name someone else has offers a merge into them."""
         argv = ("name-person", str(self._root), str(pid))
         owner = model.name_owner(self.data, name, pid) if self.data else None
         if owner is not None:

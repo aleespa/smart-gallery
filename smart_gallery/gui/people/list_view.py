@@ -43,6 +43,8 @@ COVER_PX = 32
 ROW_PX = 44
 HEADER_PX = 28
 PAD = 6
+BAR_PX = 3  # accent bar on the selected row's left edge
+SELECTED_ALPHA = 56  # strength of the selected row's accent wash, 0-255
 
 
 def _round(pixmap: QPixmap, size: int = COVER_PX) -> QPixmap:
@@ -92,21 +94,36 @@ class _RowDelegate(QStyledItemDelegate):
             )
             painter.restore()
             return
-        opt = QStyleOptionViewItem(option)
-        self.initStyleOption(opt, index)
-        opt.text = ""
-        style = opt.widget.style() if opt.widget else None
-        if style is not None:
-            style.drawPrimitive(
-                QStyle.PrimitiveElement.PE_PanelItemViewItem, opt, painter, opt.widget
-            )
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
-        text_color = option.palette.color(
-            option.palette.ColorRole.HighlightedText
-            if selected
-            else option.palette.ColorRole.Text
-        )
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if selected:
+            # A soft accent wash and an accent bar, so the name keeps the
+            # normal text colour instead of dark text on the bright accent.
+            accent = option.palette.highlight().color()
+            wash = QColor(accent)
+            wash.setAlpha(SELECTED_ALPHA)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(wash)
+            painter.drawRoundedRect(rect.adjusted(2, 1, -2, -1), 6, 6)
+            painter.setBrush(accent)
+            painter.drawRoundedRect(
+                QRect(rect.left() + 2, rect.top() + 6, BAR_PX, rect.height() - 12),
+                BAR_PX / 2,
+                BAR_PX / 2,
+            )
+        else:
+            opt = QStyleOptionViewItem(option)
+            self.initStyleOption(opt, index)
+            opt.text = ""
+            style = opt.widget.style() if opt.widget else None
+            if style is not None:  # the usual hover panel
+                style.drawPrimitive(
+                    QStyle.PrimitiveElement.PE_PanelItemViewItem,
+                    opt,
+                    painter,
+                    opt.widget,
+                )
+        text_color = option.palette.color(option.palette.ColorRole.Text)
         cover = QRect(
             rect.left() + PAD, rect.center().y() - COVER_PX // 2, COVER_PX, COVER_PX
         )

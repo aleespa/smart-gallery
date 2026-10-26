@@ -470,3 +470,42 @@ def test_face_grid_shows_crops_when_ready(qtbot, repo, cat, tmp_path):
     grid.grab()  # paints the tick on the user's face without errors
     grid.remove_faces([other])
     assert [t.face_id for t in grid.tiles()] == [mine]
+
+
+def test_face_grid_clicks_tick_faces_like_checkboxes(qtbot, repo, cat):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from smart_gallery.gui.people.faces_grid import FaceGrid, checkbox_rect
+    from smart_gallery.gui.people.model import person_faces
+
+    alice = cat.person("Alice")
+    faces = [cat.face(cat.photo(), alice) for _ in range(3)]
+    grid = FaceGrid(_ctx(repo))
+    qtbot.addWidget(grid)
+    grid.resize(400, 300)
+    grid.show()
+    grid.set_tiles(person_faces(repo, alice, "least_sure"))
+    order = [t.face_id for t in grid.tiles()]
+
+    def click(row, modifier=Qt.KeyboardModifier.NoModifier, on_box=False):
+        rect = grid.visualRect(grid.model().index(row))
+        point = checkbox_rect(rect).center().toPoint() if on_box else rect.center()
+        QTest.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton, modifier, point)
+
+    click(0, on_box=True)
+    click(2)  # a plain click adds to the selection instead of replacing it
+    assert grid.selected_face_ids() == [order[0], order[2]]
+    click(0)  # and a second click unticks
+    assert grid.selected_face_ids() == [order[2]]
+    click(2, Qt.KeyboardModifier.ShiftModifier)  # Shift still selects a range
+    assert sorted(grid.selected_face_ids()) == sorted(faces)
+    grid.grab()  # paints the outline and the ticked checkboxes without errors
+
+
+def test_people_list_selected_row_keeps_normal_text(qtbot, repo, cat):
+    alice = cat.person("Alice")
+    cat.face(cat.photo(), alice)
+    view = _view(qtbot, _ctx(repo))
+    _select(view, alice)
+    view.list.list.grab()  # paints the accent wash and bar without errors

@@ -1,8 +1,9 @@
 """Face-crop grid and the bar of corrections for the selected faces.
 
 ``FaceGrid`` shows ``FaceTile`` crops from ``ctx.face_crops`` (asked for only
-for the tiles in view, after the grid settles) and marks the faces the user
-confirmed with a small tick. ``FaceActionBar`` turns a button press into a
+for the tiles in view, after the grid settles), selects them with checkboxes
+and an accent outline, and marks the faces the user confirmed with a small
+tick. ``FaceActionBar`` turns a button press into a
 ``LabelEntry``; neither widget starts a job.
 """
 
@@ -14,6 +15,7 @@ from pathlib import Path
 from PySide6.QtCore import (
     QAbstractListModel,
     QEvent,
+    QItemSelectionModel,
     QModelIndex,
     QPointF,
     QRectF,
@@ -22,7 +24,7 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -31,7 +33,9 @@ from PySide6.QtWidgets import (
     QListView,
     QMenu,
     QPushButton,
+    QStyle,
     QStyledItemDelegate,
+    QStyleOptionViewItem,
     QToolButton,
     QWidget,
 )
@@ -43,6 +47,7 @@ from smart_gallery.services.label_faces import LabelEntry
 TILE_EDGE = 96
 GRID_SIZE = QSize(TILE_EDGE + 10, TILE_EDGE + 10)
 TICK_PX = 18
+CHECK_PX = 20
 CROP_DEBOUNCE_MS = 120
 MENU_GROUPS = 20  # unnamed groups offered in "Move to…", largest first
 TILE_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -151,33 +156,64 @@ class _FaceModel(QAbstractListModel):
                 self.dataChanged.emit(index, index, [Qt.ItemDataRole.DecorationRole])
 
 
+def _draw_tick(painter: QPainter, box: QRectF, color) -> None:
+    painter.setPen(QPen(color, 2))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    tick = QPainterPath(QPointF(box.left() + box.width() * 0.25, box.center().y()))
+    tick.lineTo(QPointF(box.center().x() - 1, box.bottom() - box.height() * 0.28))
+    tick.lineTo(
+        QPointF(box.right() - box.width() * 0.22, box.top() + box.height() * 0.28)
+    )
+    painter.drawPath(tick)
+
+
+def checkbox_rect(rect) -> QRectF:
+    """Where a tile's selection checkbox sits: its top-left corner."""
+    return QRectF(rect.left() + 8, rect.top() + 8, CHECK_PX, CHECK_PX)
+
+
 class _TickDelegate(QStyledItemDelegate):
-    """The crop as usual, plus a small tick on faces the user confirmed."""
+    """The crop, a selection checkbox in the top-left corner, an accent
+    outline on selected faces, and a small tick on faces the user confirmed."""
 
     def paint(self, painter: QPainter, option, index: QModelIndex) -> None:
-        super().paint(painter, option, index)
-        tile = index.data(TILE_ROLE)
-        if tile is None or tile.state != "user":
-            return
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        plain = QStyleOptionViewItem(option)
+        # The accent outline and checkbox show the selection, not a tint.
+        plain.state &= ~QStyle.StateFlag.State_Selected
+        plain.state &= ~QStyle.StateFlag.State_HasFocus
+        super().paint(painter, plain, index)
+        accent = option.palette.highlight().color()
         rect = option.rect
-        box = QRectF(rect.right() - TICK_PX - 4, rect.top() + 4, TICK_PX, TICK_PX)
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(option.palette.highlight())
-        painter.drawEllipse(box)
-        pen = QPen(option.palette.highlightedText().color(), 2)
-        painter.setPen(pen)
-        tick = QPainterPath(QPointF(box.left() + 5, box.center().y()))
-        tick.lineTo(QPointF(box.center().x() - 1, box.bottom() - 5))
-        tick.lineTo(QPointF(box.right() - 4, box.top() + 5))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawPath(tick)
+        if selected:
+            painter.setPen(QPen(accent, 3))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(QRectF(rect).adjusted(2.5, 2.5, -2.5, -2.5), 8, 8)
+        box = checkbox_rect(rect)
+        if selected:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(accent)
+            painter.drawRoundedRect(box, 4, 4)
+            _draw_tick(painter, box, option.palette.highlightedText().color())
+        else:
+            painter.setPen(QPen(Qt.GlobalColor.white, 1.5))
+            painter.setBrush(QColor(0, 0, 0, 90))
+            painter.drawRoundedRect(box, 4, 4)
+        tile = index.data(TILE_ROLE)
+        if tile is not None and tile.state == "user":
+            mark = QRectF(rect.right() - TICK_PX - 6, rect.top() + 6, TICK_PX, TICK_PX)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(accent)
+            painter.drawEllipse(mark)
+            _draw_tick(painter, mark, option.palette.highlightedText().color())
         painter.restore()
 
 
 class FaceGrid(QListView):
-    """Face crops in icon mode; Ctrl/Shift+click selects several."""
+    """Face crops in icon mode with a checkbox each: a click ticks or unticks
+    one face and keeps the others; Shift+click ticks a range."""
 
     faces_selected = Signal(list)  # face ids, in grid order
 
@@ -207,6 +243,19 @@ class FaceGrid(QListView):
         crops = getattr(ctx, "face_crops", None)
         if crops is not None:
             crops.ready.connect(self._on_crop)
+
+    def selectionCommand(self, index, event=None):  # noqa: N802 (Qt API)
+        """A plain click toggles one face, like ticking its checkbox, instead
+        of replacing the selection; Shift keeps the usual range select."""
+        flags = QItemSelectionModel.SelectionFlag
+        if (
+            index.isValid()
+            and event is not None
+            and event.type() == QEvent.Type.MouseButtonPress
+            and not event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+        ):
+            return flags.Toggle | flags.Rows
+        return super().selectionCommand(index, event)
 
     # ── tiles ───────────────────────────────────────────────────────────────
     def set_tiles(self, tiles: list[FaceTile], root: Path | None = None) -> None:

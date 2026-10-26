@@ -287,13 +287,15 @@ def test_add_name_on_group_runs_name_person(qtbot, repo, cat, monkeypatch):
     page.name_edit.setText(" Dana ")
     page.name_edit.returnPressed.emit()
     root = _root(repo)
-    assert ctx.jobs.specs[-1].argvs == (("name-person", root, "7", "Dana"),)
+    assert ctx.jobs.specs[-1].argvs == (("name-person", root, "7", "--", "Dana"),)
     monkeypatch.setattr(
         QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
     )
     page.name_edit.setText("alice")
     page.name_edit.returnPressed.emit()
-    assert ctx.jobs.specs[-1].argvs == (("name-person", root, "7", "Alice", "--merge"),)
+    assert ctx.jobs.specs[-1].argvs == (
+        ("name-person", root, "7", "--merge", "--", "Alice"),
+    )
 
 
 def test_several_people_all_and_any_counts(qtbot, repo, cat):

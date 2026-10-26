@@ -395,7 +395,7 @@ class PeopleView(QWidget):
                 return
             dst_row = self._row(dst)
             if choice != (dst_row.name if dst_row else None):
-                argvs.append(("name-person", str(self._root), str(dst), choice))
+                argvs.append(("name-person", str(self._root), str(dst), "--", choice))
         self._start(MERGE_TITLE, *argvs)
 
     def rename(self, pid: int) -> None:
@@ -410,7 +410,8 @@ class PeopleView(QWidget):
         self.name_person(pid, name)
 
     def name_person(self, pid: int, name: str) -> None:
-        """Name ``pid``; a name someone else has offers a merge into them."""
+        """Name ``pid``; a name someone else has offers a merge into them.
+        The name follows ``--`` so one starting with "-" is not an option."""
         argv = ("name-person", str(self._root), str(pid))
         owner = model.name_owner(self.data, name, pid) if self.data else None
         if owner is not None:
@@ -419,9 +420,9 @@ class PeopleView(QWidget):
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
-            self._start(RENAME_TITLE, (*argv, owner.name, "--merge"))
+            self._start(RENAME_TITLE, (*argv, "--merge", "--", owner.name))
             return
-        self._start(RENAME_TITLE, (*argv, name))
+        self._start(RENAME_TITLE, (*argv, "--", name))
 
     def split(self, pid: int) -> None:
         self._start(SPLIT_TITLE, ("split-person", str(self._root), str(pid)))

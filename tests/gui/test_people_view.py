@@ -270,7 +270,7 @@ def test_rename_to_existing_name_offers_merge(qtbot, repo, cat, monkeypatch):
     view.list.rename_requested.emit(7)
     assert asked == ["Merge with the existing Alice?"]
     (spec,) = ctx.jobs.specs
-    assert spec.argvs == (("name-person", _root(repo), "7", "Alice", "--merge"),)
+    assert spec.argvs == (("name-person", _root(repo), "7", "--merge", "--", "Alice"),)
 
 
 def test_rename_new_name(qtbot, repo, cat, monkeypatch):
@@ -279,7 +279,7 @@ def test_rename_new_name(qtbot, repo, cat, monkeypatch):
     view = _view(qtbot, ctx)
     monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Dana", True))
     view.list.rename_requested.emit(7)
-    assert ctx.jobs.specs[0].argvs == (("name-person", _root(repo), "7", "Dana"),)
+    assert ctx.jobs.specs[0].argvs == (("name-person", _root(repo), "7", "--", "Dana"),)
 
 
 def test_merge_two_named_asks_which_name(qtbot, repo, cat, monkeypatch):
@@ -300,7 +300,7 @@ def test_merge_two_named_asks_which_name(qtbot, repo, cat, monkeypatch):
     root = _root(repo)
     assert spec.argvs == (
         ("merge-persons", root, "3", "4"),
-        ("name-person", root, "3", "Ally"),
+        ("name-person", root, "3", "--", "Ally"),
     )
 
 
@@ -577,3 +577,48 @@ def test_corrections_go_to_their_own_gallery(qtbot, repo, cat, tmp_path):
     jobs.finished.emit(None)
     (spec,) = jobs.specs
     assert spec.argvs[0][1] == _root(repo)
+
+
+def test_every_argv_the_page_builds_parses(qtbot, repo, cat, monkeypatch):
+    from smart_gallery.cli import build_parser
+
+    cat.person("Alice", pid=3)
+    cat.person("Ally", pid=4)
+    cat.person(None, pid=7)
+    cat.person(None, pid=8, hidden=True)
+    ctx = _ctx(repo, _Jobs())
+    view = _view(qtbot, ctx)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    monkeypatch.setattr(QInputDialog, "getItem", lambda *a, **k: ("Ally", True))
+
+    view.find_faces()
+    view.send_labels([LabelEntry("ignore", (1,))])
+    view._send_pending()
+    view.merge(3, [4])
+    view.merge(3, [7])
+    view.name_person(7, "-Dash")
+    view.name_person(7, "alice")  # taken: merge into Alice
+    view.split(7)
+    view.hide_person(7)
+    view.hide_person(8, hide=False)
+    view.delete(7)
+
+    argvs = [a for spec in ctx.jobs.specs for a in spec.argvs]
+    commands = {a[0] for a in argvs}
+    assert commands == {
+        "find-faces",
+        "label-faces",
+        "file-faces",
+        "merge-persons",
+        "name-person",
+        "split-person",
+        "hide-person",
+        "delete-person",
+    }
+    parser = build_parser()
+    names = []
+    for argv in argvs:
+        args = parser.parse_args(list(argv))
+        if args.command == "name-person":
+            names.append((args.name, args.merge))
+    assert names == [("Ally", False), ("-Dash", False), ("Alice", True)]

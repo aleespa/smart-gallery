@@ -157,8 +157,25 @@ def test_split_keeps_closest_subgroup_and_rejects_the_rest(cat, repo):
     (new_id,) = new
     assert _person(repo, new_id)["name"] is None
     assert {cat.row(f)["state"] for f in a_ids} == {"cluster"}
-    assert (cat.row(stray)["state"], cat.row(stray)["person_id"]) == ("new", None)
-    assert _rejections(repo) == {(f, alice) for f in [*a_ids, stray]}
+    # A face that fits no sub-group stays with the person, unrejected.
+    assert (cat.row(stray)["state"], cat.row(stray)["person_id"]) == ("auto", alice)
+    assert _rejections(repo) == {(f, alice) for f in a_ids}
+
+
+@pytest.mark.faces
+def test_split_with_only_noise_changes_nothing(cat, repo):
+    pytest.importorskip("sklearn")
+    from smart_gallery.services.cluster_faces import split_person
+
+    alice = cat.person("Alice")
+    for axis in (0, 100, 200, 300):
+        cat.face(_unit(axis), "auto", alice)
+    repo.recompute_person(alice)
+    before = cat.snapshot()
+    report = split_person(repo, alice, algo="dbscan", eps=0.3, min_samples=2)
+    assert report.persons_created == 0 and report.noise == 0
+    assert cat.snapshot() == before
+    assert _rejections(repo) == set()
 
 
 @pytest.mark.faces
@@ -242,3 +259,57 @@ def test_identify_reassign_leaves_user_faces(cat, repo):
     assert (cat.row(n)["state"], cat.row(n)["person_id"]) == ("auto", alice)
     assert result["assigned"] == 1
     assert repo.get_person(bob) is not None
+
+
+# ── naming turns group faces into the person's faces ─────────────────────────
+def test_naming_a_group_makes_its_faces_auto(cat, repo):
+    grp = cat.person()
+    c = cat.face(_unit(0), "cluster", grp)
+    u = cat.face(_unit(1), "user", grp)
+    repo.set_person_name(grp, "Alice")
+    assert (cat.row(c)["state"], cat.row(u)["state"]) == ("auto", "user")
+
+
+def test_merging_a_group_into_a_named_person_makes_its_faces_auto(cat, repo):
+    alice, grp = cat.person("Alice"), cat.person()
+    c = cat.face(_unit(0), "cluster", grp)
+    repo.merge_persons(alice, [grp])
+    assert (cat.row(c)["state"], cat.row(c)["person_id"]) == ("auto", alice)
+
+
+def test_merging_into_an_unnamed_group_keeps_cluster(cat, repo):
+    grp, other = cat.person(), cat.person()
+    c = cat.face(_unit(0), "cluster", other)
+    repo.merge_persons(grp, [other])
+    assert cat.row(c)["state"] == "cluster"
+
+
+def test_group_taking_a_named_sources_name_makes_faces_auto(cat, repo):
+    grp, bob = cat.person(), cat.person("Bob")
+    c = cat.face(_unit(0), "cluster", grp)
+    repo.merge_persons(grp, [bob])
+    assert cat.row(c)["state"] == "auto"
+
+
+# ── people command ───────────────────────────────────────────────────────────
+def test_people_command_marks_hidden_groups(cat, repo, drive, capsys):
+    shown, hid = cat.person("Alice"), cat.person(hidden=True)
+    cat.face(_unit(0), "auto", shown)
+    cat.face(_unit(1), "ignored", hid)
+    repo.recompute_person(shown)
+    repo.recompute_person(hid)
+    _HANDLERS["people"](build_parser().parse_args(["people", str(drive)]))
+    lines = capsys.readouterr().out.splitlines()
+    (alice,) = [ln for ln in lines if f"[{shown:>4}]" in ln]
+    (hidden,) = [ln for ln in lines if f"[{hid:>4}]" in ln]
+    assert "(hidden)" in hidden and "(hidden)" not in alice
+
+
+def test_people_command_points_to_find_faces(repo, drive, monkeypatch):
+    import smart_gallery.cli as cli
+
+    said = []
+    monkeypatch.setattr(cli.logger, "info", lambda msg, *a, **k: said.append(msg))
+    _HANDLERS["people"](build_parser().parse_args(["people", str(drive)]))
+    assert any("find-faces" in m for m in said)
+    assert not any("cluster-faces" in m for m in said)

@@ -2,7 +2,8 @@
 
 The desktop app writes a JSON list of corrections; the CLI can also take a
 single correction on the command line. Everything is validated before anything
-is written, and all entries are applied in one transaction.
+is written, and all entries are applied in one transaction. In list mode an
+entry for a person deleted since the list was written is skipped.
 """
 
 from __future__ import annotations
@@ -11,6 +12,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional, Sequence, get_args
+
+from loguru import logger
 
 from smart_gallery.db import GalleryRepository
 
@@ -32,6 +35,7 @@ class LabelReport:
     faces_changed: int = 0
     people_created: int = 0
     missing_faces: int = 0
+    missing_people: int = 0  # list mode: people gone, their entries skipped
 
 
 def _is_int(value) -> bool:
@@ -89,10 +93,19 @@ def read_label_list(path: Path) -> list[LabelEntry]:
     return entries
 
 
-def label_faces(repo: GalleryRepository, entries: Sequence[LabelEntry]) -> LabelReport:
+def label_faces(
+    repo: GalleryRepository,
+    entries: Sequence[LabelEntry],
+    *,
+    skip_missing: bool = False,
+) -> LabelReport:
+    """Apply corrections. An entry naming a person that no longer exists is an
+    error, or, with ``skip_missing`` (a ``--list`` written by the app, which a
+    person deleted meanwhile can outdate), is left out and counted."""
     for e in entries:
         _check_entry(e)
     wanted = {e.person_id for e in entries if e.person_id is not None}
+    missing: set = set()
     if wanted:
         ph = ", ".join("?" for _ in wanted)
         found = {
@@ -101,10 +114,20 @@ def label_faces(repo: GalleryRepository, entries: Sequence[LabelEntry]) -> Label
                 f"SELECT id FROM persons WHERE id IN ({ph})", tuple(wanted)
             )
         }
-        if wanted - found:
-            missing = ", ".join(str(p) for p in sorted(wanted - found))
-            raise ValueError(f"No such person id: {missing}.")
+        missing = wanted - found
+    if missing:
+        listed = ", ".join(str(p) for p in sorted(missing))
+        if not skip_missing:
+            raise ValueError(f"No such person id: {listed}.")
+        skipped = [e for e in entries if e.person_id in missing]
+        logger.warning(
+            f"Skipped {len(skipped)} correction(s) for people that no longer "
+            f"exist (id {listed})."
+        )
+        entries = [e for e in entries if e.person_id not in missing]
     for e in entries:
         if e.action == "new_person":
             repo.person_named(e.name)  # raises if the name is ambiguous
-    return repo.apply_labels(entries)
+    report = repo.apply_labels(entries)
+    report.missing_people = len(missing)
+    return report

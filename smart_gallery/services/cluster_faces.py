@@ -163,10 +163,11 @@ def split_person(
     """Re-cluster the faces of ONE (impure) person with tighter settings.
 
     Only faces the user did not file are re-clustered. The sub-group closest
-    to the person's ``user`` faces (or the largest, without any) stays; each
-    other sub-group becomes a new unnamed group and the faces that no longer
-    group return to the pool. Every face moved out is marked as not this
-    person. The person itself is never deleted.
+    to the person's ``user`` faces (or the largest, without any) stays, and
+    so does every face that fits no sub-group; each other sub-group becomes a
+    new unnamed group whose faces are marked as not this person. When the
+    faces form no separate sub-groups nothing changes. The person itself is
+    never deleted.
 
     Defaults are deliberately stricter than a full run (smaller eps / cluster
     size) since the point is to break an over-merged cluster apart.
@@ -206,17 +207,21 @@ def split_person(
             keep = max(label_set, key=lambda lb: int((labels == lb).sum()))
 
     groups = [work_ids[labels == lb].tolist() for lb in label_set if lb != keep]
-    noise = work_ids[labels == -1].tolist()
-    created = repo.apply_split(person_id, groups, noise)
+    if not groups:
+        logger.warning(
+            f"Could not split person {person_id}: its faces do not form "
+            "separate groups. Nothing changed."
+        )
+        return ClusterReport()
+    created = repo.apply_split(person_id, groups)
 
     report = ClusterReport(
         persons_created=len(created),
-        faces_assigned=int((labels >= 0).sum()),
-        noise=len(noise),
+        faces_assigned=sum(len(g) for g in groups),
     )
     logger.success(
-        f"Split person {person_id}: kept one sub-group, "
-        f"{report.persons_created} new group(s), {report.noise:,} face(s) "
-        f"now ungrouped. Review with `smart-gallery people`."
+        f"Split person {person_id}: {report.faces_assigned:,} face(s) moved to "
+        f"{report.persons_created} new group(s); the rest stay. Review with "
+        "`smart-gallery people`."
     )
     return report

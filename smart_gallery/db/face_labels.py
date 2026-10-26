@@ -332,12 +332,10 @@ class FaceLabelsMixin:
             [r["state"] for r in rows],
         )
 
-    def apply_split(
-        self, person_id: int, new_groups: list[list[int]], noise: list[int]
-    ) -> list[int]:
+    def apply_split(self, person_id: int, new_groups: list[list[int]]) -> list[int]:
         """Move faces out of ``person_id`` in one transaction: each group into
-        a new unnamed group (``cluster``), ``noise`` back to the pool. Every
-        moved face is marked as not ``person_id``. Returns the new group ids."""
+        a new unnamed group (``cluster``), every moved face marked as not
+        ``person_id``. Returns the new group ids."""
         run = self.conn.execute
         created: list[int] = []
         try:
@@ -350,14 +348,8 @@ class FaceLabelsMixin:
                     [(pid, int(f)) for f in members],
                 )
             self.conn.executemany(
-                "UPDATE faces SET state='new', person_id=NULL, cluster_id=NULL, "
-                "suggested_person_id=NULL, match_score=NULL WHERE id=?",
-                [(int(f),) for f in noise],
-            )
-            moved = [int(f) for g in new_groups for f in g] + [int(f) for f in noise]
-            self.conn.executemany(
                 "INSERT OR IGNORE INTO face_rejections VALUES (?, ?)",
-                [(f, person_id) for f in moved],
+                [(int(f), person_id) for g in new_groups for f in g],
             )
             self.conn.commit()
         except Exception:

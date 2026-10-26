@@ -453,7 +453,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan.add_argument(
         "--rescan",
         action="store_true",
-        help="Scan every image again; your decisions and named people are kept.",
+        help=(
+            "Scan every image again; your decisions and named people's faces "
+            "carry over, unnamed groups are rebuilt by file-faces."
+        ),
     )
     p_scan.add_argument(
         "--limit", type=int, default=None, help="Scan at most N images (testing)."
@@ -894,11 +897,12 @@ def _label_entries(args) -> list[LabelEntry]:
 def _handle_label_faces(args):
     entries = _label_entries(args)
     with GalleryRepository.open(args.drive) as repo:
-        report = label_faces(repo, entries)
+        report = label_faces(repo, entries, skip_missing=args.list is not None)
     logger.success(
         f"Updated {report.faces_changed:,} face(s); "
         f"{report.people_created} new person(s); "
-        f"{report.missing_faces} face id(s) no longer exist."
+        f"{report.missing_faces} face id(s) and {report.missing_people} "
+        "person id(s) no longer exist."
     )
 
 
@@ -950,10 +954,12 @@ def _handle_people(args):
         samples = repo.person_samples(limit=args.samples)
         drive_root = repo.drive_root
     if not people:
-        logger.info("No people yet. Run `scan-faces` then `cluster-faces`.")
+        logger.info("No people yet. Run `find-faces` to find and sort faces.")
         return
     for p in people:
         name = p["name"] or "(unnamed)"
+        if p["hidden"]:
+            name += " (hidden)"
         print(f"[{p['id']:>4}]  {name:<24}  {p['face_count']:>6} faces")
         links = []
         for rel in samples.get(p["id"], []):
@@ -1045,10 +1051,11 @@ def _handle_split_person(args):
         except ValueError as exc:
             logger.error(str(exc))
             sys.exit(1)
-    logger.success(
-        f"Split off {report.persons_created} new group(s); "
-        f"{report.noise:,} faces now ungrouped. Review with `people`."
-    )
+    if report.persons_created:
+        logger.success(
+            f"Split off {report.persons_created} new group(s) "
+            f"({report.faces_assigned:,} faces). Review with `people`."
+        )
 
 
 def _handle_delete_person(args):
@@ -1058,7 +1065,7 @@ def _handle_delete_person(args):
             sys.exit(1)
     logger.success(
         f"Deleted person {args.person_id}; its faces are now unassigned "
-        f"(re-group them with `cluster-faces`)."
+        f"(sort them again with `file-faces`)."
     )
 
 

@@ -88,9 +88,11 @@ uv run smart-gallery label-faces E:/ --faces 88 --ignore
 uv run smart-gallery label-faces E:/ --list corrections.json     # as the app writes it
 ```
 
-Give exactly one action with `--faces`. Corrections are applied, then the
-sorting step runs again for the people they touch (no rescan), so the
-suggestions improve. Whole-person fixes: `merge-persons E:/ 1 7 9` merges 7 and
+Give exactly one action with `--faces`; an unknown person id is an error. With
+`--list`, an entry for a person deleted since the list was written is skipped
+and counted. `label-faces` only records the corrections; run
+`file-faces E:/ --no-group` afterwards (the app does this after each batch) to
+sort the remaining faces again without a rescan, so the suggestions improve. Whole-person fixes: `merge-persons E:/ 1 7 9` merges 7 and
 9 into 1; `delete-person E:/ 12` returns its faces to the pool;
 `split-person E:/ 12` splits a mixed person (see section 4).
 
@@ -157,17 +159,26 @@ rejected faces than to their examples is not matched to them either.
 
 **Assignments are sticky.** A later run never demotes an `auto` face to a
 suggestion, group or hidden, and moves it only if another named person beats
-its current one by the margin and passes the auto threshold. So a group you
+its current one by the margin and passes the auto threshold. The exception is
+your own "not this person": a face rejected from its person (for example
+after a merge brought it back) is sorted again without that person. A face
+that was hidden (too small or weak, or a one-off that fits no group) stays
+hidden, so it remains under *Show hidden faces*; `cluster-faces --rebuild`
+sorts hidden faces again. Naming a group, or merging it into a named person,
+turns its group faces into that person's `auto` faces. So a group you
 named can grow but never shrinks on its own. Existing groups keep their id and
 only you merge or split them. `split-person` keeps the person and the
 sub-group closest to your confirmed faces; the other sub-groups become new
 unnamed groups, and moved faces get a rejection against the original person.
+Faces that fit no sub-group stay with the person; if the faces form no
+separate sub-groups, nothing changes.
 
 **Corrections survive rescans.** When a photo changes (`sync` sees a new size
 or mtime) or the face model is bumped, its faces are rescanned, but your `user`
-and `ignored` decisions and rejections are carried over: each old face is
-matched to the new detection by box overlap (IoU of at least 0.5) and the
-decision is copied. Old faces with no match are dropped and counted in the job
+and `ignored` decisions and rejections are carried over, and so are the faces
+of named people (they come back as `auto`): each old face is matched to the
+new detection by box overlap (IoU of at least 0.5) and the decision is
+copied, your own decisions first. Old faces with no match are dropped and counted in the job
 report. A photo that fails to decode keeps its faces and any pending decisions.
 
 **Thresholds** (`FilingConfig` in `smart_gallery/analysis/filing.py`):
@@ -225,8 +236,9 @@ uv run smart-gallery split-person E:/ 12
 uv run smart-gallery split-person E:/ 12 --eps 0.25 --min-cluster-size 4
 ```
 It re-clusters only person 12's faces that you have not confirmed. The person
-keeps the sub-group closest to the faces you confirmed (or the largest);
-the others become new unnamed groups. Name the good ones.
+keeps the sub-group closest to the faces you confirmed (or the largest) and
+the faces that fit no sub-group; the others become new unnamed groups. Name
+the good ones.
 
 **C. Delete the junk group:**
 ```bash
@@ -246,8 +258,9 @@ Named people and your own decisions stay.
 SG_FACES_MIN_SCORE=0.6 uv run smart-gallery scan-faces E:/ --rescan
 uv run smart-gallery file-faces E:/
 ```
-`--rescan` scans every image again. Your decisions are carried over to the new
-faces, and named and hidden people stay; unnamed groups are rebuilt.
+`--rescan` scans every image again. Your decisions and the faces of named
+people are carried over to the new faces (by box overlap), and named and hidden
+people stay; unnamed groups are deleted and rebuilt by `file-faces`.
 
 ## 5. Tuning (environment variables)
 

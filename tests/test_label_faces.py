@@ -184,20 +184,36 @@ def test_missing_face_ids_are_counted_not_fatal(cat, repo):
     assert cat.row(f)["person_id"] == alice
 
 
-def test_all_entries_apply_atomically(cat, repo):
-    alice = cat.person("Alice")
-    f, g = cat.face(_unit(0)), cat.face(_unit(1))
+def test_single_action_with_unknown_person_fails_and_writes_nothing(cat, repo, drive):
+    f = cat.face(_unit(0))
     before = cat.snapshot()
+    args = build_parser().parse_args(
+        ["label-faces", str(drive), "--faces", str(f), "--confirm", "424242"]
+    )
     with pytest.raises(ValueError):
-        label_faces(
-            repo,
-            [
-                LabelEntry("confirm", (f,), person_id=alice),
-                LabelEntry("confirm", (g,), person_id=424242),
-            ],
-        )
+        _HANDLERS["label-faces"](args)
     assert cat.snapshot() == before
     assert _rejections(repo) == set()
+
+
+def test_list_skips_entries_whose_person_is_gone(cat, repo, drive, tmp_path):
+    alice = cat.person("Alice")
+    f, g = cat.face(_unit(0)), cat.face(_unit(1))
+    path = tmp_path / "labels.json"
+    write_label_list(
+        path,
+        [
+            LabelEntry("confirm", (f,), person_id=alice),
+            LabelEntry("confirm", (g,), person_id=424242),
+        ],
+    )
+    report = label_faces(repo, read_label_list(path), skip_missing=True)
+    assert report.missing_people == 1
+    assert (cat.row(f)["state"], cat.row(f)["person_id"]) == ("user", alice)
+    assert (cat.row(g)["state"], cat.row(g)["person_id"]) == ("new", None)
+
+    args = build_parser().parse_args(["label-faces", str(drive), "--list", str(path)])
+    _HANDLERS["label-faces"](args)  # the CLI's list mode skips too
 
 
 def test_rejected_face_not_resuggested_after_file_faces(cat, repo):

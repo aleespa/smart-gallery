@@ -435,9 +435,10 @@ class GalleryRepository(FaceLabelsMixin):
         return len(ids)
 
     def reset_all_faces(self) -> None:
-        """Start a full ``--rescan``: stash the user's decisions, delete every
-        face and scan state, and the unnamed groups that are not hidden. Named
-        and hidden persons stay, so the decisions carry over to the new faces."""
+        """Start a full ``--rescan``: stash the user's decisions and the faces
+        of named people (see ``stash_decisions``), delete every face and scan
+        state, and the unnamed groups that are not hidden. Named and hidden
+        persons stay, so the stash carries over to the new faces."""
         run = self.conn.execute
         try:
             media = [r[0] for r in run("SELECT DISTINCT media_id FROM faces")]
@@ -743,10 +744,13 @@ class GalleryRepository(FaceLabelsMixin):
         self.conn.commit()
 
     def list_persons(self) -> List[dict]:
-        """Persons with a cover-photo relpath, biggest first."""
+        """Persons with a cover-photo relpath, biggest first. ``hidden`` is 0
+        on catalogs older than schema v5 (read-only opens never migrate)."""
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(persons)")}
+        hidden = "p.hidden" if "hidden" in cols else "0"
         cur = self.conn.execute(
-            "SELECT p.id, p.name, p.face_count, p.cover_face_id, "
-            "m.relpath AS cover_relpath "
+            f"SELECT p.id, p.name, {hidden} AS hidden, p.face_count, "
+            "p.cover_face_id, m.relpath AS cover_relpath "
             "FROM persons p "
             "LEFT JOIN faces f ON f.id = p.cover_face_id "
             "LEFT JOIN media_items m ON m.id = f.media_id "
@@ -787,12 +791,25 @@ class GalleryRepository(FaceLabelsMixin):
         ).fetchone()
         return dict(row) if row else None
 
+    _GROUP_FACES_TO_AUTO = (
+        "UPDATE faces SET state='auto' WHERE person_id=? AND state='cluster' "
+        "AND EXISTS (SELECT 1 FROM persons p WHERE p.id=faces.person_id "
+        "AND p.name IS NOT NULL AND p.name <> '')"
+    )
+
     def set_person_name(self, person_id: int, name: Optional[str]) -> bool:
-        cur = self.conn.execute(
-            "UPDATE persons SET name=?, updated_at=datetime('now') WHERE id=?",
-            (name, person_id),
-        )
-        self.conn.commit()
+        """Name a person (or clear the name). A group that gains a name turns
+        its ``cluster`` faces into that person's ``auto`` faces."""
+        try:
+            cur = self.conn.execute(
+                "UPDATE persons SET name=?, updated_at=datetime('now') WHERE id=?",
+                (name, person_id),
+            )
+            self.conn.execute(self._GROUP_FACES_TO_AUTO, (person_id,))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
         return cur.rowcount > 0
 
     def delete_person(self, person_id: int) -> bool:
@@ -835,7 +852,7 @@ class GalleryRepository(FaceLabelsMixin):
 
         A face the user filed in a merged person wins over an old rejection of
         it by ``dst_id``. An unnamed destination takes the name of its only
-        named source.
+        named source. A named destination's ``cluster`` faces become ``auto``.
         """
         srcs = [int(s) for s in src_ids if int(s) != dst_id]
         if not srcs:
@@ -874,6 +891,7 @@ class GalleryRepository(FaceLabelsMixin):
                     "WHERE id=? AND (name IS NULL OR name='')",
                     (names[0], dst_id),
                 )
+            run(self._GROUP_FACES_TO_AUTO, (dst_id,))
             self.conn.commit()
         except Exception:
             self.conn.rollback()

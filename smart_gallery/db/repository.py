@@ -600,15 +600,26 @@ class GalleryRepository:
 
     def recompute_person(self, person_id: int) -> None:
         """Refresh a person's centroid (L2-normalized mean), face_count and
-        cover (highest det_score). Deletes the person if it has no faces left."""
+        cover (highest det_score). An empty person is deleted unless it is named or hidden.
+        """
         import numpy as np
 
         rows = self.conn.execute(
-            "SELECT id, embedding, det_score FROM faces WHERE person_id=?",
+            "SELECT id, embedding, det_score, state FROM faces WHERE person_id=?",
             (person_id,),
         ).fetchall()
         if not rows:
-            self.conn.execute("DELETE FROM persons WHERE id=?", (person_id,))
+            # A named or hidden person is a decision the user made; keep it.
+            self.conn.execute(
+                "DELETE FROM persons WHERE id=? AND "
+                "(name IS NULL OR name='') AND hidden=0",
+                (person_id,),
+            )
+            self.conn.execute(
+                "UPDATE persons SET centroid=NULL, face_count=0, "
+                "cover_face_id=NULL, updated_at=datetime('now') WHERE id=?",
+                (person_id,),
+            )
             self.conn.commit()
             return
         embs = np.stack([np.frombuffer(r["embedding"], dtype=np.float32) for r in rows])
@@ -616,7 +627,8 @@ class GalleryRepository:
         norm = float(np.linalg.norm(centroid))
         if norm > 0:
             centroid = centroid / norm
-        cover = max(rows, key=lambda r: (r["det_score"] or 0.0))
+        filed = [r for r in rows if r["state"] in ("user", "auto", "cluster")]
+        cover = max(filed or rows, key=lambda r: (r["det_score"] or 0.0))
         self.conn.execute(
             "UPDATE persons SET centroid=?, face_count=?, cover_face_id=?, "
             "updated_at=datetime('now') WHERE id=?",
@@ -685,7 +697,8 @@ class GalleryRepository:
     def delete_person(self, person_id: int) -> bool:
         """Drop a person and unassign its faces (they become re-clusterable)."""
         self.conn.execute(
-            "UPDATE faces SET person_id=NULL, cluster_id=NULL WHERE person_id=?",
+            "UPDATE faces SET person_id=NULL, cluster_id=NULL, state='new', "
+            "suggested_person_id=NULL WHERE person_id=?",
             (person_id,),
         )
         cur = self.conn.execute("DELETE FROM persons WHERE id=?", (person_id,))

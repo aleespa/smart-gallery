@@ -317,7 +317,15 @@ FACE_COLUMNS = (
     "embedding",
     "person_id",
     "cluster_id",
+    "state",
+    "suggested_person_id",
+    "match_score",
 )
+
+# How a face relates to a person. "new" = not filed yet (fresh scan or returned
+# to the pool). The filing step never touches USER_STATES.
+FACE_STATES = ("new", "auto", "user", "suggested", "cluster", "hidden", "ignored")
+USER_STATES = frozenset({"user", "ignored"})
 
 PERSON_COLUMNS = (
     "name",
@@ -326,6 +334,7 @@ PERSON_COLUMNS = (
     "reference_centroid",
     "face_count",
     "cover_face_id",
+    "hidden",
 )
 
 
@@ -359,6 +368,9 @@ class Face:
     embedding: "np.ndarray"  # float32, length FACE_EMBEDDING_DIM, L2-normalized
     person_id: Optional[int] = None
     cluster_id: Optional[int] = None
+    state: str = "new"
+    suggested_person_id: Optional[int] = None
+    match_score: Optional[float] = None
     id: Optional[int] = None  # DB-assigned on read-back
 
     @staticmethod
@@ -374,9 +386,7 @@ class Face:
         return tuple(values)
 
     @classmethod
-    def from_detection(
-        cls, media_id: int, bbox, det_score, embedding
-    ) -> "Face":
+    def from_detection(cls, media_id: int, bbox, det_score, embedding) -> "Face":
         """Build from an InsightFace detection: bbox is (x1, y1, x2, y2)."""
         x1, y1, x2, y2 = (float(v) for v in bbox)
         return cls(
@@ -402,6 +412,9 @@ class Face:
             embedding=blob_to_embedding(row["embedding"]),
             person_id=row["person_id"],
             cluster_id=row["cluster_id"],
+            state=row["state"],
+            suggested_person_id=row["suggested_person_id"],
+            match_score=row["match_score"],
         )
 
 
@@ -417,6 +430,7 @@ class Person:
     reference_centroid: Optional["np.ndarray"] = None
     face_count: int = 0
     cover_face_id: Optional[int] = None
+    hidden: bool = False  # stored as 0/1
     id: Optional[int] = None  # DB-assigned
 
     @staticmethod
@@ -429,9 +443,12 @@ class Person:
             self.name,
             self.cluster_id,
             None if self.centroid is None else embedding_to_blob(self.centroid),
-            None
-            if self.reference_centroid is None
-            else embedding_to_blob(self.reference_centroid),
+            (
+                None
+                if self.reference_centroid is None
+                else embedding_to_blob(self.reference_centroid)
+            ),
             self.face_count,
             self.cover_face_id,
+            1 if self.hidden else 0,
         )

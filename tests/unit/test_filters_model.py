@@ -182,6 +182,8 @@ def _unit():
 
 def test_filter_choices_on_old_catalog_without_face_tables(repo, make_item):
     repo.upsert_many([make_item("a.jpg")])
+    repo.conn.execute("DROP TABLE face_rejections")
+    repo.conn.execute("DROP TABLE face_carryover")
     repo.conn.execute("DROP TABLE faces")
     repo.conn.execute("DROP TABLE persons")
     choices = filter_choices(repo)

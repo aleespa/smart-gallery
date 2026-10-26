@@ -113,9 +113,7 @@ def test_scan_results_resumability(repo, make_item):
     assert repo.count_unscanned_images(FACE_DET_VERSION) == 2
 
     face = Face.from_detection(mid_a, (10, 10, 50, 60), 0.9, _unit(0))
-    inserted = repo.add_scan_results(
-        [(mid_a, [face]), (mid_b, [])], FACE_DET_VERSION
-    )
+    inserted = repo.add_scan_results([(mid_a, [face]), (mid_b, [])], FACE_DET_VERSION)
     assert inserted == 1
 
     # Both images now recorded as scanned (b with n_faces=0) -> nothing pending.
@@ -178,10 +176,13 @@ def test_person_samples_top_n_distinct_media(repo, make_item):
     mids = [_add_media(repo, make_item, f"p{i}.jpg") for i in range(4)]
     results = [
         # two faces in the same photo -> that photo counts once, by its best score
-        (mids[0], [
-            Face.from_detection(mids[0], (0, 0, 40, 40), 0.90, _unit(0)),
-            Face.from_detection(mids[0], (0, 0, 40, 40), 0.95, _unit(0)),
-        ]),
+        (
+            mids[0],
+            [
+                Face.from_detection(mids[0], (0, 0, 40, 40), 0.90, _unit(0)),
+                Face.from_detection(mids[0], (0, 0, 40, 40), 0.95, _unit(0)),
+            ],
+        ),
         (mids[1], [Face.from_detection(mids[1], (0, 0, 40, 40), 0.80, _unit(0))]),
         (mids[2], [Face.from_detection(mids[2], (0, 0, 40, 40), 0.70, _unit(0))]),
         (mids[3], [Face.from_detection(mids[3], (0, 0, 40, 40), 0.60, _unit(0))]),
@@ -192,7 +193,11 @@ def test_person_samples_top_n_distinct_media(repo, make_item):
     repo.assign_faces(pid, 0, ids.tolist())
 
     samples = repo.person_samples(limit=3)
-    assert samples[pid] == ["p0.jpg", "p1.jpg", "p2.jpg"]  # distinct, best-first, capped
+    assert samples[pid] == [
+        "p0.jpg",
+        "p1.jpg",
+        "p2.jpg",
+    ]  # distinct, best-first, capped
 
 
 def test_filter_by_person_id_and_name(repo, make_item):
@@ -337,3 +342,161 @@ def test_migrate_v4_clears_zero_capture_dates(tmp_path):
             ("a.jpg", None, None),
             ("b.jpg", "2026-03-01", "10:00:00"),
         ]
+
+
+# ── schema v5: face states, rejections, carry-over ──────────────────────────
+_V4_FACES = """
+CREATE TABLE faces (
+    id          INTEGER PRIMARY KEY,
+    media_id    INTEGER NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
+    bbox_x      REAL NOT NULL,
+    bbox_y      REAL NOT NULL,
+    bbox_w      REAL NOT NULL,
+    bbox_h      REAL NOT NULL,
+    det_score   REAL,
+    embedding   BLOB NOT NULL,
+    person_id   INTEGER REFERENCES persons(id) ON DELETE SET NULL,
+    cluster_id  INTEGER
+);
+"""
+_V4_PERSONS = """
+CREATE TABLE persons (
+    id            INTEGER PRIMARY KEY,
+    name          TEXT,
+    cluster_id    INTEGER,
+    centroid      BLOB,
+    reference_centroid BLOB,
+    face_count    INTEGER NOT NULL DEFAULT 0,
+    cover_face_id INTEGER,
+    created_at    TEXT DEFAULT (datetime('now')),
+    updated_at    TEXT DEFAULT (datetime('now'))
+);
+"""
+_V4_SCAN_STATE = """
+CREATE TABLE face_scan_state (
+    media_id    INTEGER PRIMARY KEY REFERENCES media_items(id) ON DELETE CASCADE,
+    scanned_at  TEXT DEFAULT (datetime('now')),
+    n_faces     INTEGER NOT NULL DEFAULT 0,
+    det_version TEXT
+);
+"""
+
+
+def test_migrate_v4_to_v5_maps_states(tmp_path):
+    db = tmp_path / "gallery.db"
+    conn = sqlite3.connect(db)
+    conn.execute(CREATE_META)
+    conn.execute(CREATE_MEDIA_ITEMS)
+    conn.execute(_V4_PERSONS)
+    conn.execute(_V4_FACES)
+    conn.execute(_V4_SCAN_STATE)
+    conn.execute("INSERT INTO meta(key, value) VALUES('schema_version', '4')")
+    for i in (1, 2, 3):
+        conn.execute(
+            "INSERT INTO media_items(id, relpath, media_type) VALUES(?, ?, 'image')",
+            (i, f"{i}.jpg"),
+        )
+    conn.execute("INSERT INTO persons(id, name) VALUES(1, 'Alice'), (2, NULL)")
+    blob = embedding_to_blob(_unit(0))
+    for fid, mid, pid in ((1, 1, 1), (2, 2, 2), (3, 3, None)):
+        conn.execute(
+            "INSERT INTO faces(id, media_id, bbox_x, bbox_y, bbox_w, bbox_h,"
+            " embedding, person_id) VALUES(?, ?, 0, 0, 10, 10, ?, ?)",
+            (fid, mid, blob, pid),
+        )
+    conn.commit()
+    conn.close()
+
+    def check():
+        with GalleryRepository.open(db) as repo:
+            states = [
+                r[0] for r in repo.conn.execute("SELECT state FROM faces ORDER BY id")
+            ]
+            assert states == ["auto", "cluster", "new"]
+            hidden = [r[0] for r in repo.conn.execute("SELECT hidden FROM persons")]
+            assert hidden == [0, 0]
+            tables = {
+                r[0]
+                for r in repo.conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            assert {"face_rejections", "face_carryover"} <= tables
+            assert (
+                repo.conn.execute(
+                    "SELECT value FROM meta WHERE key='schema_version'"
+                ).fetchone()[0]
+                == "5"
+            )
+            scan_cols = {
+                r[1] for r in repo.conn.execute("PRAGMA table_info(face_scan_state)")
+            }
+            assert {"img_w", "img_h"} <= scan_cols
+
+    check()
+    check()  # idempotent
+
+
+def _face_on(repo, mid, person_id=None, state="new"):
+    repo.add_scan_results(
+        [(mid, [Face.from_detection(mid, (0, 0, 40, 40), 0.9, _unit(0))])],
+        FACE_DET_VERSION,
+    )
+    fid = repo.conn.execute("SELECT MAX(id) FROM faces").fetchone()[0]
+    repo.conn.execute(
+        "UPDATE faces SET person_id=?, state=? WHERE id=?", (person_id, state, fid)
+    )
+    repo.conn.commit()
+    return fid
+
+
+def test_recompute_keeps_empty_named_person(repo, make_item):
+    mid = _add_media(repo, make_item, "a.jpg")
+    pid = repo.create_person(Person(name="Alice"))
+    fid = _face_on(repo, mid, pid, "user")
+    repo.recompute_person(pid)
+    repo.conn.execute("UPDATE faces SET person_id=NULL WHERE id=?", (fid,))
+    repo.conn.commit()
+    repo.recompute_person(pid)
+    person = repo.get_person(pid)
+    assert person is not None
+    assert person["face_count"] == 0
+    assert person["cover_face_id"] is None
+    assert (
+        repo.conn.execute("SELECT centroid FROM persons WHERE id=?", (pid,)).fetchone()[
+            0
+        ]
+        is None
+    )
+
+
+def test_recompute_drops_empty_unnamed_group(repo, make_item):
+    mid = _add_media(repo, make_item, "a.jpg")
+    pid = repo.create_person(Person(cluster_id=0))
+    fid = _face_on(repo, mid, pid, "cluster")
+    repo.conn.execute("UPDATE faces SET person_id=NULL WHERE id=?", (fid,))
+    repo.conn.commit()
+    repo.recompute_person(pid)
+    assert repo.get_person(pid) is None
+
+
+def test_delete_person_returns_faces_to_pool(repo, make_item):
+    mid = _add_media(repo, make_item, "a.jpg")
+    pid = repo.create_person(Person(name="Alice"))
+    other = repo.create_person(Person(name="Bob"))
+    f_user = _face_on(repo, mid, pid, "user")
+    f_auto = _face_on(repo, mid, pid, "auto")
+    f_other = _face_on(repo, mid, None, "new")
+    repo.conn.execute(
+        "INSERT INTO face_rejections(face_id, person_id) VALUES(?, ?)",
+        (f_other, pid),
+    )
+    repo.conn.commit()
+
+    assert repo.delete_person(pid) is True
+    rows = repo.conn.execute(
+        "SELECT state, person_id FROM faces WHERE id IN (?, ?)", (f_user, f_auto)
+    ).fetchall()
+    assert [tuple(r) for r in rows] == [("new", None), ("new", None)]
+    assert repo.conn.execute("SELECT COUNT(*) FROM face_rejections").fetchone()[0] == 0
+    assert repo.get_person(other) is not None

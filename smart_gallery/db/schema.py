@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS persons (
     reference_centroid BLOB,
     face_count    INTEGER NOT NULL DEFAULT 0,
     cover_face_id INTEGER,
+    hidden        INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT DEFAULT (datetime('now')),
     updated_at    TEXT DEFAULT (datetime('now'))
 );
@@ -80,7 +81,10 @@ CREATE TABLE IF NOT EXISTS faces (
     det_score   REAL,
     embedding   BLOB NOT NULL,
     person_id   INTEGER REFERENCES persons(id) ON DELETE SET NULL,
-    cluster_id  INTEGER
+    cluster_id  INTEGER,
+    state       TEXT NOT NULL DEFAULT 'new',
+    suggested_person_id INTEGER REFERENCES persons(id) ON DELETE SET NULL,
+    match_score REAL
 );
 """
 
@@ -89,7 +93,36 @@ CREATE TABLE IF NOT EXISTS face_scan_state (
     media_id    INTEGER PRIMARY KEY REFERENCES media_items(id) ON DELETE CASCADE,
     scanned_at  TEXT DEFAULT (datetime('now')),
     n_faces     INTEGER NOT NULL DEFAULT 0,
-    det_version TEXT
+    det_version TEXT,
+    img_w       INTEGER,
+    img_h       INTEGER
+);
+"""
+
+# ── face decisions (schema v5) ───────────────────────────────────────────────
+CREATE_FACE_REJECTIONS = """
+CREATE TABLE IF NOT EXISTS face_rejections (
+    face_id   INTEGER NOT NULL REFERENCES faces(id) ON DELETE CASCADE,
+    person_id INTEGER NOT NULL REFERENCES persons(id) ON DELETE CASCADE,
+    PRIMARY KEY (face_id, person_id)
+);
+"""
+
+# Decisions saved across a re-scan so they can be re-applied to the new faces.
+# ``rejected`` is a comma-separated list of person ids.
+CREATE_FACE_CARRYOVER = """
+CREATE TABLE IF NOT EXISTS face_carryover (
+    id        INTEGER PRIMARY KEY,
+    media_id  INTEGER NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
+    bbox_x    REAL NOT NULL,
+    bbox_y    REAL NOT NULL,
+    bbox_w    REAL NOT NULL,
+    bbox_h    REAL NOT NULL,
+    img_w     INTEGER,
+    img_h     INTEGER,
+    state     TEXT,
+    person_id INTEGER REFERENCES persons(id) ON DELETE SET NULL,
+    rejected  TEXT
 );
 """
 
@@ -104,6 +137,8 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_faces_media ON faces(media_id);",
     "CREATE INDEX IF NOT EXISTS ix_faces_person ON faces(person_id);",
     "CREATE INDEX IF NOT EXISTS ix_faces_cluster ON faces(cluster_id);",
+    "CREATE INDEX IF NOT EXISTS ix_faces_state ON faces(state);",
+    "CREATE INDEX IF NOT EXISTS ix_carryover_media ON face_carryover(media_id);",
 ]
 
 
@@ -114,6 +149,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute(CREATE_PERSONS)
     conn.execute(CREATE_FACES)
     conn.execute(CREATE_FACE_SCAN_STATE)
+    conn.execute(CREATE_FACE_REJECTIONS)
+    conn.execute(CREATE_FACE_CARRYOVER)
     for stmt in CREATE_INDEXES:
         conn.execute(stmt)
     conn.execute(
@@ -140,13 +177,13 @@ def migrate(conn: sqlite3.Connection) -> None:
         conn.execute(CREATE_PERSONS)
         conn.execute(CREATE_FACES)
         conn.execute(CREATE_FACE_SCAN_STATE)
+        # The v5 indexes need v5 columns; the v5 step below creates them.
         for stmt in CREATE_INDEXES:
-            conn.execute(stmt)
+            if "ix_faces_state" not in stmt and "ix_carryover_media" not in stmt:
+                conn.execute(stmt)
 
     if current < 3:
-        columns = {
-            row["name"] for row in conn.execute("PRAGMA table_info(persons)")
-        }
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(persons)")}
         if "reference_centroid" not in columns:
             conn.execute("ALTER TABLE persons ADD COLUMN reference_centroid BLOB")
 
@@ -155,6 +192,41 @@ def migrate(conn: sqlite3.Connection) -> None:
         conn.execute(
             "UPDATE media_items SET date_taken=NULL, time_taken=NULL, taken_ts=NULL "
             "WHERE date_taken < '0001-01-01'"
+        )
+
+    if current < 5:
+        # Catalogs migrated from v1 may not have the face tables yet.
+        conn.execute(CREATE_PERSONS)
+        conn.execute(CREATE_FACES)
+        conn.execute(CREATE_FACE_SCAN_STATE)
+        additions = {
+            "faces": (
+                ("state", "TEXT NOT NULL DEFAULT 'new'"),
+                (
+                    "suggested_person_id",
+                    "INTEGER REFERENCES persons(id) ON DELETE SET NULL",
+                ),
+                ("match_score", "REAL"),
+            ),
+            "persons": (("hidden", "INTEGER NOT NULL DEFAULT 0"),),
+            "face_scan_state": (("img_w", "INTEGER"), ("img_h", "INTEGER")),
+        }
+        for table, cols in additions.items():
+            have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+            for col, decl in cols:
+                if col not in have:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+        conn.execute(CREATE_FACE_REJECTIONS)
+        conn.execute(CREATE_FACE_CARRYOVER)
+        for stmt in CREATE_INDEXES:
+            conn.execute(stmt)
+        conn.execute(
+            "UPDATE faces SET state='auto' WHERE person_id IN "
+            "(SELECT id FROM persons WHERE name IS NOT NULL AND name != '')"
+        )
+        conn.execute(
+            "UPDATE faces SET state='cluster' "
+            "WHERE person_id IS NOT NULL AND state='new'"
         )
 
     conn.execute(

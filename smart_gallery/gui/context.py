@@ -23,10 +23,12 @@ class AppContext(QObject):
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
         # Set by whoever builds the window: GalleryStore (Task 5), JobRunner
-        # (Task 6), ThumbnailLoader (Task 9).
+        # (Task 6), ThumbnailLoader (Task 9),
+        # FaceCropLoader (face crops for the People page).
         self.galleries = None
         self.jobs = None
         self.thumbs = None
+        self.face_crops = None
         self.current = None  # Gallery | None
         self.filters = FilterOptions()
         self._leave_guards: list[Callable[[], bool]] = []

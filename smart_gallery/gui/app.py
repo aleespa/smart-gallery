@@ -36,6 +36,7 @@ from smart_gallery.gui.history.store import HistoryStore
 from smart_gallery.gui.jobs import JobRunner
 from smart_gallery.gui.paths import app_data_dir, exiftool_available
 from smart_gallery.gui.statusbar import JobStatusBar
+from smart_gallery.gui.thumbs.face_crops import FaceCropLoader
 from smart_gallery.gui.thumbs.loader import ThumbnailLoader
 from smart_gallery.gui.titlebar import (
     RESIZE_MARGIN,
@@ -81,6 +82,8 @@ class MainWindow(QMainWindow):
             )
         if self.ctx.thumbs is None:
             self.ctx.thumbs = ThumbnailLoader(self)
+        if self.ctx.face_crops is None:
+            self.ctx.face_crops = FaceCropLoader(self)
         self.ctx.jobs.catalog_written.connect(self.ctx.catalog_updated.emit)
         self._pages: dict[str, QWidget] = {}
         self._controls: dict[str, QWidget] = {}  # area id -> its header controls

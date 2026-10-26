@@ -112,13 +112,19 @@ class FaceLabelsMixin:
         return faces, candidates
 
     def stash_decisions(self, media_ids: Iterable[int]) -> int:
-        """Save what the user decided about the faces of these media (``user``
-        and ``ignored`` faces, and any rejections) into ``face_carryover``, so
-        ``apply_carryover`` can give it back after the faces are re-detected.
-        Does not commit; the caller deletes the faces in the same transaction.
-        Returns rows stashed."""
+        """Save what the faces of these media were filed as into
+        ``face_carryover``, so ``apply_carryover`` can give it back after the
+        faces are re-detected: ``user`` and ``ignored`` faces, ``auto`` and
+        ``cluster`` faces of a named person (saved as ``auto``), and any
+        rejections. Does not commit; the caller deletes the faces in the same
+        transaction. Returns rows stashed."""
         ids = [int(m) for m in media_ids]
         stashed = 0
+        kept = (
+            "(f.state IN ('user', 'ignored') OR (f.state IN ('auto', 'cluster') "
+            "AND f.person_id IN (SELECT id FROM persons "
+            "WHERE name IS NOT NULL AND name <> '')))"
+        )
         for i in range(0, len(ids), _STASH_CHUNK):
             chunk = ids[i : i + _STASH_CHUNK]
             ph = ", ".join("?" for _ in chunk)
@@ -127,12 +133,13 @@ class FaceLabelsMixin:
                 "bbox_h, img_w, img_h, state, person_id, rejected) "
                 "SELECT f.media_id, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h, "
                 "s.img_w, s.img_h, "
-                "CASE WHEN f.state IN ('user', 'ignored') THEN f.state END, "
-                "CASE WHEN f.state IN ('user', 'ignored') THEN f.person_id END, "
+                f"CASE WHEN f.state IN ('user', 'ignored') THEN f.state "
+                f"WHEN {kept} THEN 'auto' END, "
+                f"CASE WHEN {kept} THEN f.person_id END, "
                 "(SELECT group_concat(r.person_id) FROM face_rejections r "
                 " WHERE r.face_id = f.id) "
                 "FROM faces f LEFT JOIN face_scan_state s ON s.media_id = f.media_id "
-                f"WHERE f.media_id IN ({ph}) AND (f.state IN ('user', 'ignored') "
+                f"WHERE f.media_id IN ({ph}) AND ({kept} "
                 "OR EXISTS (SELECT 1 FROM face_rejections r WHERE r.face_id = f.id))",
                 chunk,
             )
@@ -142,8 +149,9 @@ class FaceLabelsMixin:
     def apply_carryover(self, media_id: int) -> tuple[int, int]:
         """Give stashed decisions of this media to its new faces, matching each
         to the face it overlaps most (IoU >= ``CARRYOVER_MIN_IOU``, boxes taken
-        relative to the image size). Every stashed row of the media is removed.
-        Does not commit. Returns ``(carried, dropped)``."""
+        relative to the image size). The user's own decisions are matched
+        before ``auto`` ones. Every stashed row of the media is removed. Does
+        not commit. Returns ``(carried, dropped)``."""
         run = self.conn.execute
         stashed = run(
             "SELECT * FROM face_carryover WHERE media_id=? ORDER BY id", (media_id,)
@@ -162,6 +170,7 @@ class FaceLabelsMixin:
         def box(r) -> tuple:
             return (r["bbox_x"], r["bbox_y"], r["bbox_w"], r["bbox_h"])
 
+        rows = {s["id"]: s for s in stashed}
         pairs = []
         for s in stashed:
             sizes = (s["img_w"], s["img_h"], new_w, new_h)
@@ -173,10 +182,13 @@ class FaceLabelsMixin:
                 if iou >= CARRYOVER_MIN_IOU:
                     pairs.append((iou, s["id"], f["id"]))
 
-        rows = {s["id"]: s for s in stashed}
         matched: dict[int, int] = {}
         taken: set[int] = set()
-        for _, sid, fid in sorted(pairs, key=lambda p: -p[0]):
+
+        def order(pair) -> tuple:
+            return (rows[pair[1]]["state"] == "auto", -pair[0])
+
+        for _, sid, fid in sorted(pairs, key=order):
             if sid not in matched and fid not in taken:
                 matched[sid] = fid
                 taken.add(fid)
@@ -185,7 +197,7 @@ class FaceLabelsMixin:
         for sid, fid in matched.items():
             s = rows[sid]
             state, person_id = s["state"], s["person_id"]
-            if state == "user" and person_id is None:
+            if state in ("user", "auto") and person_id is None:
                 continue  # its person is gone; nothing left to carry
             if state is not None:
                 run(

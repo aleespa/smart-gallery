@@ -204,6 +204,72 @@ def test_version_bump_does_not_duplicate_faces(repo, make_item):
     assert repo.count_unscanned_images("v2") == 0
 
 
+BOXES = [(100 + 250 * i, 100, 200 + 250 * i, 220) for i in range(3)]
+
+
+def _mum_with_three_auto_faces(repo, make_item, version=FACE_DET_VERSION):
+    mid = _media(repo, make_item)
+    mum = repo.create_person(Person(name="Mum"))
+    faces = _scan(repo, mid, BOXES, version=version)
+    for f, state in zip(faces, ("auto", "auto", "cluster")):
+        _set(repo, f.id, state, mum)
+    repo.recompute_person(mum)
+    return mid, mum
+
+
+def _states_of(repo, person_id):
+    return sorted(
+        r[0]
+        for r in repo.conn.execute(
+            "SELECT state FROM faces WHERE person_id=?", (person_id,)
+        )
+    )
+
+
+def test_rescan_gives_a_named_person_its_auto_faces_back(repo, make_item):
+    from smart_gallery.services.file_faces import file_faces
+
+    mid, mum = _mum_with_three_auto_faces(repo, make_item)
+    repo.reset_all_faces()
+    _scan(repo, mid, BOXES)
+    assert repo.last_carryover == (3, 0)
+    file_faces(repo, group=False)
+    assert _states_of(repo, mum) == ["auto", "auto", "auto"]
+    assert repo.get_person(mum)["face_count"] == 3
+
+
+def test_version_bump_gives_a_named_person_its_auto_faces_back(repo, make_item):
+    from smart_gallery.services.file_faces import file_faces
+
+    mid, mum = _mum_with_three_auto_faces(repo, make_item, version="v1")
+    _scan(repo, mid, BOXES, version="v2")
+    file_faces(repo, group=False)
+    assert _states_of(repo, mum) == ["auto", "auto", "auto"]
+    assert repo.get_person(mum)["face_count"] == 3
+
+
+def test_unnamed_group_faces_are_not_stashed(repo, make_item):
+    mid = _media(repo, make_item)
+    group = repo.create_person(Person())
+    (a,) = _scan(repo, mid, [BOX_A])
+    _set(repo, a.id, "cluster", group)
+    repo.reset_all_faces()
+    assert _carryover_rows(repo) == 0
+
+
+def test_user_stash_wins_over_auto_stash(repo, make_item):
+    mid = _media(repo, make_item)
+    alice = repo.create_person(Person(name="Alice"))
+    bob = repo.create_person(Person(name="Bob"))
+    a, b = _scan(repo, mid, [BOX_A, (110, 110, 210, 230)])
+    _set(repo, a.id, "auto", alice)
+    _set(repo, b.id, "user", bob)
+    repo.reset_all_faces()
+    _scan(repo, mid, [BOX_A])  # one new face overlaps both old ones
+    row = _face_at(repo, mid, BOX_A[0])
+    assert (row["state"], row["person_id"]) == ("user", bob)
+
+
 class _FakeScanner:
     provider = "fake"
 

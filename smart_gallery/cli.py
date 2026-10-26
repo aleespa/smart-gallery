@@ -553,12 +553,13 @@ def build_parser() -> argparse.ArgumentParser:
     g_mode.add_argument(
         "--rebuild",
         action="store_true",
-        help="Drop all people and re-cluster from scratch.",
+        help="Return undecided faces to the pool and drop unnamed groups, then "
+        "sort again (named people and your choices stay).",
     )
     g_mode.add_argument(
         "--incremental",
         action="store_true",
-        help="Match new faces to existing people (fast).",
+        help="File new faces into existing people only; make no new groups.",
     )
 
     p_people = sub.add_parser(
@@ -580,6 +581,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_name.add_argument("person_id", type=int, help=PERSON_ID_HELP)
     p_name.add_argument(
         "name", nargs="?", default=None, help="Name to assign; omit to clear."
+    )
+    p_name.add_argument(
+        "--merge",
+        action="store_true",
+        help="If another person already has this name, merge into them.",
+    )
+
+    p_hide = sub.add_parser(
+        "hide-person",
+        help="Hide an unnamed group of strangers, or show it again.",
+    )
+    p_hide.add_argument("drive", type=Path, help=DRIVE_HELP)
+    p_hide.add_argument("person_id", type=int, help=PERSON_ID_HELP)
+    p_hide.add_argument(
+        "--unhide",
+        action="store_true",
+        help="Show the group again instead of hiding it.",
     )
 
     p_merge = sub.add_parser(
@@ -862,15 +880,11 @@ def _handle_cluster_faces(args):
             incremental=args.incremental,
             pca=args.pca,
         )
-    if args.incremental:
-        logger.success(
-            f"Matched {report.faces_assigned:,} faces to {report.persons_matched} people."
-        )
-    else:
-        logger.success(
-            f"{report.persons_created} people from {report.faces_assigned:,} faces "
-            f"({report.noise:,} ungrouped)."
-        )
+    logger.success(
+        f"{report.faces_assigned:,} faces filed: {report.persons_matched} existing "
+        f"people gained faces, {report.persons_created} new group(s), "
+        f"{report.noise:,} hidden."
+    )
 
 
 def _handle_identify_faces(args):
@@ -927,6 +941,29 @@ def _handle_name_person(args):
         if repo.get_person(args.person_id) is None:
             logger.error(f"No person with id {args.person_id}.")
             sys.exit(1)
+        if args.name:
+            others = [
+                r["id"]
+                for r in repo.conn.execute(
+                    "SELECT id FROM persons WHERE name = ? COLLATE NOCASE "
+                    "AND id <> ? ORDER BY id",
+                    (args.name.strip(), args.person_id),
+                )
+            ]
+            if others and not args.merge:
+                raise ValueError(
+                    f"Person {others[0]} is already named {args.name!r}; "
+                    "use --merge to merge into them."
+                )
+            if len(others) > 1:
+                raise ValueError(f"Several people are named {args.name!r}.")
+            if others:
+                repo.merge_persons(others[0], [args.person_id])
+                logger.success(
+                    f"Merged person {args.person_id} into person {others[0]} "
+                    f"('{args.name}')."
+                )
+                return
         repo.set_person_name(args.person_id, args.name)
     if args.name:
         logger.success(f"Person {args.person_id} named '{args.name}'.")
@@ -947,6 +984,18 @@ def _handle_merge_persons(args):
     )
 
 
+def _handle_hide_person(args):
+    with GalleryRepository.open(args.drive) as repo:
+        if repo.get_person(args.person_id) is None:
+            logger.error(f"No person with id {args.person_id}.")
+            sys.exit(1)
+        repo.set_person_hidden(args.person_id, not args.unhide)
+    if args.unhide:
+        logger.success(f"Person {args.person_id} is shown again.")
+    else:
+        logger.success(f"Person {args.person_id} is hidden.")
+
+
 def _handle_split_person(args):
     with GalleryRepository.open(args.drive) as repo:
         try:
@@ -963,7 +1012,7 @@ def _handle_split_person(args):
             logger.error(str(exc))
             sys.exit(1)
     logger.success(
-        f"Split into {report.persons_created} sub-cluster(s); "
+        f"Split off {report.persons_created} new group(s); "
         f"{report.noise:,} faces now ungrouped. Review with `people`."
     )
 
@@ -1014,6 +1063,7 @@ _HANDLERS = {
     "people": _handle_people,
     "name-person": _handle_name_person,
     "merge-persons": _handle_merge_persons,
+    "hide-person": _handle_hide_person,
     "split-person": _handle_split_person,
     "delete-person": _handle_delete_person,
 }

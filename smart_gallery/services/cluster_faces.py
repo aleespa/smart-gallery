@@ -1,24 +1,28 @@
-"""cluster-faces — group face embeddings into people.
+"""cluster-faces and split-person — group face embeddings into people.
 
-Embeddings are L2-normalized, so Euclidean distance is monotonic in cosine
-distance. Default clustering is HDBSCAN (no eps tuning, density-aware); DBSCAN
-with cosine metric is available too. Each resulting cluster becomes a ``persons``
-row (unnamed) with a centroid for later incremental matching.
+``cluster-faces`` now sorts with the People defaults (``file_faces``): faces
+go to named people, suggestions or new unnamed groups, and nothing the user
+decided is touched.
 
 Modes:
-  * default      — cluster faces not yet assigned to a person (first run = all).
-  * --rebuild    — clear all persons and re-cluster everything from scratch.
-  * --incremental— match unassigned faces to existing person centroids (fast;
-                   for new photos added by a later sync + scan-faces).
+  * default      — file every undecided face and group the leftovers.
+  * --rebuild    — first return every undecided face to the pool and drop the
+                   unnamed groups (named and hidden people stay).
+  * --incremental— file faces into existing people only; no new groups.
+
+``split-person`` re-clusters one person's faces with the clustering helpers
+below. Embeddings are L2-normalized, so Euclidean distance is monotonic in
+cosine distance. Default clustering is HDBSCAN; DBSCAN with the cosine metric
+is available too.
 """
 
-from collections import defaultdict
 from dataclasses import dataclass
 
 from loguru import logger
 
+from smart_gallery.analysis.filing import FilingConfig
 from smart_gallery.db import GalleryRepository
-from smart_gallery.models import Person
+from smart_gallery.services.file_faces import file_faces
 
 DEFAULT_EPS = 0.45
 DEFAULT_MIN_SAMPLES = 4
@@ -52,8 +56,9 @@ def _maybe_pca(embs, pca: int):
     return (reduced / norms).astype("float32")
 
 
-def _run_clustering(embs, algo: str, eps: float, min_samples: int,
-                    min_cluster_size: int):
+def _run_clustering(
+    embs, algo: str, eps: float, min_samples: int, min_cluster_size: int
+):
     """Return an integer label per row (>=0 = cluster, -1 = noise)."""
     if algo == "dbscan":
         from sklearn.cluster import DBSCAN
@@ -75,6 +80,13 @@ def _run_clustering(embs, algo: str, eps: float, min_samples: int,
     ).fit_predict(embs)
 
 
+def _face_owners(repo: GalleryRepository) -> dict:
+    return {
+        r["id"]: r["person_id"]
+        for r in repo.conn.execute("SELECT id, person_id FROM faces")
+    }
+
+
 def cluster_faces(
     repo: GalleryRepository,
     *,
@@ -87,38 +99,53 @@ def cluster_faces(
     match_thresh: float = DEFAULT_MATCH_THRESH,
     pca: int = 0,
 ) -> ClusterReport:
-    if incremental:
-        return _incremental(repo, match_thresh)
+    """Sort faces into people with ``file_faces``.
 
+    ``algo``, ``eps``, ``min_samples``, ``min_cluster_size`` and ``pca`` are
+    accepted for old command lines but no longer used; ``match_thresh`` is the
+    filing step's ``auto_thresh``.
+    """
+    if (algo, eps, min_samples, min_cluster_size, pca) != (
+        "hdbscan",
+        DEFAULT_EPS,
+        DEFAULT_MIN_SAMPLES,
+        DEFAULT_MIN_CLUSTER_SIZE,
+        0,
+    ):
+        logger.info(
+            "cluster-faces now sorts with the People defaults; --algo, --eps, "
+            "--min-samples, --min-cluster-size and --pca are ignored here "
+            "(they still apply to split-person)."
+        )
     if rebuild:
-        logger.info("--rebuild: clearing existing persons and re-clustering all faces")
+        logger.info(
+            "--rebuild: returning undecided faces to the pool and dropping "
+            "unnamed groups (named people and your choices stay)"
+        )
         repo.clear_persons()
 
-    face_ids, embs, _ = repo.load_embeddings(only_unassigned=not rebuild)
-    if len(face_ids) == 0:
-        logger.success("No unassigned faces to cluster.")
-        return ClusterReport()
+    existing = {r["id"] for r in repo.conn.execute("SELECT id FROM persons")}
+    before = _face_owners(repo)
+    filed = file_faces(
+        repo, group=not incremental, config=FilingConfig(auto_thresh=match_thresh)
+    )
+    gained = {
+        pid
+        for fid, pid in _face_owners(repo).items()
+        if pid is not None and pid in existing and pid != before.get(fid)
+    }
 
-    embs = _maybe_pca(embs, pca)
-    logger.info(f"Clustering {len(face_ids):,} faces with {algo}…")
-    labels = _run_clustering(embs, algo, eps, min_samples, min_cluster_size)
-
-    import numpy as np
-
-    report = ClusterReport(noise=int((labels == -1).sum()))
-    for label in sorted({int(v) for v in labels if v >= 0}):
-        member_idx = np.where(labels == label)[0]
-        member_fids = face_ids[member_idx].tolist()
-        person_id = repo.create_person(Person(cluster_id=label))
-        repo.assign_faces(person_id, label, member_fids)
-        repo.recompute_person(person_id)
-        report.persons_created += 1
-        report.faces_assigned += len(member_fids)
-
+    report = ClusterReport(
+        persons_created=filed.groups_created,
+        persons_matched=len(gained),
+        faces_assigned=filed.auto + filed.grouped,
+        noise=filed.hidden,
+    )
     logger.success(
-        f"Clustering done — {report.persons_created} people from "
-        f"{report.faces_assigned:,} faces ({report.noise:,} ungrouped). "
-        f"Next: `smart-gallery people` to review, then `name-person`."
+        f"Sorting done — {report.faces_assigned:,} faces filed, "
+        f"{report.persons_created} new group(s), {report.persons_matched} "
+        f"existing people gained faces, {filed.suggested:,} suggested, "
+        f"{report.noise:,} hidden. Next: `smart-gallery people` to review."
     )
     return report
 
@@ -133,9 +160,13 @@ def split_person(
     min_cluster_size: int = 3,
     pca: int = 0,
 ) -> ClusterReport:
-    """Re-cluster the faces of ONE (impure) person with tighter settings,
-    replacing it with the resulting sub-clusters. Faces that no longer group
-    are left unassigned. Other people are untouched.
+    """Re-cluster the faces of ONE (impure) person with tighter settings.
+
+    Only faces the user did not file are re-clustered. The sub-group closest
+    to the person's ``user`` faces (or the largest, without any) stays; each
+    other sub-group becomes a new unnamed group and the faces that no longer
+    group return to the pool. Every face moved out is marked as not this
+    person. The person itself is never deleted.
 
     Defaults are deliberately stricter than a full run (smaller eps / cluster
     size) since the point is to break an over-merged cluster apart.
@@ -143,73 +174,49 @@ def split_person(
     if repo.get_person(person_id) is None:
         raise ValueError(f"No person with id {person_id}.")
 
-    face_ids, embs = repo.load_face_embeddings_for_person(person_id)
-    if len(face_ids) == 0:
-        logger.warning(f"Person {person_id} has no faces.")
+    import numpy as np
+
+    face_ids, embs, states = repo.load_person_faces(person_id)
+    is_user = np.array([s == "user" for s in states], dtype=bool)
+    work_ids, work_embs = face_ids[~is_user], embs[~is_user]
+    if len(work_ids) == 0:
+        logger.warning(f"Person {person_id} has no faces to split.")
         return ClusterReport()
 
     logger.info(
-        f"Splitting person {person_id} ({len(face_ids):,} faces) with {algo} "
+        f"Splitting person {person_id} ({len(work_ids):,} faces) with {algo} "
         f"(eps={eps}, min_cluster_size={min_cluster_size})…"
     )
-    work = _maybe_pca(embs, pca)
-    labels = _run_clustering(work, algo, eps, min_samples, min_cluster_size)
-
-    import numpy as np
-
-    repo.delete_person(person_id)  # unassigns these faces; we re-assign below
-
-    report = ClusterReport(noise=int((labels == -1).sum()))
-    for label in sorted({int(v) for v in labels if v >= 0}):
-        member_fids = face_ids[np.where(labels == label)[0]].tolist()
-        new_id = repo.create_person(Person(cluster_id=label))
-        repo.assign_faces(new_id, label, member_fids)
-        repo.recompute_person(new_id)
-        report.persons_created += 1
-        report.faces_assigned += len(member_fids)
-
-    logger.success(
-        f"Split person {person_id} -> {report.persons_created} sub-cluster(s) "
-        f"from {report.faces_assigned:,} faces ({report.noise:,} now ungrouped). "
-        f"Review with `smart-gallery people`."
+    labels = _run_clustering(
+        _maybe_pca(work_embs, pca), algo, eps, min_samples, min_cluster_size
     )
-    return report
+    label_set = sorted({int(v) for v in labels if v >= 0})
 
+    keep = None
+    if label_set:
+        if is_user.any():
+            anchor = embs[is_user].mean(axis=0)
 
-def _incremental(repo: GalleryRepository, match_thresh: float) -> ClusterReport:
-    import numpy as np
+            def closeness(label: int) -> float:
+                c = work_embs[labels == label].mean(axis=0)
+                return float(c @ anchor / (np.linalg.norm(c) or 1.0))
 
-    face_ids, embs, _ = repo.load_embeddings(only_unassigned=True)
-    if len(face_ids) == 0:
-        logger.success("No unassigned faces — nothing to match.")
-        return ClusterReport()
+            keep = max(label_set, key=closeness)
+        else:
+            keep = max(label_set, key=lambda lb: int((labels == lb).sum()))
 
-    person_ids, centroids = repo.load_person_centroids()
-    if len(person_ids) == 0:
-        logger.warning(
-            "No existing people to match against. Run `cluster-faces` (full) first."
-        )
-        return ClusterReport()
+    groups = [work_ids[labels == lb].tolist() for lb in label_set if lb != keep]
+    noise = work_ids[labels == -1].tolist()
+    created = repo.apply_split(person_id, groups, noise)
 
-    sims = embs @ centroids.T  # both L2-normalized -> cosine similarity
-    best = sims.argmax(axis=1)
-    best_sim = sims[np.arange(len(face_ids)), best]
-
-    groups = defaultdict(list)
-    for i, fid in enumerate(face_ids):
-        if best_sim[i] >= match_thresh:
-            groups[int(person_ids[best[i]])].append(int(fid))
-
-    report = ClusterReport()
-    for pid, fids in groups.items():
-        repo.assign_faces(pid, None, fids)
-        repo.recompute_person(pid)
-        report.persons_matched += 1
-        report.faces_assigned += len(fids)
-
+    report = ClusterReport(
+        persons_created=len(created),
+        faces_assigned=int((labels >= 0).sum()),
+        noise=len(noise),
+    )
     logger.success(
-        f"Incremental match — {report.faces_assigned:,} faces attached to "
-        f"{report.persons_matched} existing people "
-        f"({len(face_ids) - report.faces_assigned:,} left unmatched)."
+        f"Split person {person_id}: kept one sub-group, "
+        f"{report.persons_created} new group(s), {report.noise:,} face(s) "
+        f"now ungrouped. Review with `smart-gallery people`."
     )
     return report

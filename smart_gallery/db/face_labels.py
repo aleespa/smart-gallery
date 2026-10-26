@@ -148,6 +148,93 @@ class FaceLabelsMixin:
             raise ValueError(f"Several people are named {name.strip()!r}.")
         return ids[0] if ids else None
 
+    def set_person_hidden(self, person_id: int, hidden: bool) -> None:
+        """Hide an unnamed group of strangers (its faces become ``ignored``),
+        or show it again (its ignored/hidden faces go back to ``cluster``)."""
+        row = self.conn.execute(
+            "SELECT name FROM persons WHERE id=?", (person_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"No person with id {person_id}.")
+        if row["name"]:
+            raise ValueError(
+                f"Person {person_id} is named {row['name']!r}; only unnamed "
+                "groups can be hidden."
+            )
+        run = self.conn.execute
+        try:
+            run(
+                "UPDATE persons SET hidden=?, updated_at=datetime('now') WHERE id=?",
+                (1 if hidden else 0, person_id),
+            )
+            if hidden:
+                run(
+                    "UPDATE faces SET state='ignored', suggested_person_id=NULL "
+                    "WHERE person_id=?",
+                    (person_id,),
+                )
+            else:
+                run(
+                    "UPDATE faces SET state='cluster' "
+                    "WHERE person_id=? AND state IN ('ignored', 'hidden')",
+                    (person_id,),
+                )
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        self.recompute_person(person_id)
+
+    def load_person_faces(
+        self, person_id: int
+    ) -> "tuple[np.ndarray, np.ndarray, list[str]]":
+        """``(face_ids, embeddings, states)`` of one person's faces, by id."""
+        rows = self.conn.execute(
+            "SELECT id, embedding, state FROM faces WHERE person_id=? ORDER BY id",
+            (person_id,),
+        ).fetchall()
+        ids = np.array([r["id"] for r in rows], dtype=np.int64)
+        return (
+            ids,
+            _stack([_vec(r["embedding"]) for r in rows]),
+            [r["state"] for r in rows],
+        )
+
+    def apply_split(
+        self, person_id: int, new_groups: list[list[int]], noise: list[int]
+    ) -> list[int]:
+        """Move faces out of ``person_id`` in one transaction: each group into
+        a new unnamed group (``cluster``), ``noise`` back to the pool. Every
+        moved face is marked as not ``person_id``. Returns the new group ids."""
+        run = self.conn.execute
+        created: list[int] = []
+        try:
+            for members in new_groups:
+                pid = int(run("INSERT INTO persons (hidden) VALUES (0)").lastrowid)
+                created.append(pid)
+                self.conn.executemany(
+                    "UPDATE faces SET state='cluster', person_id=?, cluster_id=NULL, "
+                    "suggested_person_id=NULL, match_score=NULL WHERE id=?",
+                    [(pid, int(f)) for f in members],
+                )
+            self.conn.executemany(
+                "UPDATE faces SET state='new', person_id=NULL, cluster_id=NULL, "
+                "suggested_person_id=NULL, match_score=NULL WHERE id=?",
+                [(int(f),) for f in noise],
+            )
+            moved = [int(f) for g in new_groups for f in g] + [int(f) for f in noise]
+            self.conn.executemany(
+                "INSERT OR IGNORE INTO face_rejections VALUES (?, ?)",
+                [(f, person_id) for f in moved],
+            )
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        for pid in [person_id, *created]:
+            self.recompute_person(pid)
+        return created
+
     def apply_labels(self, entries: "Sequence[LabelEntry]") -> "LabelReport":
         """Apply validated corrections in one transaction, then refresh every
         person whose faces changed."""

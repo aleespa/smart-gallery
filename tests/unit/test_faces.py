@@ -270,10 +270,11 @@ def test_split_person_breaks_impure_cluster(repo, make_item):
     assert len(repo.list_persons()) == 1
 
     report = split_person(repo, impure, algo="dbscan", eps=0.3, min_samples=2)
-    assert report.persons_created == 2
+    assert report.persons_created == 1  # the person keeps one sub-group
     people = repo.list_persons()
     assert len(people) == 2  # the one impure cluster became two clean ones
     assert sorted(p["face_count"] for p in people) == [6, 6]
+    assert repo.get_person(impure) is not None
 
 
 def test_merge_persons(repo, make_item):

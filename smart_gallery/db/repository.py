@@ -28,6 +28,7 @@ from smart_gallery.models import (
     DB_COLUMNS,
     FACE_COLUMNS,
     PERSON_COLUMNS,
+    USER_STATES,
     MediaItem,
     Person,
 )
@@ -446,9 +447,11 @@ class GalleryRepository(FaceLabelsMixin):
     ) -> dict:
         """Persist sample references and assign confident faces atomically.
 
-        ``references`` maps person names to normalized vectors. With ``reassign``,
-        only existing assignments to these named people are reconsidered; other
-        people's faces remain untouched.
+        ``references`` maps person names to normalized vectors. Faces the user
+        decided (``USER_STATES``) are never touched, and a face is never given
+        to a person it was rejected from. With ``reassign``, only ``auto``
+        faces of these named people are reconsidered; other people's faces
+        remain untouched.
         """
         import numpy as np
 
@@ -483,24 +486,26 @@ class GalleryRepository(FaceLabelsMixin):
                     (np.asarray(embedding, dtype=np.float32).tobytes(), person_id),
                 )
 
-            ids_by_name = {pid: name for name, pid in target_ids.items()}
             target_ids_list = list(target_ids.values())
             if reassign and target_ids_list:
                 placeholders = ",".join("?" for _ in target_ids_list)
                 conn.execute(
-                    f"UPDATE faces SET person_id=NULL, cluster_id=NULL "
-                    f"WHERE person_id IN ({placeholders})",
+                    f"UPDATE faces SET person_id=NULL, cluster_id=NULL, "
+                    f"state='new', suggested_person_id=NULL, match_score=NULL "
+                    f"WHERE state='auto' AND person_id IN ({placeholders})",
                     target_ids_list,
                 )
 
+            rejected: Dict[int, set] = {}
+            for r in conn.execute("SELECT face_id, person_id FROM face_rejections"):
+                rejected.setdefault(r["face_id"], set()).add(r["person_id"])
+
             rows = conn.execute(
-                "SELECT id, embedding, person_id FROM faces ORDER BY id"
+                "SELECT id, embedding, person_id, state FROM faces ORDER BY id"
             ).fetchall()
             eligible = []
             for row in rows:
-                if row["person_id"] is None or (
-                    reassign and row["person_id"] in ids_by_name
-                ):
+                if row["person_id"] is None and row["state"] not in USER_STATES:
                     eligible.append(row)
                 else:
                     already_assigned += 1
@@ -513,6 +518,11 @@ class GalleryRepository(FaceLabelsMixin):
             for row in eligible:
                 embedding = np.frombuffer(row["embedding"], dtype=np.float32)
                 similarities = centroids @ embedding
+                banned = rejected.get(row["id"])
+                if banned:
+                    similarities = np.where(
+                        [pid in banned for pid in person_ids], -np.inf, similarities
+                    )
                 order = np.argsort(similarities)
                 best_index = int(order[-1])
                 best_score = float(similarities[best_index])
@@ -525,8 +535,9 @@ class GalleryRepository(FaceLabelsMixin):
                     ambiguous += 1
                 else:
                     conn.execute(
-                        "UPDATE faces SET person_id=?, cluster_id=NULL WHERE id=?",
-                        (person_ids[best_index], row["id"]),
+                        "UPDATE faces SET person_id=?, cluster_id=NULL, state='auto', "
+                        "suggested_person_id=NULL, match_score=? WHERE id=?",
+                        (person_ids[best_index], best_score, row["id"]),
                     )
                     assigned += 1
 
@@ -575,10 +586,33 @@ class GalleryRepository(FaceLabelsMixin):
         }
 
     def clear_persons(self) -> None:
-        """Unassign every face and drop all persons (for a full --rebuild)."""
-        self.conn.execute("UPDATE faces SET person_id=NULL, cluster_id=NULL")
-        self.conn.execute("DELETE FROM persons")
-        self.conn.commit()
+        """Start sorting over (for ``cluster-faces --rebuild``) without losing
+        what the user decided.
+
+        Named and hidden persons stay, and so does any group still holding a
+        face the user filed. Every ``user``/``ignored`` face keeps its place;
+        all other faces return to the pool and the other unnamed groups are
+        deleted. Rejections are left alone (those of a deleted group go with
+        it through the foreign key).
+        """
+        run = self.conn.execute
+        try:
+            run(
+                "UPDATE faces SET state='new', person_id=NULL, cluster_id=NULL, "
+                "suggested_person_id=NULL, match_score=NULL "
+                "WHERE state NOT IN ('user', 'ignored')"
+            )
+            run(
+                "DELETE FROM persons WHERE (name IS NULL OR name='') AND hidden=0 "
+                "AND id NOT IN "
+                "(SELECT person_id FROM faces WHERE person_id IS NOT NULL)"
+            )
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        for r in run("SELECT id FROM persons").fetchall():
+            self.recompute_person(r["id"])
 
     def create_person(self, person: Person) -> int:
         cur = self.conn.execute(_PERSON_INSERT_SQL, person.as_params())
@@ -729,17 +763,53 @@ class GalleryRepository(FaceLabelsMixin):
         return ids, embs
 
     def merge_persons(self, dst_id: int, src_ids: Iterable[int]) -> None:
-        """Re-point all faces of ``src_ids`` onto ``dst_id``, delete the emptied
-        source persons, and recompute the destination's stats."""
+        """Re-point all faces, suggestions and rejections of ``src_ids`` onto
+        ``dst_id``, delete the emptied source persons, and recompute the
+        destination's stats.
+
+        A face the user filed in a merged person wins over an old rejection of
+        it by ``dst_id``. An unnamed destination takes the name of its only
+        named source.
+        """
         srcs = [int(s) for s in src_ids if int(s) != dst_id]
         if not srcs:
             return
-        cur = self.conn.cursor()
         ph = ", ".join("?" for _ in srcs)
-        cur.execute(
-            f"UPDATE faces SET person_id=? WHERE person_id IN ({ph})",
-            [dst_id, *srcs],
-        )
-        cur.execute(f"DELETE FROM persons WHERE id IN ({ph})", srcs)
-        self.conn.commit()
+        run = self.conn.execute
+        try:
+            names = [
+                r["name"]
+                for r in run(
+                    f"SELECT name FROM persons WHERE id IN ({ph}) "
+                    "AND name IS NOT NULL AND name <> ''",
+                    srcs,
+                )
+            ]
+            for col in ("person_id", "suggested_person_id"):
+                run(
+                    f"UPDATE faces SET {col}=? WHERE {col} IN ({ph})",
+                    [dst_id, *srcs],
+                )
+            run(
+                f"UPDATE OR IGNORE face_rejections SET person_id=? "
+                f"WHERE person_id IN ({ph})",
+                [dst_id, *srcs],
+            )
+            run(f"DELETE FROM face_rejections WHERE person_id IN ({ph})", srcs)
+            run(
+                "DELETE FROM face_rejections WHERE person_id=? AND face_id IN "
+                "(SELECT id FROM faces WHERE person_id=? AND state='user')",
+                (dst_id, dst_id),
+            )
+            run(f"DELETE FROM persons WHERE id IN ({ph})", srcs)
+            if len(names) == 1:
+                run(
+                    "UPDATE persons SET name=?, updated_at=datetime('now') "
+                    "WHERE id=? AND (name IS NULL OR name='')",
+                    (names[0], dst_id),
+                )
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
         self.recompute_person(dst_id)

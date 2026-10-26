@@ -1,0 +1,73 @@
+<style>
+  .pg { background:#1e1e1e; color:#eee; font-family:"Segoe UI",sans-serif; border-radius:8px; padding:14px; font-size:13px }
+  .pg h4 { font-family:Georgia,serif; font-weight:normal; font-size:18px; margin:0 0 10px }
+  .row { display:flex; gap:14px; flex-wrap:wrap }
+  .face { display:flex; flex-direction:column; align-items:center; gap:4px; width:72px; cursor:default }
+  .av { width:60px; height:60px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:600; color:#1a1a1a }
+  .sel .av { outline:3px solid #FF5F6D; outline-offset:2px }
+  .muted { color:#999; font-size:11px }
+  .chip { display:inline-block; background:#FF5F6D; color:#1a1a1a; border-radius:12px; padding:2px 10px; margin-right:6px; font-size:12px }
+  .chipo { display:inline-block; border:1px solid #555; border-radius:12px; padding:2px 10px; margin-right:6px; font-size:12px; color:#ccc }
+  .grid { display:grid; grid-template-columns:repeat(6,1fr); gap:4px; margin-top:8px }
+  .ph { aspect-ratio:1; background:#3a3a3a; border-radius:3px }
+  .bar { display:flex; justify-content:space-between; align-items:center; margin:12px 0 6px }
+  .list { width:170px; border-right:1px solid #333; padding-right:10px }
+  .li { display:flex; align-items:center; gap:8px; padding:5px; border-radius:5px }
+  .li.on { background:#3a2a2c }
+  .sm { width:30px; height:30px; border-radius:50%; flex:none }
+  .btn { border:1px solid #555; border-radius:5px; padding:3px 9px; font-size:12px; color:#ddd }
+</style>
+
+<h2>How should the People page be laid out?</h2>
+<p class="subtitle">Both let you pick one or several people and see the photos they're in. Gray squares = photos, circles = face crops.</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="pg">
+      <h4>People</h4>
+      <div class="row">
+        <div class="face sel"><div class="av" style="background:#e8a">A</div>Alice<span class="muted">842</span></div>
+        <div class="face sel"><div class="av" style="background:#8bd">B</div>Bob<span class="muted">310</span></div>
+        <div class="face"><div class="av" style="background:#bd8">M</div>Mum<span class="muted">1,204</span></div>
+        <div class="face"><div class="av" style="background:#555;color:#ccc">?</div><span class="muted">Add name</span><span class="muted">96</span></div>
+        <div class="face"><div class="av" style="background:#555;color:#ccc">?</div><span class="muted">Add name</span><span class="muted">41</span></div>
+        <div class="face"><div class="av" style="background:#333;color:#888;font-size:11px">+38</div><span class="muted">More</span></div>
+      </div>
+      <div class="bar">
+        <div><span class="chip">Alice ✕</span><span class="chip">Bob ✕</span><span class="muted">photos with <b>both</b> ▾ · 127 photos</span></div>
+        <span class="btn">Show in Library</span>
+      </div>
+      <div class="grid"><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div></div>
+    </div></div>
+    <div class="card-body">
+      <h3>A — Face row on top, photos below (Google Photos style)</h3>
+      <p>Big circular faces across the top, named people first, then unnamed groups. Click faces to add them to the selection and the photos underneath narrow down. "Both / either" switch for several people.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="pg">
+      <h4>People</h4>
+      <div class="row" style="flex-wrap:nowrap">
+        <div class="list">
+          <div class="muted" style="margin-bottom:4px">NAMED</div>
+          <div class="li on"><div class="sm" style="background:#e8a"></div>Alice <span class="muted">842</span></div>
+          <div class="li"><div class="sm" style="background:#8bd"></div>Bob <span class="muted">310</span></div>
+          <div class="li"><div class="sm" style="background:#bd8"></div>Mum <span class="muted">1,204</span></div>
+          <div class="muted" style="margin:8px 0 4px">TO NAME (40)</div>
+          <div class="li"><div class="sm" style="background:#555"></div><span class="muted">Unnamed · 96</span></div>
+          <div class="li"><div class="sm" style="background:#555"></div><span class="muted">Unnamed · 41</span></div>
+        </div>
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:10px"><div class="av" style="background:#e8a;width:44px;height:44px">A</div><div><b style="font-size:15px">Alice</b><br><span class="muted">842 photos · 2009–2026</span></div><span style="flex:1"></span><span class="btn">Rename</span><span class="btn">Show in Library</span></div>
+          <div class="muted" style="margin-top:10px">Is this Alice? <span class="btn">✓</span> <span class="btn">✕</span> — 12 suggestions</div>
+          <div class="grid"><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div><div class="ph"></div></div>
+        </div>
+      </div>
+    </div></div>
+    <div class="card-body">
+      <h3>B — People list on the left, one person's page on the right</h3>
+      <p>Matches the Library/Storage split. Better for naming and fixing one person at a time. Picking several people happens with Ctrl+click in the list, or in the Library's people filter.</p>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,47 @@
+<style>
+  .pg { background:#1e1e1e; color:#eee; font-family:"Segoe UI",sans-serif; border-radius:8px; padding:14px; font-size:13px }
+  .muted { color:#999; font-size:11px }
+  .btn { border:1px solid #555; border-radius:5px; padding:3px 9px; font-size:12px; color:#ddd; display:inline-block }
+  .btna { background:#FF5F6D; color:#1a1a1a; border-radius:5px; padding:3px 9px; font-size:12px; display:inline-block }
+  .seg { display:inline-flex; border:1px solid #555; border-radius:5px; overflow:hidden; font-size:12px }
+  .seg span { padding:3px 10px } .seg .on { background:#FF5F6D; color:#1a1a1a }
+  .fg { display:grid; grid-template-columns:repeat(8,1fr); gap:6px; margin-top:10px }
+  .fc { aspect-ratio:1; border-radius:6px; background:#c79; position:relative }
+  .fc.b { background:#7ab } .fc.s { outline:3px solid #FF5F6D; outline-offset:1px }
+  .fc.s:after { content:"✓"; position:absolute; right:3px; top:1px; font-size:11px; color:#fff }
+  .tag { position:absolute; left:3px; bottom:2px; font-size:9px; color:#fff; background:#0008; padding:0 3px; border-radius:3px }
+  .action { margin-top:10px; background:#2b2b2b; border-radius:6px; padding:8px; display:flex; gap:8px; align-items:center }
+  .menu { background:#2b2b2b; border:1px solid #444; border-radius:6px; padding:6px; width:170px; margin-left:auto; margin-top:6px }
+  .menu div { padding:3px 6px } .menu .h { background:#3a2a2c; border-radius:4px }
+</style>
+
+<h2>Fixing mistakes: the Faces view of a person</h2>
+<p class="subtitle">On a person's page, switch from Photos to Faces to see every face crop that was filed under them. Pick the wrong ones and move them.</p>
+
+<div class="mockup"><div class="mockup-header">People › Alice: Faces view, 2 wrong faces selected</div><div class="mockup-body"><div class="pg">
+  <div style="display:flex;align-items:center;gap:10px">
+    <b style="font-size:15px">Alice</b><span class="muted">842 faces · 51 confirmed by you</span>
+    <span style="flex:1"></span>
+    <span class="seg"><span>Photos</span><span class="on">Faces</span></span>
+    <span class="btn">Sort: least sure first ▾</span>
+  </div>
+  <div class="fg">
+    <div class="fc b s"><span class="tag">0.52</span></div><div class="fc b s"><span class="tag">0.55</span></div><div class="fc"><span class="tag">0.58</span></div><div class="fc"><span class="tag">0.61</span></div>
+    <div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div>
+    <div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div>
+    <div class="fc"></div><div class="fc"></div><div class="fc"></div><div class="fc"></div>
+  </div>
+  <div class="action">
+    <span>2 faces selected</span><span style="flex:1"></span>
+    <span class="btn">Not Alice</span><span class="btna">Move to… ▾</span><span class="btn">Not a face / ignore</span>
+  </div>
+  <div class="menu">
+    <div class="h">Clara (cousin)</div><div>Bob</div><div>Mum</div><div class="muted">+ New person…</div>
+  </div>
+</div></div></div>
+
+<div class="section" style="margin-top:14px">
+  <h3>Also on the left list</h3>
+  <p>• Drag one person onto another, or select both and choose <b>Merge</b>, to fix one person split into several groups.<br>
+  • Right-click a person and choose <b>Split</b> to re-group a mixed-up person into smaller groups you can name again.</p>
+</div>

@@ -137,6 +137,38 @@ def test_user_face_of_deleted_person_is_dropped(repo, make_item):
     ) == ("ignored", None)
 
 
+def test_decode_failure_keeps_faces_and_stash(repo, make_item):
+    mid = _media(repo, make_item)
+    other = _media(repo, make_item, "b.jpg")
+    alice = repo.create_person(Person(name="Alice"))
+    (a,) = _scan(repo, mid, [BOX_A])
+    (b,) = _scan(repo, other, [BOX_B])
+    _set(repo, a.id, "user", alice)
+    _set(repo, b.id, "user", alice)
+
+    # a.jpg: stashed by invalidate, then its decode fails.
+    repo.invalidate_faces_by_relpath(["a.jpg"])
+    repo.add_scan_results([(mid, [], None)], FACE_DET_VERSION)
+    assert repo.last_carryover == (0, 0)
+    assert _carryover_rows(repo) == 1
+    assert repo.count_unscanned_images(FACE_DET_VERSION) == 0  # not retried
+
+    # b.jpg: a version bump whose decode fails keeps the existing face.
+    repo.add_scan_results([(other, [], None)], "v2")
+    assert tuple(
+        repo.conn.execute(
+            "SELECT state, person_id FROM faces WHERE media_id=?", (other,)
+        ).fetchone()
+    ) == ("user", alice)
+    assert _carryover_rows(repo) == 1
+
+    # A later successful scan of a.jpg still carries the decision.
+    _scan(repo, mid, [BOX_A])
+    assert repo.last_carryover == (1, 0)
+    assert _face_at(repo, mid, BOX_A[0])["person_id"] == alice
+    assert _carryover_rows(repo) == 0
+
+
 def test_rescan_keeps_named_people(repo, make_item):
     mid = _media(repo, make_item)
     alice = repo.create_person(Person(name="Alice"))

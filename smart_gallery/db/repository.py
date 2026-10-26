@@ -359,7 +359,9 @@ class GalleryRepository(FaceLabelsMixin):
         existing faces are stashed and those faces deleted (a re-scan replaces
         them), the new faces are inserted (each ``Face.id`` is set), the image
         size is recorded and the stashed decisions are carried over. Faceless
-        images get an ``n_faces=0`` state row so they are not retried.
+        images get an ``n_faces=0`` state row so they are not retried. An image
+        that could not be decoded (``img_size`` None, no faces) only gets that
+        state row: its faces and stashed decisions wait for a later scan.
 
         Returns faces inserted; ``last_carryover`` holds ``(carried, dropped)``
         for the chunk.
@@ -369,6 +371,18 @@ class GalleryRepository(FaceLabelsMixin):
         touched: set = set()
         try:
             for media_id, faces, img_size in results:
+                if img_size is None and not faces:
+                    # Decoding failed: keep the existing faces and any stashed
+                    # decisions for a later successful scan; only mark it
+                    # scanned so it is not retried on every run.
+                    cur.execute(
+                        "INSERT INTO face_scan_state(media_id, n_faces, det_version) "
+                        "VALUES(?, 0, ?) ON CONFLICT(media_id) DO UPDATE SET "
+                        "n_faces=0, det_version=excluded.det_version, "
+                        "scanned_at=datetime('now')",
+                        (media_id, det_version),
+                    )
+                    continue
                 img_w, img_h = img_size if img_size else (None, None)
                 touched.update(self._face_persons(media_id))
                 self.stash_decisions([media_id])

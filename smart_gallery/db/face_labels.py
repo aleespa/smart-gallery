@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional, Sequence
 
 import numpy as np
 
@@ -11,6 +11,7 @@ from smart_gallery.config import FACE_EMBEDDING_DIM
 
 if TYPE_CHECKING:
     from smart_gallery.analysis.filing import Candidate, Decision, FaceIn
+    from smart_gallery.services.label_faces import LabelEntry, LabelReport
 
 
 def _vec(blob) -> np.ndarray:
@@ -133,3 +134,90 @@ class FaceLabelsMixin:
             raise
         for pid in sorted(touched):
             self.recompute_person(pid)
+
+    def person_named(self, name: str) -> Optional[int]:
+        """The id of the one person with this name (any case), or None.
+        Raises ValueError when several people share it."""
+        ids = [
+            r["id"]
+            for r in self.conn.execute(
+                "SELECT id FROM persons WHERE name = ? COLLATE NOCASE", (name.strip(),)
+            )
+        ]
+        if len(ids) > 1:
+            raise ValueError(f"Several people are named {name.strip()!r}.")
+        return ids[0] if ids else None
+
+    def apply_labels(self, entries: "Sequence[LabelEntry]") -> "LabelReport":
+        """Apply validated corrections in one transaction, then refresh every
+        person whose faces changed."""
+        from smart_gallery.services.label_faces import LabelReport
+
+        report = LabelReport()
+        touched: set[int] = set()
+        try:
+            for e in entries:
+                person_id = e.person_id
+                if e.action == "new_person":
+                    person_id = self.person_named(e.name)
+                    if person_id is None:
+                        cur = self.conn.execute(
+                            "INSERT INTO persons (name, hidden) VALUES (?, 0)",
+                            (e.name.strip(),),
+                        )
+                        person_id = int(cur.lastrowid)
+                        report.people_created += 1
+                    action = "move"
+                else:
+                    action = e.action
+                if person_id is not None:
+                    touched.add(person_id)
+                for fid in dict.fromkeys(e.faces):
+                    row = self.conn.execute(
+                        "SELECT person_id, suggested_person_id FROM faces WHERE id=?",
+                        (fid,),
+                    ).fetchone()
+                    if row is None:
+                        report.missing_faces += 1
+                        continue
+                    report.faces_changed += 1
+                    old = row["person_id"]
+                    if old:
+                        touched.add(old)
+                    self._label_face(action, fid, person_id, old, row)
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        for pid in sorted(touched):
+            self.recompute_person(pid)
+        return report
+
+    def _label_face(self, action: str, fid: int, pid, old, row) -> None:
+        run = self.conn.execute
+        if action == "ignore":
+            run(
+                "UPDATE faces SET state='ignored', person_id=NULL, "
+                "suggested_person_id=NULL, match_score=NULL WHERE id=?",
+                (fid,),
+            )
+        elif action == "reject":
+            run("INSERT OR IGNORE INTO face_rejections VALUES (?, ?)", (fid, pid))
+            if pid in (old, row["suggested_person_id"]):
+                run(
+                    "UPDATE faces SET state='new', person_id=NULL, "
+                    "suggested_person_id=NULL, match_score=NULL WHERE id=?",
+                    (fid,),
+                )
+        else:  # confirm / move
+            if action == "move" and old and old != pid:
+                run("INSERT OR IGNORE INTO face_rejections VALUES (?, ?)", (fid, old))
+            run(
+                "DELETE FROM face_rejections WHERE face_id=? AND person_id=?",
+                (fid, pid),
+            )
+            run(
+                "UPDATE faces SET state='user', person_id=?, "
+                "suggested_person_id=NULL, match_score=NULL WHERE id=?",
+                (pid, fid),
+            )

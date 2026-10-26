@@ -19,6 +19,13 @@ from smart_gallery.services.identify_faces import (
 )
 from smart_gallery.services.file_faces import FileFacesReport, file_faces
 from smart_gallery.services.init_db import init_drive
+from smart_gallery.services.label_faces import (
+    LabelEntry,
+    LabelReport,
+    label_faces,
+    read_label_list,
+    write_label_list,
+)
 from smart_gallery.services.recycle import (
     RecycleReport,
     read_list,
@@ -42,6 +49,11 @@ __all__ = [
     "identify_faces",
     "IdentifyFacesReport",
     "file_faces",
+    "label_faces",
+    "LabelEntry",
+    "LabelReport",
+    "read_label_list",
+    "write_label_list",
     "FileFacesReport",
     "cluster_faces",
     "split_person",

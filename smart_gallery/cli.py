@@ -34,6 +34,9 @@ from smart_gallery.services import (
     import_media,
     identify_faces,
     init_drive,
+    label_faces,
+    LabelEntry,
+    read_label_list,
     read_list,
     recycle_files,
     rename_gallery,
@@ -486,6 +489,56 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip forming new groups; only match faces to existing people and groups.",
     )
 
+    p_label = sub.add_parser(
+        "label-faces",
+        help="Confirm, reject, move or ignore faces (corrections to the filing).",
+    )
+    p_label.add_argument("drive", type=Path, help=DRIVE_HELP)
+    g_src = p_label.add_mutually_exclusive_group(required=True)
+    g_src.add_argument(
+        "--list",
+        type=Path,
+        metavar="PATH",
+        help="A JSON list of corrections, as the desktop app writes it.",
+    )
+    g_src.add_argument(
+        "--faces",
+        type=int,
+        nargs="+",
+        metavar="ID",
+        help="Face ids to correct; give exactly one action below.",
+    )
+    g_act = p_label.add_mutually_exclusive_group()
+    g_act.add_argument(
+        "--to",
+        type=int,
+        metavar="PERSON_ID",
+        help="Move the faces to this person.",
+    )
+    g_act.add_argument(
+        "--new-person",
+        metavar="NAME",
+        help="Move the faces to a new person with this name (or the one that has it).",
+    )
+    g_act.add_argument(
+        "--not",
+        dest="not_person",
+        type=int,
+        metavar="PERSON_ID",
+        help="The faces are not this person; never suggest them to it again.",
+    )
+    g_act.add_argument(
+        "--confirm",
+        type=int,
+        metavar="PERSON_ID",
+        help="Confirm that the faces are this person.",
+    )
+    g_act.add_argument(
+        "--ignore",
+        action="store_true",
+        help="Ignore the faces (not a real face, or not worth filing).",
+    )
+
     p_cluster = sub.add_parser(
         "cluster-faces", help="Optionally cluster faces without sample photos."
     )
@@ -764,6 +817,39 @@ def _handle_file_faces(args):
     )
 
 
+def _label_entries(args) -> list[LabelEntry]:
+    actions = [
+        ("move", {"person_id": args.to}, args.to is not None),
+        ("new_person", {"name": args.new_person}, args.new_person is not None),
+        ("reject", {"person_id": args.not_person}, args.not_person is not None),
+        ("confirm", {"person_id": args.confirm}, args.confirm is not None),
+        ("ignore", {}, args.ignore),
+    ]
+    chosen = [
+        LabelEntry(a, tuple(args.faces or ()), **kw) for a, kw, on in actions if on
+    ]
+    if args.list is not None:
+        if chosen:
+            raise ValueError("--list cannot be combined with an action.")
+        return read_label_list(args.list)
+    if len(chosen) != 1:
+        raise ValueError(
+            "--faces needs exactly one of --to, --new-person, --not, --confirm, --ignore."
+        )
+    return chosen
+
+
+def _handle_label_faces(args):
+    entries = _label_entries(args)
+    with GalleryRepository.open(args.drive) as repo:
+        report = label_faces(repo, entries)
+    logger.success(
+        f"Updated {report.faces_changed:,} face(s); "
+        f"{report.people_created} new person(s); "
+        f"{report.missing_faces} face id(s) no longer exist."
+    )
+
+
 def _handle_cluster_faces(args):
     with GalleryRepository.open(args.drive) as repo:
         report = cluster_faces(
@@ -922,6 +1008,7 @@ _HANDLERS = {
     "report": _handle_report,
     "scan-faces": _handle_scan_faces,
     "file-faces": _handle_file_faces,
+    "label-faces": _handle_label_faces,
     "identify-faces": _handle_identify_faces,
     "cluster-faces": _handle_cluster_faces,
     "people": _handle_people,

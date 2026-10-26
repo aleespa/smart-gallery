@@ -166,7 +166,8 @@ def test_filter_choices_count_photos_per_person(repo, make_item):
     for face in faces:
         face.person_id = ana
     repo.add_scan_results(
-        [(ids["a.jpg"], faces[:2]), (ids["b.jpg"], faces[2:])], FACE_DET_VERSION
+        [(ids["a.jpg"], faces[:2], None), (ids["b.jpg"], faces[2:], None)],
+        FACE_DET_VERSION,
     )
     # Two faces in a.jpg are still one photo.
     assert filter_choices(repo)["people"] == [("Ana", 2)]

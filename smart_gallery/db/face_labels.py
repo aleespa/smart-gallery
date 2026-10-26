@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING, Optional, Sequence
+from typing import TYPE_CHECKING, Iterable, Optional, Sequence
 
 import numpy as np
 
@@ -12,6 +12,24 @@ from smart_gallery.config import FACE_EMBEDDING_DIM
 if TYPE_CHECKING:
     from smart_gallery.analysis.filing import Candidate, Decision, FaceIn
     from smart_gallery.services.label_faces import LabelEntry, LabelReport
+
+
+# A stashed decision goes to the new face it overlaps by at least this much.
+CARRYOVER_MIN_IOU = 0.5
+_STASH_CHUNK = 500
+
+
+def _iou(a: tuple, b: tuple) -> float:
+    """Intersection over union of two ``(x, y, w, h)`` boxes."""
+    ix = max(0.0, min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = a[2] * a[3] + b[2] * b[3] - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _scaled(box: tuple, w, h) -> tuple:
+    return (box[0] / w, box[1] / h, box[2] / w, box[3] / h)
 
 
 def _vec(blob) -> np.ndarray:
@@ -92,6 +110,99 @@ class FaceLabelsMixin:
                 Candidate(pid, kind, _stack(ex), _stack(rejected_embs.get(pid, [])))
             )
         return faces, candidates
+
+    def stash_decisions(self, media_ids: Iterable[int]) -> int:
+        """Save what the user decided about the faces of these media (``user``
+        and ``ignored`` faces, and any rejections) into ``face_carryover``, so
+        ``apply_carryover`` can give it back after the faces are re-detected.
+        Does not commit; the caller deletes the faces in the same transaction.
+        Returns rows stashed."""
+        ids = [int(m) for m in media_ids]
+        stashed = 0
+        for i in range(0, len(ids), _STASH_CHUNK):
+            chunk = ids[i : i + _STASH_CHUNK]
+            ph = ", ".join("?" for _ in chunk)
+            cur = self.conn.execute(
+                "INSERT INTO face_carryover (media_id, bbox_x, bbox_y, bbox_w, "
+                "bbox_h, img_w, img_h, state, person_id, rejected) "
+                "SELECT f.media_id, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h, "
+                "s.img_w, s.img_h, "
+                "CASE WHEN f.state IN ('user', 'ignored') THEN f.state END, "
+                "CASE WHEN f.state IN ('user', 'ignored') THEN f.person_id END, "
+                "(SELECT group_concat(r.person_id) FROM face_rejections r "
+                " WHERE r.face_id = f.id) "
+                "FROM faces f LEFT JOIN face_scan_state s ON s.media_id = f.media_id "
+                f"WHERE f.media_id IN ({ph}) AND (f.state IN ('user', 'ignored') "
+                "OR EXISTS (SELECT 1 FROM face_rejections r WHERE r.face_id = f.id))",
+                chunk,
+            )
+            stashed += max(cur.rowcount, 0)
+        return stashed
+
+    def apply_carryover(self, media_id: int) -> tuple[int, int]:
+        """Give stashed decisions of this media to its new faces, matching each
+        to the face it overlaps most (IoU >= ``CARRYOVER_MIN_IOU``, boxes taken
+        relative to the image size). Every stashed row of the media is removed.
+        Does not commit. Returns ``(carried, dropped)``."""
+        run = self.conn.execute
+        stashed = run(
+            "SELECT * FROM face_carryover WHERE media_id=? ORDER BY id", (media_id,)
+        ).fetchall()
+        if not stashed:
+            return 0, 0
+        size = run(
+            "SELECT img_w, img_h FROM face_scan_state WHERE media_id=?", (media_id,)
+        ).fetchone()
+        new_w, new_h = (size["img_w"], size["img_h"]) if size else (None, None)
+        faces = run(
+            "SELECT id, bbox_x, bbox_y, bbox_w, bbox_h FROM faces WHERE media_id=?",
+            (media_id,),
+        ).fetchall()
+
+        def box(r) -> tuple:
+            return (r["bbox_x"], r["bbox_y"], r["bbox_w"], r["bbox_h"])
+
+        pairs = []
+        for s in stashed:
+            sizes = (s["img_w"], s["img_h"], new_w, new_h)
+            relative = all(sizes)
+            old = _scaled(box(s), s["img_w"], s["img_h"]) if relative else box(s)
+            for f in faces:
+                new = _scaled(box(f), new_w, new_h) if relative else box(f)
+                iou = _iou(old, new)
+                if iou >= CARRYOVER_MIN_IOU:
+                    pairs.append((iou, s["id"], f["id"]))
+
+        rows = {s["id"]: s for s in stashed}
+        matched: dict[int, int] = {}
+        taken: set[int] = set()
+        for _, sid, fid in sorted(pairs, key=lambda p: -p[0]):
+            if sid not in matched and fid not in taken:
+                matched[sid] = fid
+                taken.add(fid)
+
+        carried = 0
+        for sid, fid in matched.items():
+            s = rows[sid]
+            state, person_id = s["state"], s["person_id"]
+            if state == "user" and person_id is None:
+                continue  # its person is gone; nothing left to carry
+            if state is not None:
+                run(
+                    "UPDATE faces SET state=?, person_id=?, cluster_id=NULL, "
+                    "suggested_person_id=NULL, match_score=NULL WHERE id=?",
+                    (state, person_id, fid),
+                )
+            for pid in (s["rejected"] or "").split(","):
+                if pid.strip():
+                    run(
+                        "INSERT OR IGNORE INTO face_rejections (face_id, person_id) "
+                        "SELECT ?, id FROM persons WHERE id=?",
+                        (fid, int(pid)),
+                    )
+            carried += 1
+        run("DELETE FROM face_carryover WHERE media_id=?", (media_id,))
+        return carried, len(stashed) - carried
 
     def apply_filing(
         self, decisions: "list[Decision]", new_groups: list[list[int]]

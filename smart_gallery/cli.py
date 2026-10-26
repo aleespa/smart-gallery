@@ -30,6 +30,7 @@ from smart_gallery.services import (
     compare_galleries,
     convert_cr3,
     export_media,
+    find_faces,
     format_compare_report,
     import_media,
     identify_faces,
@@ -56,6 +57,7 @@ DETAIL_LOG_COMMANDS = {
     "export",
     "scan-faces",
     "file-faces",
+    "find-faces",
     "recycle",
 }
 LOG_DIR = Path("logs")
@@ -449,6 +451,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit", type=int, default=None, help="Scan at most N images (testing)."
     )
 
+    p_find = sub.add_parser(
+        "find-faces",
+        help="Scan new images for faces, then sort them into people (GPU).",
+    )
+    p_find.add_argument("drive", type=Path, help=DRIVE_HELP)
+
     p_identify = sub.add_parser(
         "identify-faces", help="Identify faces using person-named sample directories."
     )
@@ -817,7 +825,8 @@ def _handle_scan_faces(args):
             cb.close()
     logger.success(
         f"Scanned {report.images_scanned:,} images — {report.faces_found:,} faces "
-        f"(provider={report.provider})."
+        f"(provider={report.provider}), {report.decisions_carried:,} decisions "
+        f"carried over, {report.decisions_dropped:,} dropped."
     )
 
 
@@ -832,6 +841,23 @@ def _handle_file_faces(args):
         f"Sorted faces: {report.auto:,} matched, {report.suggested:,} suggested, "
         f"{report.grouped:,} grouped into {report.groups_created} new group(s), "
         f"{report.hidden:,} hidden, {report.left:,} left."
+    )
+
+
+def _handle_find_faces(args):
+    cb = progress_reporter()
+    with GalleryRepository.open(args.drive) as repo:
+        try:
+            scanned, filed = find_faces(repo, progress_callback=cb)
+        finally:
+            cb.close()
+    logger.success(
+        f"Scanned {scanned.images_scanned:,} images — {scanned.faces_found:,} faces "
+        f"(provider={scanned.provider}), {scanned.decisions_carried:,} decisions "
+        f"carried over, {scanned.decisions_dropped:,} dropped. Sorted faces: "
+        f"{filed.auto:,} matched, {filed.suggested:,} suggested, {filed.grouped:,} "
+        f"grouped into {filed.groups_created} new group(s), {filed.hidden:,} "
+        f"hidden, {filed.left:,} left."
     )
 
 
@@ -1057,6 +1083,7 @@ _HANDLERS = {
     "report": _handle_report,
     "scan-faces": _handle_scan_faces,
     "file-faces": _handle_file_faces,
+    "find-faces": _handle_find_faces,
     "label-faces": _handle_label_faces,
     "identify-faces": _handle_identify_faces,
     "cluster-faces": _handle_cluster_faces,

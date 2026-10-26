@@ -113,7 +113,9 @@ def test_scan_results_resumability(repo, make_item):
     assert repo.count_unscanned_images(FACE_DET_VERSION) == 2
 
     face = Face.from_detection(mid_a, (10, 10, 50, 60), 0.9, _unit(0))
-    inserted = repo.add_scan_results([(mid_a, [face]), (mid_b, [])], FACE_DET_VERSION)
+    inserted = repo.add_scan_results(
+        [(mid_a, [face], None), (mid_b, [], None)], FACE_DET_VERSION
+    )
     assert inserted == 1
 
     # Both images now recorded as scanned (b with n_faces=0) -> nothing pending.
@@ -129,7 +131,7 @@ def test_scan_results_resumability(repo, make_item):
 def test_invalidate_faces_by_relpath(repo, make_item):
     mid = _add_media(repo, make_item, "a.jpg")
     repo.add_scan_results(
-        [(mid, [Face.from_detection(mid, (0, 0, 40, 40), 0.9, _unit(0))])],
+        [(mid, [Face.from_detection(mid, (0, 0, 40, 40), 0.9, _unit(0))], None)],
         FACE_DET_VERSION,
     )
     assert repo.faces_count() == 1
@@ -142,7 +144,7 @@ def test_invalidate_faces_by_relpath(repo, make_item):
 def test_delete_media_cascades_faces(repo, make_item):
     mid = _add_media(repo, make_item, "a.jpg")
     repo.add_scan_results(
-        [(mid, [Face.from_detection(mid, (0, 0, 40, 40), 0.9, _unit(0))])],
+        [(mid, [Face.from_detection(mid, (0, 0, 40, 40), 0.9, _unit(0))], None)],
         FACE_DET_VERSION,
     )
     repo.delete_by_relpaths(["a.jpg"])  # FK ON DELETE CASCADE
@@ -154,7 +156,7 @@ def test_person_assign_and_recompute(repo, make_item):
     e1, e2 = _unit(0), _unit(1)
     f1 = Face.from_detection(mid, (0, 0, 40, 40), 0.9, e1)  # higher score -> cover
     f2 = Face.from_detection(mid, (0, 0, 40, 40), 0.5, e2)
-    repo.add_scan_results([(mid, [f1, f2])], FACE_DET_VERSION)
+    repo.add_scan_results([(mid, [f1, f2], None)], FACE_DET_VERSION)
 
     ids, _, _ = repo.load_embeddings()
     pid = repo.create_person(Person(cluster_id=0))
@@ -182,10 +184,11 @@ def test_person_samples_top_n_distinct_media(repo, make_item):
                 Face.from_detection(mids[0], (0, 0, 40, 40), 0.90, _unit(0)),
                 Face.from_detection(mids[0], (0, 0, 40, 40), 0.95, _unit(0)),
             ],
+            None,
         ),
-        (mids[1], [Face.from_detection(mids[1], (0, 0, 40, 40), 0.80, _unit(0))]),
-        (mids[2], [Face.from_detection(mids[2], (0, 0, 40, 40), 0.70, _unit(0))]),
-        (mids[3], [Face.from_detection(mids[3], (0, 0, 40, 40), 0.60, _unit(0))]),
+        (mids[1], [Face.from_detection(mids[1], (0, 0, 40, 40), 0.80, _unit(0))], None),
+        (mids[2], [Face.from_detection(mids[2], (0, 0, 40, 40), 0.70, _unit(0))], None),
+        (mids[3], [Face.from_detection(mids[3], (0, 0, 40, 40), 0.60, _unit(0))], None),
     ]
     repo.add_scan_results(results, FACE_DET_VERSION)
     ids, _, _ = repo.load_embeddings()
@@ -207,8 +210,8 @@ def test_filter_by_person_id_and_name(repo, make_item):
     mid_b = _add_media(repo, make_item, "b.jpg")
     repo.add_scan_results(
         [
-            (mid_a, [Face.from_detection(mid_a, (0, 0, 40, 40), 0.9, _unit(0))]),
-            (mid_b, [Face.from_detection(mid_b, (0, 0, 40, 40), 0.9, _unit(1))]),
+            (mid_a, [Face.from_detection(mid_a, (0, 0, 40, 40), 0.9, _unit(0))], None),
+            (mid_b, [Face.from_detection(mid_b, (0, 0, 40, 40), 0.9, _unit(1))], None),
         ],
         FACE_DET_VERSION,
     )
@@ -230,7 +233,7 @@ def test_filter_by_person_id_and_name(repo, make_item):
 def test_delete_person_unassigns_faces(repo, make_item):
     mid = _add_media(repo, make_item, "a.jpg")
     repo.add_scan_results(
-        [(mid, [Face.from_detection(mid, (0, 0, 40, 40), 0.9, _unit(0))])],
+        [(mid, [Face.from_detection(mid, (0, 0, 40, 40), 0.9, _unit(0))], None)],
         FACE_DET_VERSION,
     )
     ids, _, _ = repo.load_embeddings()
@@ -261,7 +264,7 @@ def test_split_person_breaks_impure_cluster(repo, make_item):
                     mid, (0, 0, 40, 40), 0.9, (v / np.linalg.norm(v)).astype("float32")
                 )
             )
-    repo.add_scan_results([(mid, faces)], FACE_DET_VERSION)
+    repo.add_scan_results([(mid, faces, None)], FACE_DET_VERSION)
 
     ids, _, _ = repo.load_embeddings()
     impure = repo.create_person(Person(cluster_id=0))  # both people lumped together
@@ -281,7 +284,7 @@ def test_merge_persons(repo, make_item):
     mid = _add_media(repo, make_item, "a.jpg")
     f1 = Face.from_detection(mid, (0, 0, 40, 40), 0.9, _unit(0))
     f2 = Face.from_detection(mid, (0, 0, 40, 40), 0.8, _unit(1))
-    repo.add_scan_results([(mid, [f1, f2])], FACE_DET_VERSION)
+    repo.add_scan_results([(mid, [f1, f2], None)], FACE_DET_VERSION)
     ids, _, _ = repo.load_embeddings()
 
     p1 = repo.create_person(Person(cluster_id=0))
@@ -313,7 +316,7 @@ def test_cluster_synthetic_three_people(repo, make_item):
             faces.append(
                 Face.from_detection(mid, (0, 0, 40, 40), 0.9, v.astype(np.float32))
             )
-    repo.add_scan_results([(mid, faces)], FACE_DET_VERSION)
+    repo.add_scan_results([(mid, faces, None)], FACE_DET_VERSION)
 
     report = cluster_faces(repo, algo="dbscan", eps=0.3, min_samples=3)
     assert report.persons_created == 3
@@ -439,16 +442,17 @@ def test_migrate_v4_to_v5_maps_states(tmp_path):
 
 
 def _face_on(repo, mid, person_id=None, state="new"):
-    repo.add_scan_results(
-        [(mid, [Face.from_detection(mid, (0, 0, 40, 40), 0.9, _unit(0))])],
-        FACE_DET_VERSION,
-    )
-    fid = repo.conn.execute("SELECT MAX(id) FROM faces").fetchone()[0]
-    repo.conn.execute(
-        "UPDATE faces SET person_id=?, state=? WHERE id=?", (person_id, state, fid)
+    # Inserted directly: a scan result replaces the media's faces, and these
+    # tests stack several faces on one media.
+    face = Face.from_detection(mid, (0, 0, 40, 40), 0.9, _unit(0))
+    face.person_id, face.state = person_id, state
+    cur = repo.conn.execute(
+        f"INSERT INTO faces ({', '.join(FACE_COLUMNS)}) "
+        f"VALUES ({', '.join('?' for _ in FACE_COLUMNS)})",
+        face.as_params(),
     )
     repo.conn.commit()
-    return fid
+    return cur.lastrowid
 
 
 def test_recompute_keeps_empty_named_person(repo, make_item):

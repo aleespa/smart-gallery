@@ -88,6 +88,8 @@ class GalleryRepository(FaceLabelsMixin):
         self.conn = conn
         self.drive_root = Path(drive_root)
         self.db_path = Path(db_path)
+        # (carried, dropped) decisions of the last ``add_scan_results`` chunk.
+        self.last_carryover: Tuple[int, int] = (0, 0)
 
     # ── lifecycle ───────────────────────────────────────────────────────────
     @staticmethod
@@ -350,24 +352,61 @@ class GalleryRepository(FaceLabelsMixin):
         return [(r["id"], str(to_abspath(r["relpath"], self.drive_root))) for r in cur]
 
     def add_scan_results(self, results, det_version: str) -> int:
-        """Persist a chunk of scan results in one transaction. ``results`` is an
-        iterable of ``(media_id, list[Face])``; faceless images get an
-        ``n_faces=0`` state row so they are not retried. Returns faces inserted."""
+        """Persist a chunk of scan results in one transaction.
+
+        ``results`` is an iterable of ``(media_id, list[Face], img_size)`` with
+        ``img_size`` ``(width, height)`` or None. Per media: the decisions on its
+        existing faces are stashed and those faces deleted (a re-scan replaces
+        them), the new faces are inserted (each ``Face.id`` is set), the image
+        size is recorded and the stashed decisions are carried over. Faceless
+        images get an ``n_faces=0`` state row so they are not retried.
+
+        Returns faces inserted; ``last_carryover`` holds ``(carried, dropped)``
+        for the chunk.
+        """
         cur = self.conn.cursor()
-        inserted = 0
-        for media_id, faces in results:
-            if faces:
-                cur.executemany(_FACE_INSERT_SQL, [f.as_params() for f in faces])
+        inserted = carried = dropped = 0
+        touched: set = set()
+        try:
+            for media_id, faces, img_size in results:
+                img_w, img_h = img_size if img_size else (None, None)
+                touched.update(self._face_persons(media_id))
+                self.stash_decisions([media_id])
+                cur.execute("DELETE FROM faces WHERE media_id=?", (media_id,))
+                for face in faces:
+                    cur.execute(_FACE_INSERT_SQL, face.as_params())
+                    face.id = int(cur.lastrowid)
                 inserted += len(faces)
-            cur.execute(
-                "INSERT INTO face_scan_state(media_id, n_faces, det_version) "
-                "VALUES(?, ?, ?) ON CONFLICT(media_id) DO UPDATE SET "
-                "n_faces=excluded.n_faces, det_version=excluded.det_version, "
-                "scanned_at=datetime('now')",
-                (media_id, len(faces), det_version),
-            )
-        self.conn.commit()
+                cur.execute(
+                    "INSERT INTO face_scan_state(media_id, n_faces, det_version, "
+                    "img_w, img_h) VALUES(?, ?, ?, ?, ?) ON CONFLICT(media_id) DO "
+                    "UPDATE SET n_faces=excluded.n_faces, "
+                    "det_version=excluded.det_version, img_w=excluded.img_w, "
+                    "img_h=excluded.img_h, scanned_at=datetime('now')",
+                    (media_id, len(faces), det_version, img_w, img_h),
+                )
+                c, d = self.apply_carryover(media_id)
+                carried += c
+                dropped += d
+                touched.update(self._face_persons(media_id))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        self.last_carryover = (carried, dropped)
+        for pid in sorted(touched):
+            self.recompute_person(pid)
         return inserted
+
+    def _face_persons(self, media_id: int) -> set:
+        return {
+            r[0]
+            for r in self.conn.execute(
+                "SELECT DISTINCT person_id FROM faces "
+                "WHERE media_id=? AND person_id IS NOT NULL",
+                (media_id,),
+            )
+        }
 
     def clear_faces_for(self, media_ids: Iterable[int]) -> int:
         """Delete faces + scan state for these media (so they re-scan)."""
@@ -382,15 +421,27 @@ class GalleryRepository(FaceLabelsMixin):
         return len(ids)
 
     def reset_all_faces(self) -> None:
-        """Wipe all face data (faces, scan state, persons) for a full --rescan."""
-        self.conn.execute("DELETE FROM faces")
-        self.conn.execute("DELETE FROM face_scan_state")
-        self.conn.execute("DELETE FROM persons")
-        self.conn.commit()
+        """Start a full ``--rescan``: stash the user's decisions, delete every
+        face and scan state, and the unnamed groups that are not hidden. Named
+        and hidden persons stay, so the decisions carry over to the new faces."""
+        run = self.conn.execute
+        try:
+            media = [r[0] for r in run("SELECT DISTINCT media_id FROM faces")]
+            self.stash_decisions(media)
+            run("DELETE FROM faces")
+            run("DELETE FROM face_scan_state")
+            run("DELETE FROM persons WHERE (name IS NULL OR name='') AND hidden=0")
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        for r in run("SELECT id FROM persons").fetchall():
+            self.recompute_person(r["id"])
 
     def invalidate_faces_by_relpath(self, relpaths: Iterable[str]) -> int:
         """Clear face data for changed files (sync calls this for updated rows so
-        the next scan re-processes them). Returns media rows invalidated."""
+        the next scan re-processes them), keeping the user's decisions for the
+        re-scan to carry over. Returns media rows invalidated."""
         rels = list(relpaths)
         ids: List[int] = []
         for i in range(0, len(rels), _DELETE_CHUNK):
@@ -401,6 +452,7 @@ class GalleryRepository(FaceLabelsMixin):
             ).fetchall()
             ids.extend(r["id"] for r in rows)
         if ids:
+            self.stash_decisions(ids)
             self.clear_faces_for(ids)
         return len(ids)
 

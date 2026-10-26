@@ -2,7 +2,9 @@
 
 A resumable GPU pass: images already scanned at the current ``FACE_DET_VERSION``
 are skipped (tracked in ``face_scan_state``), so the job can be killed and
-re-run. CPU image-decode runs on a worker pool and overlaps with single-owner
+re-run. Each face's thumbnail is saved under ``.smart_gallery/faces`` and the
+user's decisions on faces of a re-scanned image carry over to its new faces.
+CPU image-decode runs on a worker pool and overlaps with single-owner
 GPU inference — decode/IO is the real bottleneck, not the GPU.
 """
 
@@ -16,8 +18,10 @@ from loguru import logger
 from smart_gallery.analysis.faces import FaceScanner
 from smart_gallery.config import FACE_DET_VERSION
 from smart_gallery.db import GalleryRepository
+from smart_gallery.face_crops import crop_box, encode_crop, write_crop
 from smart_gallery.models import Face
 from smart_gallery.progress import SCANNING, ProgressCallback, ProgressEvent
+from smart_gallery.services.file_faces import FileFacesReport, file_faces
 
 _COMMIT_CHUNK = 500
 
@@ -27,6 +31,8 @@ class ScanFacesReport:
     images_scanned: int = 0
     faces_found: int = 0
     provider: str = "unknown"
+    decisions_carried: int = 0
+    decisions_dropped: int = 0
 
 
 def _decode_workers() -> int:
@@ -65,7 +71,20 @@ def scan_faces(
     workers = _decode_workers()
     work_iter = iter(work)
     inflight = {}
-    buffer = []
+    buffer = []  # (media_id, faces, img_size) for add_scan_results
+    crops = []  # (Face, jpeg bytes), written once the faces have ids
+
+    def _flush() -> None:
+        repo.add_scan_results(buffer, FACE_DET_VERSION)
+        report.decisions_carried += repo.last_carryover[0]
+        report.decisions_dropped += repo.last_carryover[1]
+        for face, data in crops:
+            try:
+                write_crop(repo.drive_root, face.id, data)
+            except Exception as exc:
+                logger.debug(f"could not save crop of face {face.id}: {exc}")
+        buffer.clear()
+        crops.clear()
 
     def _submit_next(ex) -> None:
         item = next(work_iter, None)
@@ -92,15 +111,25 @@ def scan_faces(
                         Face.from_detection(media_id, d.bbox, d.det_score, d.embedding)
                         for d in faces
                     ]
-                    buffer.append((media_id, face_rows))
+                    img_size = None
+                    if img is not None:
+                        img_size = (int(img.shape[1]), int(img.shape[0]))
+                        for face in face_rows:
+                            box = (face.bbox_x, face.bbox_y, face.bbox_w, face.bbox_h)
+                            try:
+                                data = encode_crop(img, crop_box(box, *img_size))
+                            except Exception as exc:
+                                logger.debug(f"crop failed for media {media_id}: {exc}")
+                                continue
+                            crops.append((face, data))
+                    buffer.append((media_id, face_rows, img_size))
                     report.images_scanned += 1
                     report.faces_found += len(face_rows)
 
                     _submit_next(ex)  # keep the pipeline full
 
                     if len(buffer) >= _COMMIT_CHUNK:
-                        repo.add_scan_results(buffer, FACE_DET_VERSION)
-                        buffer.clear()
+                        _flush()
                     if progress_callback:
                         progress_callback(
                             ProgressEvent(
@@ -110,11 +139,24 @@ def scan_faces(
     finally:
         # Keep what was scanned even when the run is cancelled part way.
         if buffer:
-            repo.add_scan_results(buffer, FACE_DET_VERSION)
+            _flush()
 
     logger.success(
         f"Face scan complete — {report.images_scanned:,} images, "
-        f"{report.faces_found:,} faces (provider={report.provider}). "
+        f"{report.faces_found:,} faces (provider={report.provider}); "
+        f"{report.decisions_carried:,} decisions carried over, "
+        f"{report.decisions_dropped:,} dropped. "
         f"Next: `smart-gallery identify-faces` with a sample directory for each person."
     )
     return report
+
+
+def find_faces(
+    repo: GalleryRepository,
+    *,
+    progress_callback: Optional[ProgressCallback] = None,
+) -> tuple[ScanFacesReport, FileFacesReport]:
+    """Scan new images for faces, then sort every face into people."""
+    scanned = scan_faces(repo, progress_callback=progress_callback)
+    filed = file_faces(repo, group=True, progress_callback=progress_callback)
+    return scanned, filed

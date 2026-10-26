@@ -32,7 +32,11 @@ from smart_gallery.services.recycle import (
     recycle_files,
 )
 from smart_gallery.services.rename import rename_gallery
-from smart_gallery.services.scan_faces import ScanFacesReport, scan_faces
+from smart_gallery.services.scan_faces import (
+    ScanFacesReport,
+    find_faces,
+    scan_faces,
+)
 from smart_gallery.services.sync import SyncReport, diff_drive, sync_drive
 
 __all__ = [
@@ -45,6 +49,7 @@ __all__ = [
     "export_media",
     "ExportReport",
     "scan_faces",
+    "find_faces",
     "ScanFacesReport",
     "identify_faces",
     "IdentifyFacesReport",

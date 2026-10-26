@@ -202,11 +202,19 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
    `hide-person` and `delete-person` are the user's corrections.
    `models.USER_STATES` (`user`, `ignored`) are locked: filing, `cluster-faces`,
    `identify-faces` and rescans never change them. Rejections live in
-   `face_rejections`. `auto`/`cluster` assignments are sticky.
-4. **Carry-over.** Before `invalidate_faces_by_relpath` (or a rescan) deletes a
-   file's faces, user/ignored decisions and rejections go to `face_carryover`;
-   the next scan copies them to the new face with box IoU >= 0.5. A photo that
-   fails to decode keeps its faces and pending decisions.
+   `face_rejections`. `auto`/`cluster` assignments are sticky unless the face
+   is rejected from its person; `hidden` faces stay hidden (only
+   `cluster-faces --rebuild` regroups them). Naming a group, or merging it
+   into a named person, turns its `cluster` faces into `auto`. `label-faces`
+   only records corrections; the People page follows each batch with
+   `file-faces --no-group`.
+4. **Carry-over.** Before `invalidate_faces_by_relpath` (or a rescan / a
+   `FACE_DET_VERSION` bump) deletes a file's faces, user/ignored decisions,
+   rejections, and the `auto`/`cluster` faces of named people go to
+   `face_carryover`; the next scan copies them to the new face with box
+   IoU >= 0.5 (user/ignored rows win over auto rows; named people come back
+   as `auto`). A photo that fails to decode keeps its faces and pending
+   decisions.
 5. **`identify-faces --samples`** (sample-directory `reference_centroid`s) is an
    optional shortcut. **`cluster-faces`** delegates to `file-faces`; `--rebuild`
    keeps named people and user faces, and the old clustering knobs are ignored.

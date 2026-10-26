@@ -13,7 +13,7 @@ from typing import Iterator, Set
 
 DB_DIRNAME = ".smart_gallery"
 DB_FILENAME = "gallery.db"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # A copy in progress lives beside its destination under this extra suffix and is
 # renamed into place when complete, so a cancel never leaves a truncated photo.

@@ -500,12 +500,9 @@ def test_migrate_v4_to_v5_maps_states(tmp_path):
                 )
             }
             assert {"face_rejections", "face_carryover"} <= tables
-            assert (
-                repo.conn.execute(
-                    "SELECT value FROM meta WHERE key='schema_version'"
-                ).fetchone()[0]
-                == "5"
-            )
+            assert repo.conn.execute(
+                "SELECT value FROM meta WHERE key='schema_version'"
+            ).fetchone()[0] == str(SCHEMA_VERSION)
             scan_cols = {
                 r[1] for r in repo.conn.execute("PRAGMA table_info(face_scan_state)")
             }
@@ -513,6 +510,35 @@ def test_migrate_v4_to_v5_maps_states(tmp_path):
 
     check()
     check()  # idempotent
+
+
+def _indexes(repo) -> set:
+    return {
+        r[0]
+        for r in repo.conn.execute("SELECT name FROM sqlite_master WHERE type='index'")
+    }
+
+
+V6_INDEXES = {"ix_faces_suggested", "ix_rejections_person"}
+
+
+def test_new_catalog_has_v6_indexes(repo):
+    assert V6_INDEXES <= _indexes(repo)
+
+
+def test_migrate_v5_to_v6_adds_indexes(drive):
+    from smart_gallery.db.repository import GalleryRepository as Repo
+
+    with Repo.create(drive) as repo:
+        for name in V6_INDEXES:
+            repo.conn.execute(f"DROP INDEX IF EXISTS {name}")
+        repo.conn.execute("UPDATE meta SET value='5' WHERE key='schema_version'")
+        repo.conn.commit()
+        db = repo.db_path
+    for _ in range(2):  # idempotent
+        with Repo.open(db) as repo:
+            assert V6_INDEXES <= _indexes(repo)
+            assert repo.schema_version == SCHEMA_VERSION == 6
 
 
 def _face_on(repo, mid, person_id=None, state="new"):

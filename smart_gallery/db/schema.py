@@ -141,6 +141,14 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_carryover_media ON face_carryover(media_id);",
 ]
 
+# Schema v6: the People page counts suggestions per person, and deleting a
+# person looks up the rejections that reference it.
+CREATE_V6_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_faces_suggested "
+    "ON faces(suggested_person_id, state);",
+    "CREATE INDEX IF NOT EXISTS ix_rejections_person ON face_rejections(person_id);",
+]
+
 
 def init_schema(conn: sqlite3.Connection) -> None:
     """Create tables/indexes if missing and seed the schema version."""
@@ -151,7 +159,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute(CREATE_FACE_SCAN_STATE)
     conn.execute(CREATE_FACE_REJECTIONS)
     conn.execute(CREATE_FACE_CARRYOVER)
-    for stmt in CREATE_INDEXES:
+    for stmt in CREATE_INDEXES + CREATE_V6_INDEXES:
         conn.execute(stmt)
     conn.execute(
         "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
@@ -228,6 +236,10 @@ def migrate(conn: sqlite3.Connection) -> None:
             "UPDATE faces SET state='cluster' "
             "WHERE person_id IS NOT NULL AND state='new'"
         )
+
+    if current < 6:
+        for stmt in CREATE_V6_INDEXES:
+            conn.execute(stmt)
 
     conn.execute(
         "INSERT INTO meta(key, value) VALUES('schema_version', ?) "

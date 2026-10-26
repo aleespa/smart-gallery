@@ -89,34 +89,57 @@ def _tiles(repo, where: str, params, order: str) -> list[FaceTile]:
 
 _ROWS_SQL = """
 SELECT p.id, p.name, p.hidden, p.cover_face_id,
+  COALESCE(c.photos, 0) AS photos, COALESCE(c.faces, 0) AS faces,
+  COALESCE(s.n, 0) AS suggestions
+FROM persons p
+LEFT JOIN (
+  SELECT person_id, COUNT(DISTINCT media_id) AS photos, COUNT(*) AS faces
+  FROM faces WHERE person_id IS NOT NULL GROUP BY person_id
+) c ON c.person_id = p.id
+LEFT JOIN (
+  SELECT suggested_person_id, COUNT(*) AS n FROM faces
+  WHERE state = 'suggested' AND suggested_person_id IS NOT NULL
+  GROUP BY suggested_person_id
+) s ON s.suggested_person_id = p.id
+"""
+_ONE_ROW_SQL = """
+SELECT p.id, p.name, p.hidden, p.cover_face_id,
   (SELECT COUNT(DISTINCT f.media_id) FROM faces f WHERE f.person_id = p.id) AS photos,
   (SELECT COUNT(*) FROM faces f WHERE f.person_id = p.id) AS faces,
   (SELECT COUNT(*) FROM faces f
      WHERE f.suggested_person_id = p.id AND f.state = 'suggested') AS suggestions
-FROM persons p
+FROM persons p WHERE p.id = ?
 """
+_IN_CHUNK = 500
 
 
-def _person_rows(repo, where: str = "", params=()) -> list[PersonRow]:
-    cur = repo.conn.execute(_ROWS_SQL + where, params)
-    rows = []
-    for r in cur.fetchall():
-        cover = None
-        if r["cover_face_id"] is not None:
-            tiles = _tiles(repo, "f.id = ?", (r["cover_face_id"],), "f.id")
-            cover = tiles[0] if tiles else None
-        rows.append(
-            PersonRow(
-                r["id"],
-                r["name"],
-                r["photos"],
-                r["faces"],
-                r["suggestions"],
-                cover,
-                bool(r["hidden"]),
-            )
+def _covers(repo, face_ids: list[int]) -> dict[int, FaceTile]:
+    out: dict[int, FaceTile] = {}
+    for i in range(0, len(face_ids), _IN_CHUNK):
+        chunk = face_ids[i : i + _IN_CHUNK]
+        ph = ", ".join("?" for _ in chunk)
+        for t in _tiles(repo, f"f.id IN ({ph})", chunk, "f.id"):
+            out[t.face_id] = t
+    return out
+
+
+def _person_rows(repo, sql: str = _ROWS_SQL, params=()) -> list[PersonRow]:
+    found = repo.conn.execute(sql, params).fetchall()
+    covers = _covers(
+        repo, [r["cover_face_id"] for r in found if r["cover_face_id"] is not None]
+    )
+    return [
+        PersonRow(
+            r["id"],
+            r["name"],
+            r["photos"],
+            r["faces"],
+            r["suggestions"],
+            covers.get(r["cover_face_id"]),
+            bool(r["hidden"]),
         )
-    return rows
+        for r in found
+    ]
 
 
 def _has_v5(repo) -> bool:
@@ -144,7 +167,7 @@ def people_list(repo: GalleryRepository) -> PeopleList:
 
 
 def person_summary(repo: GalleryRepository, person_id: int) -> PersonSummary | None:
-    rows = _person_rows(repo, " WHERE p.id = ?", (person_id,))
+    rows = _person_rows(repo, _ONE_ROW_SQL, (person_id,))
     if not rows:
         return None
     r = repo.conn.execute(

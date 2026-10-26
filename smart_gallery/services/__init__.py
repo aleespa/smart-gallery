@@ -17,6 +17,7 @@ from smart_gallery.services.identify_faces import (
     IdentifyFacesReport,
     identify_faces,
 )
+from smart_gallery.services.file_faces import FileFacesReport, file_faces
 from smart_gallery.services.init_db import init_drive
 from smart_gallery.services.recycle import (
     RecycleReport,
@@ -40,6 +41,8 @@ __all__ = [
     "ScanFacesReport",
     "identify_faces",
     "IdentifyFacesReport",
+    "file_faces",
+    "FileFacesReport",
     "cluster_faces",
     "split_person",
     "ClusterReport",

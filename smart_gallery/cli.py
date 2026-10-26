@@ -26,6 +26,7 @@ from smart_gallery.progress import (
 )
 from smart_gallery.services import (
     cluster_faces,
+    file_faces,
     compare_galleries,
     convert_cr3,
     export_media,
@@ -45,7 +46,15 @@ from smart_gallery.storage.tree import format_bytes
 
 # Long-running commands whose per-file details (copied/skipped files, ExifTool
 # chatter) go to a log file for the run instead of the terminal.
-DETAIL_LOG_COMMANDS = {"init", "import", "sync", "export", "scan-faces", "recycle"}
+DETAIL_LOG_COMMANDS = {
+    "init",
+    "import",
+    "sync",
+    "export",
+    "scan-faces",
+    "file-faces",
+    "recycle",
+}
 LOG_DIR = Path("logs")
 
 
@@ -466,6 +475,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reconsider all faces assigned to people in the sample set.",
     )
 
+    p_file = sub.add_parser(
+        "file-faces",
+        help="Sort scanned faces into people, suggestions and new groups (no GPU).",
+    )
+    p_file.add_argument("drive", type=Path, help=DRIVE_HELP)
+    p_file.add_argument(
+        "--no-group",
+        action="store_true",
+        help="Skip forming new groups; only match faces to existing people and groups.",
+    )
+
     p_cluster = sub.add_parser(
         "cluster-faces", help="Optionally cluster faces without sample photos."
     )
@@ -730,6 +750,20 @@ def _handle_scan_faces(args):
     )
 
 
+def _handle_file_faces(args):
+    cb = progress_reporter()
+    with GalleryRepository.open(args.drive) as repo:
+        try:
+            report = file_faces(repo, group=not args.no_group, progress_callback=cb)
+        finally:
+            cb.close()
+    logger.success(
+        f"Sorted faces: {report.auto:,} matched, {report.suggested:,} suggested, "
+        f"{report.grouped:,} grouped into {report.groups_created} new group(s), "
+        f"{report.hidden:,} hidden, {report.left:,} left."
+    )
+
+
 def _handle_cluster_faces(args):
     with GalleryRepository.open(args.drive) as repo:
         report = cluster_faces(
@@ -887,6 +921,7 @@ _HANDLERS = {
     "gui": _handle_gui,
     "report": _handle_report,
     "scan-faces": _handle_scan_faces,
+    "file-faces": _handle_file_faces,
     "identify-faces": _handle_identify_faces,
     "cluster-faces": _handle_cluster_faces,
     "people": _handle_people,

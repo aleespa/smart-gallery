@@ -67,6 +67,7 @@ FIX_TITLE = "Fix faces"
 SEND_DELAY_MS = 400  # a burst of clicks becomes one job
 LABELS_DIR = "face-labels"
 LEAVE_ASK = "Send the face corrections you made before leaving?"
+LEAVE_WAIT = "The corrections will be sent when the running job finishes."
 LIST_ERROR = "Could not save the face corrections: {error}"
 
 
@@ -80,6 +81,7 @@ class PeopleView(QWidget):
         self._loading_root = Path()
         self._message_callback: Callable[[], None] | None = None
         self._pending: list[LabelEntry] = []  # corrections not sent yet
+        self._pending_roots: list[str] = []  # the gallery each one belongs to
         self._send_timer = QTimer(self)
         self._send_timer.setSingleShot(True)
         self._send_timer.setInterval(SEND_DELAY_MS)
@@ -277,7 +279,12 @@ class PeopleView(QWidget):
             self.hidden_page.faces_grid,
         ):
             grid.remove_faces(gone)
+        if self.ctx.current is not None:
+            root = str(drive_root_of(Path(self.ctx.current.db_path)))
+        else:
+            root = str(self._root)
         self._pending.extend(entries)
+        self._pending_roots.extend([root] * len(entries))
         self._send_timer.start()
 
     def _send_pending(self, *_args) -> bool:
@@ -286,12 +293,14 @@ class PeopleView(QWidget):
             return False
         self._send_timer.stop()
         jobs = self.ctx.jobs
-        if jobs is None or self.ctx.current is None or jobs.running:
+        if jobs is None or jobs.running:
             return False  # sent when the running job finishes
-        root = str(drive_root_of(Path(self.ctx.current.db_path)))
+        # Always to the gallery they were made in, whatever is open now.
+        root = self._pending_roots[0]
+        batch = [e for e, r in zip(self._pending, self._pending_roots) if r == root]
         try:
             path = self._new_list_path()
-            write_label_list(path, self._pending)
+            write_label_list(path, batch)
         except OSError as exc:
             QMessageBox.warning(self, FIX_TITLE, LIST_ERROR.format(error=exc))
             return False
@@ -304,7 +313,11 @@ class PeopleView(QWidget):
         )
         if not jobs.start(spec):
             return False  # raced with another job: retry on its finish
-        self._pending = []
+        rest = [(e, r) for e, r in zip(self._pending, self._pending_roots) if r != root]
+        self._pending = [e for e, _ in rest]
+        self._pending_roots = [r for _, r in rest]
+        if rest:
+            self._send_timer.start()
         return True
 
     @staticmethod
@@ -332,9 +345,12 @@ class PeopleView(QWidget):
         if answer == buttons.Cancel:
             return False
         if answer == buttons.Yes:
-            self._send_pending()
-        else:
-            self._pending = []
+            while self._pending:
+                if not self._send_pending():
+                    QMessageBox.information(self, FIX_TITLE, LEAVE_WAIT)
+                    return False
+        self._pending = []
+        self._pending_roots = []
         self._send_timer.stop()
         return True
 

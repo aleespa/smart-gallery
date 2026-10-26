@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QObject, Signal
@@ -471,7 +472,7 @@ def test_burst_of_corrections_becomes_one_job(qtbot, repo, cat):
     assert spec.title == "Fix faces"
     assert label[:3] == ("label-faces", root, "--list")
     assert file == ("file-faces", root, "--no-group")
-    data = json.loads(open(label[3], encoding="utf-8").read())
+    data = json.loads(Path(label[3]).read_text(encoding="utf-8"))
     assert [d["action"] for d in data] == ["ignore", "move"]
     assert data[1]["person_id"] == 5
     assert view._pending == []
@@ -545,3 +546,34 @@ def test_remove_faces_keeps_selection_and_scroll(qtbot):
     assert resets == []
     assert [t.face_id for t in grid.tiles()] == [3, 4, 5]
     assert grid.selected_face_ids() == [5]
+
+
+def test_leave_guard_yes_while_job_running_stays(qtbot, repo, cat, monkeypatch):
+    cat.person("Alice")
+    jobs = _Jobs()
+    jobs.running = True
+    ctx = _ctx(repo, jobs)
+    view = _view(qtbot, ctx)
+    view.send_labels([LabelEntry("ignore", (1,))])
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
+    )
+    told = []
+    monkeypatch.setattr(QMessageBox, "information", lambda p, t, x: told.append(x))
+    assert not ctx.can_leave()
+    assert len(view._pending) == 1 and told
+
+
+def test_corrections_go_to_their_own_gallery(qtbot, repo, cat, tmp_path):
+    cat.person("Alice")
+    jobs = _Jobs()
+    jobs.running = True
+    ctx = _ctx(repo, jobs)
+    view = _view(qtbot, ctx)
+    view.send_labels([LabelEntry("ignore", (1,))])
+    other = tmp_path / "other" / ".smart_gallery" / "gallery.db"
+    ctx.set_gallery(Gallery("b", str(other), "b"))
+    jobs.running = False
+    jobs.finished.emit(None)
+    (spec,) = jobs.specs
+    assert spec.argvs[0][1] == _root(repo)

@@ -278,6 +278,7 @@ def test_range_fields_share_a_row():
         ("min_shutter_speed", "max_shutter_speed"),
         ("people",),
         ("person_ids",),
+        ("people_match",),
     ]
 
 

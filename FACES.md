@@ -42,7 +42,6 @@ instead of falling back, set `SG_FACES_REQUIRE_GPU=1`.
 ---
 
 ## 2. The workflow
-## 2. The workflow
 
 Assuming your photos already live in a catalog (`smart-gallery init <drive>` /
 `sync`), point a drive letter or folder at each step. Examples use `E:/`. The
@@ -247,7 +246,8 @@ Named people and your own decisions stay.
 SG_FACES_MIN_SCORE=0.6 uv run smart-gallery scan-faces E:/ --rescan
 uv run smart-gallery file-faces E:/
 ```
-`--rescan` clears all face data and scans everything again.
+`--rescan` scans every image again. Your decisions are carried over to the new
+faces, and named and hidden people stay; unnamed groups are rebuilt.
 
 ## 5. Tuning (environment variables)
 

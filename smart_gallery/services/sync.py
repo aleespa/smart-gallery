@@ -104,6 +104,6 @@ def sync_drive(
     )
     if pending:
         logger.info(
-            f"{pending:,} image(s) pending face scan — run `smart-gallery scan-faces`."
+            f"{pending:,} image(s) pending face scan — run `smart-gallery find-faces`."
         )
     return report

@@ -453,7 +453,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan.add_argument(
         "--rescan",
         action="store_true",
-        help="Clear all face data and scan everything again.",
+        help="Scan every image again; your decisions and named people are kept.",
     )
     p_scan.add_argument(
         "--limit", type=int, default=None, help="Scan at most N images (testing)."

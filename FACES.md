@@ -1,7 +1,8 @@
 # Face recognition — grouping photos by person
 
-smart_gallery detects faces in your catalogued photos, identifies people from
-sample photos you provide, and lets you filter/browse by person. Faces are
+smart_gallery detects faces in your catalogued photos, sorts them into people (you name the
+groups and correct mistakes; sample photos are an optional shortcut), and lets
+you filter/browse by person. Faces are
 stored **in the same per-drive `gallery.db`**, linked to existing `media_items`
 rows — nothing in your media catalog changes.
 
@@ -30,7 +31,7 @@ need any of this — it is lazy-loaded only by the face commands.
   `[tool.uv] override-dependencies`; just don't add it back.
 
 ### Verify the GPU is actually used
-The first thing `scan-faces` logs is the bound execution provider:
+The first thing the scan (`find-faces` / `scan-faces`) logs is the bound execution provider:
 ```
 Face model ready — execution provider: CUDAExecutionProvider
 ```
@@ -41,135 +42,212 @@ instead of falling back, set `SG_FACES_REQUIRE_GPU=1`.
 ---
 
 ## 2. The workflow
+## 2. The workflow
 
 Assuming your photos already live in a catalog (`smart-gallery init <drive>` /
-`sync`), point a drive letter or folder at each step. Examples use `E:/`.
+`sync`), point a drive letter or folder at each step. Examples use `E:/`. The
+desktop app's **People** page does every step below; the commands are what it
+runs for you.
+
+**1. Find faces.** In the app press **Find new faces**; on the command line:
 
 ```bash
-# 1) Detect + embed faces for every image (resumable; safe to re-run / kill).
-uv run smart-gallery scan-faces E:/
+# Scan every image not yet scanned (GPU, resumable), then sort the faces.
+uv run smart-gallery find-faces E:/
+```
 
-# 2) Make one directory per person, named as it should appear in the catalog.
-#    Put clear, single-face examples in each directory. Multiple examples help.
-#       E:/face_samples/Alice/*.jpg
-#       E:/face_samples/Bob/*.jpg
+This is `scan-faces` followed by `file-faces`. The sorting step (`file-faces`,
+no GPU) puts each face in a person, a suggestion, or a new unnamed group.
+`file-faces --no-group` only matches faces to existing people and groups and
+forms no new ones.
 
-# 3) Match catalog faces against those examples.
-uv run smart-gallery identify-faces E:/ --samples E:/face_samples
+**2. Name the groups.** Unnamed groups are people the program found but you
+have not named. Name one on the People page, or:
 
-# 4) Review the results. Each person lists its 3 best catalog photos as
-#    clickable links (OSC-8) — click one to open the image in your viewer.
-uv run smart-gallery people E:/
-#   [   1]  Alice                    842 faces
-#            IMG_0001.JPG   IMG_2207.JPG   IMG_3310.JPG     <- each is clickable
-#   [   2]  Bob                      310 faces
-#            ...
-# Show more/fewer thumbnails per person with --samples N (default 3).
+```bash
+uv run smart-gallery people E:/                       # list people and groups
+uv run smart-gallery name-person E:/ 7 Alice
+uv run smart-gallery name-person E:/ 9 Alice --merge  # 9 is Alice too
+uv run smart-gallery hide-person E:/ 12               # a group of strangers
+uv run smart-gallery hide-person E:/ 12 --unhide
+```
 
-# 5) Browse / export by person.
+Naming a group keeps its faces as `auto`, not confirmed by you. Each person
+lists its 3 best photos as clickable links (OSC-8); `--samples N` changes that.
+
+**3. Fix what is wrong.** On a person's page the **Faces** view shows every
+face, least sure first; confirm, move, say "not this person" or ignore. The
+suggestions strip lets you accept or reject close matches. The same
+corrections from the command line:
+
+```bash
+uv run smart-gallery label-faces E:/ --faces 101 102 --confirm 7
+uv run smart-gallery label-faces E:/ --faces 101 --to 9          # move
+uv run smart-gallery label-faces E:/ --faces 55 --new-person Carol
+uv run smart-gallery label-faces E:/ --faces 55 --not 7          # not this person
+uv run smart-gallery label-faces E:/ --faces 88 --ignore
+uv run smart-gallery label-faces E:/ --list corrections.json     # as the app writes it
+```
+
+Give exactly one action with `--faces`. Corrections are applied, then the
+sorting step runs again for the people they touch (no rescan), so the
+suggestions improve. Whole-person fixes: `merge-persons E:/ 1 7 9` merges 7 and
+9 into 1; `delete-person E:/ 12` returns its faces to the pool;
+`split-person E:/ 12` splits a mixed person (see section 4).
+
+**4. Filter by person.** In the Library, the people filter selects photos with
+a person; with several people it offers *any* (at least one) or *all* (every
+one). On the command line:
+
+```bash
 uv run smart-gallery export --from E:/ --to D:/AlicePhotos --people Alice
+uv run smart-gallery export --from E:/ --to D:/Both --people Alice Bob --people-match all
 uv run smart-gallery report E:/ --to alice.xlsx --people Alice
-
-# Optional: group faces which do not match any supplied samples.
-uv run smart-gallery cluster-faces E:/
-
-# Optional manual corrections.
-uv run smart-gallery merge-persons E:/ 1 7 9
-
-#    If one person has mixed faces, split it or delete it for re-identification.
-uv run smart-gallery split-person E:/ 12
-uv run smart-gallery delete-person E:/ 12
-
-# Export any person by its id (from `people`):
-uv run smart-gallery export --from E:/ --to D:/Cluster7 --person-ids 7
 uv run smart-gallery export --from E:/ --to D:/Some --person-ids 7 12 30
 ```
 
-`identify-faces` requires exactly one detected face in each sample photo;
-photos with zero or multiple detected faces are skipped and reported. Each
-immediate subdirectory name becomes a person name. Faces below the similarity
-threshold or too close to another person's score remain unassigned. Tune the
-cosine threshold with `--threshold` (default `0.5`) and the required lead over
-the runner-up with `--margin` (default `0.05`). Re-running processes only
-unassigned faces, preserving existing assignments. Use `--reassign` to
-reconsider faces currently assigned to people named by the supplied sample
-directories; unmatched faces from those people become unassigned. Other people
-are left alone. Sample embeddings are stored separately from catalog centroids,
-so later updates do not replace the supplied references.
-
 `--people NAME [NAME ...]` and `--person-ids ID [ID ...]` are accepted by
-`export` and `report`. Combining several ids/names selects media containing any
-of them.
+`export` and `report`. `--people-match any|all` (default `any`) decides whether
+media must contain any of the people or all of them.
+
+### Optional shortcut: sample folders
+
+If you would rather seed people from photos than name groups, make one
+directory per person, named as the person should appear, with clear
+single-face examples:
+
+```bash
+#   E:/face_samples/Alice/*.jpg
+#   E:/face_samples/Bob/*.jpg
+uv run smart-gallery identify-faces E:/ --samples E:/face_samples
+```
+
+`identify-faces` requires exactly one detected face in each sample photo;
+photos with zero or several faces are skipped and reported. Faces below the
+similarity threshold or too close to another person's score stay unassigned
+(`--threshold`, default `0.5`; `--margin`, default `0.05`). Re-running handles
+only unassigned faces; `--reassign` reconsiders faces held by the people the
+sample folders name. It never moves a face you decided (`user` or `ignored`)
+and respects your rejections. Sample embeddings are stored separately, so
+later updates do not replace them.
+
+`cluster-faces` still works but is now a wrapper over `file-faces`;
+`--incremental` files faces into existing people only, and `--rebuild` returns
+undecided faces to the pool, drops unnamed groups and sorts again, keeping named
+people and your own decisions. Its old clustering knobs (`--algo`, `--eps`,
+`--min-samples`, `--min-cluster-size`, `--pca`) are accepted but ignored.
+
+### Face states
+
+Every face is in exactly one state:
+
+| State | Meaning | Set by |
+|---|---|---|
+| `user` | You confirmed it, moved it or named it in the Faces view | you only |
+| `auto` | Assigned automatically, very confident (also faces of a group you named) | sorting |
+| `suggested` | A best guess for review, not assigned | sorting |
+| `cluster` | In an unnamed group | sorting |
+| `hidden` | Too small, low score, or in a tiny or hidden group | sorting |
+| `ignored` | You said it is not a face or not worth filing | you only |
+| `new` | Not sorted yet (fresh scan, or returned to the pool) | sorting |
+
+**Your decisions are locked.** Sorting never changes a `user` or `ignored`
+face. "Not this person" is remembered as a rejection: the face is never
+assigned or suggested to that person again, and a face closer to a person's
+rejected faces than to their examples is not matched to them either.
+
+**Assignments are sticky.** A later run never demotes an `auto` face to a
+suggestion, group or hidden, and moves it only if another named person beats
+its current one by the margin and passes the auto threshold. So a group you
+named can grow but never shrinks on its own. Existing groups keep their id and
+only you merge or split them. `split-person` keeps the person and the
+sub-group closest to your confirmed faces; the other sub-groups become new
+unnamed groups, and moved faces get a rejection against the original person.
+
+**Corrections survive rescans.** When a photo changes (`sync` sees a new size
+or mtime) or the face model is bumped, its faces are rescanned, but your `user`
+and `ignored` decisions and rejections are carried over: each old face is
+matched to the new detection by box overlap (IoU of at least 0.5) and the
+decision is copied. Old faces with no match are dropped and counted in the job
+report. A photo that fails to decode keeps its faces and any pending decisions.
+
+**Thresholds** (`FilingConfig` in `smart_gallery/analysis/filing.py`):
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `auto_thresh` | `0.50` | Minimum score for an automatic assignment |
+| `suggest_thresh` | `0.35` | Minimum score to suggest a person |
+| `margin` | `0.05` | Required lead over the runner-up |
+| `k` | `5` | Nearest examples averaged per person |
+| `min_face_px` | `40` | Faces whose short side is smaller go to `hidden` |
+| `min_det_score` | `0.60` | Detections below this go to `hidden` |
+| `min_group_size` | `3` | Smaller new groups go to `hidden` |
+
+Scores are cosine similarities of the 512-d embeddings. Re-running with no
+new faces and no new corrections changes nothing.
 
 ---
 
 ## 3. Keeping it up to date (new photos)
 
-`sync` never runs the GPU. After it ingests new/changed files it tells you how
-many images are pending a face scan:
+`sync` never runs the GPU. After it ingests new or changed files it tells you
+how many images are pending a face scan:
 
 ```bash
 uv run smart-gallery sync E:/
-# ... 1,204 image(s) pending face scan — run `smart-gallery scan-faces`.
+# ... 1,204 image(s) pending face scan.
 
-uv run smart-gallery scan-faces E:/                 # only scans the new images
-uv run smart-gallery identify-faces E:/ --samples E:/face_samples
-# Or match new faces to known centroids, including sample references:
-uv run smart-gallery cluster-faces E:/ --incremental
+uv run smart-gallery find-faces E:/     # scans only the new images, then sorts
 ```
 
-* `scan-faces` skips images already scanned (tracked in `face_scan_state`), so
-  it only processes what's new.
-* `identify-faces` matches new unassigned faces against the supplied sample
-  references and preserves existing assignments. `cluster-faces --incremental`
-  is also available and prefers sample references where present.
-* `cluster-faces --rebuild` is an optional unsupervised workflow; it removes
-  current people, including their names and sample references.
-* `sync` automatically drops face data for files whose pixels changed, and the
-  database FK cascade removes faces for deleted files.
+* `find-faces` skips images already scanned (tracked in `face_scan_state`), so
+  it only processes what is new. New faces are matched to your people first:
+  very confident ones are filed automatically, close ones become suggestions,
+  the rest join or form groups. Use `file-faces` alone to re-sort without
+  scanning.
+* `sync` drops face data for files whose pixels changed (keeping your
+  decisions for the rescan, see above), and the database FK cascade removes
+  faces for deleted files.
 
 ---
 
 ## 4. Fixing assignments
 
-Any matcher can occasionally make a wrong assignment, especially for similar
-looking people or low-quality faces. You may see an **impure person** — one
-person id that mixes several different people. This usually comes from a few
-low-quality faces (blurry, profile, very small) bridging distinct people, or
-thresholds that were a touch too loose. Fixes, least to most disruptive:
+Any matcher can make a wrong assignment, especially for similar-looking people
+or low-quality faces. You may see an **impure person**, one id that mixes
+several people. Fixes, least to most disruptive:
 
-**A. Split just that cluster (surgical — leaves all other people alone):**
+**A. Correct single faces.** The Faces view, or `label-faces` (section 2).
+Moving a face to the right person also teaches the matcher.
+
+**B. Split just that person (surgical):**
 ```bash
-uv run smart-gallery split-person E:/ 12          # re-cluster person 12, tighter
+uv run smart-gallery split-person E:/ 12
 uv run smart-gallery split-person E:/ 12 --eps 0.25 --min-cluster-size 4
 ```
-It re-clusters only person 12's faces with stricter settings and replaces it
-with the resulting sub-clusters (new ids); faces that no longer group cleanly
-become unassigned. Then `people` to review and `name-person` the good ones.
+It re-clusters only person 12's faces that you have not confirmed. The person
+keeps the sub-group closest to the faces you confirmed (or the largest);
+the others become new unnamed groups. Name the good ones.
 
-**B. Delete the junk cluster entirely:**
+**C. Delete the junk group:**
 ```bash
-uv run smart-gallery delete-person E:/ 12   # faces become unassigned, not deleted
-uv run smart-gallery cluster-faces E:/ --incremental   # optionally re-home them
+uv run smart-gallery delete-person E:/ 12   # faces return to the pool, not deleted
+uv run smart-gallery file-faces E:/         # optionally re-home them
 ```
 
-**C. Optionally re-cluster unassigned faces or rebuild all clusters:**
+**D. Re-sort all undecided faces:**
 ```bash
-uv run smart-gallery cluster-faces E:/ --rebuild --pca 128 --min-cluster-size 8
-# or DBSCAN with a tighter radius:
-uv run smart-gallery cluster-faces E:/ --rebuild --algo dbscan --eps 0.38 --min-samples 5
+uv run smart-gallery cluster-faces E:/ --rebuild
 ```
-Stricter settings reduce over-merging, at the cost of more ungrouped faces. A
-full rebuild removes sample-created people and their labels; use it only when
-that is intended.
+Named people and your own decisions stay.
 
-**D. Drop weak faces at the source** (if bad merges persist): raise
-`SG_FACES_MIN_SCORE` (e.g. `0.6`) and re-scan, so blurry bridge-faces never enter
-clustering:
+**E. Drop weak faces at the source** (if bad merges persist): raise
+`SG_FACES_MIN_SCORE` (e.g. `0.6`) and re-scan:
 ```bash
 SG_FACES_MIN_SCORE=0.6 uv run smart-gallery scan-faces E:/ --rescan
-uv run smart-gallery cluster-faces E:/
+uv run smart-gallery file-faces E:/
 ```
+`--rescan` clears all face data and scans everything again.
 
 ## 5. Tuning (environment variables)
 
@@ -182,23 +260,28 @@ uv run smart-gallery cluster-faces E:/
 | `SG_FACES_DECODE_WORKERS` | `min(8, cores-1)` | CPU threads decoding images in parallel. |
 | `SG_FACES_REQUIRE_GPU` | unset | `1` = abort instead of falling back to CPU. |
 
-Clustering knobs are flags on `cluster-faces`: `--algo {hdbscan,dbscan}`,
-`--min-cluster-size` (HDBSCAN), `--eps` / `--min-samples` (DBSCAN).
+Clustering knobs (`--algo`, `--min-cluster-size`, `--eps`, `--min-samples`) are flags on
+`split-person`; `cluster-faces` accepts them but ignores them. Filing thresholds are
+in section 2.
 
 ---
 
 ## 6. Where the data lives
 
-Two new tables in each drive's `gallery.db` (schema v2; old catalogs migrate
-automatically on first open):
+Tables in each drive's `gallery.db` (old catalogs migrate automatically on the
+first read-write open):
 
 * **`faces`** — one row per detected face: bounding box, detection score, a
   512-d L2-normalized ArcFace embedding (BLOB), and the `person_id` it belongs
-  to. `media_id` links to `media_items.id`.
+  to, plus its `state`, `suggested_person_id` and `match_score`.
+  `media_id` links to `media_items.id`.
 * **`persons`** — one row per person: optional `name`, a catalog-face centroid,
   an optional sample-photo reference centroid, face count, and a cover face for
   listings.
 * **`face_scan_state`** — bookkeeping for resumable scans.
+* **`face_rejections`** — `(face, person)` pairs for "not this person".
+* **`face_carryover`** — your decisions for a photo being rescanned, kept
+  until they are applied to the new detections.
 
 Because faces are keyed to `media_items.id` (not stored as media columns), the
 catalog's media schema is untouched and `sync`/`import` can never overwrite face

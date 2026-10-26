@@ -193,11 +193,23 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
    `config.FACE_DET_VERSION` are skipped; bump that constant when the model
    changes. Image decoding runs on a CPU thread pool and feeds one thread that
    owns the GPU.
-2. **`identify-faces`** builds a per-person `reference_centroid` from the sample
-   directories and assigns faces using a cosine threshold plus a margin over the
-   runner-up.
-3. **`cluster-faces`** (HDBSCAN/DBSCAN) is the optional unsupervised path.
-
+2. **`file-faces`** (no GPU) runs `analysis/filing.py` (pure numpy; thresholds
+   in `FilingConfig`) and applies its decisions: each face not decided by the
+   user becomes `auto`, `suggested`, `cluster`, `hidden` or stays `new`.
+   `find-faces` is scan then file in one job; the People page's "Find new
+   faces" runs it.
+3. **`label-faces`**, `name-person`, `merge-persons`, `split-person`,
+   `hide-person` and `delete-person` are the user's corrections.
+   `models.USER_STATES` (`user`, `ignored`) are locked: filing, `cluster-faces`,
+   `identify-faces` and rescans never change them. Rejections live in
+   `face_rejections`. `auto`/`cluster` assignments are sticky.
+4. **Carry-over.** Before `invalidate_faces_by_relpath` (or a rescan) deletes a
+   file's faces, user/ignored decisions and rejections go to `face_carryover`;
+   the next scan copies them to the new face with box IoU >= 0.5. A photo that
+   fails to decode keeps its faces and pending decisions.
+5. **`identify-faces --samples`** (sample-directory `reference_centroid`s) is an
+   optional shortcut. **`cluster-faces`** delegates to `file-faces`; `--rebuild`
+   keeps named people and user faces, and the old clustering knobs are ignored.
 Embeddings are 512-d, L2-normalized, and stored as float32 BLOBs via
 `models.embedding_to_blob`/`blob_to_embedding`.
 

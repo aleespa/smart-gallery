@@ -45,18 +45,25 @@ Commands:
   ui            Open the interactive terminal interface.
   gui           Open the Windows desktop app.
   report        Write an Excel report (and optional figures).
+  find-faces    Scan new images for faces, then sort them into people (GPU).
+  file-faces    Sort scanned faces into people, suggestions and new groups (no GPU).
+  label-faces   Confirm, reject, move or ignore faces.
   scan-faces    Detect & embed faces in every catalogued image (GPU).
   identify-faces Identify faces using person-named sample directories.
-  cluster-faces Optionally group faces without sample photos.
+  cluster-faces Sort faces into groups (wrapper over file-faces).
   people        List detected people and their photo counts.
   name-person   Set (or clear) the name of a person cluster.
+  hide-person   Hide an unnamed group of strangers, or show it again.
   merge-persons Merge several person clusters into one.
   split-person  Re-cluster one impure person into tighter sub-clusters.
   delete-person Delete a person cluster (its faces become unassigned).
 ```
 
-> **Face recognition / group by person** (optional `faces` extra, GPU) — detect
-> faces, identify them from person-named sample directories, then filter with `--people NAME`.
+> **Face recognition / group by person** (optional `faces` extra, GPU) — `find-faces`
+> detects and sorts faces into people; name the groups and fix mistakes on the
+> desktop People page or with `label-faces`, then filter with `--people NAME`
+> (`--people-match any|all` for several). Sample directories with
+> `identify-faces` are an optional shortcut.
 > See **[FACES.md](FACES.md)** for the full guide.
 
 A `<drive>` argument is any directory you treat as a root — `E:/`, a subfolder,

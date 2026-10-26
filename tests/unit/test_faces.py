@@ -500,3 +500,21 @@ def test_delete_person_returns_faces_to_pool(repo, make_item):
     assert [tuple(r) for r in rows] == [("new", None), ("new", None)]
     assert repo.conn.execute("SELECT COUNT(*) FROM face_rejections").fetchone()[0] == 0
     assert repo.get_person(other) is not None
+
+
+def test_delete_person_clears_suggestions_pointing_at_it(repo, make_item):
+    mid = _add_media(repo, make_item, "a.jpg")
+    pid = repo.create_person(Person(name="Alice"))
+    fid = _face_on(repo, mid, None, "suggested")
+    repo.conn.execute(
+        "UPDATE faces SET suggested_person_id=?, match_score=0.5 WHERE id=?",
+        (pid, fid),
+    )
+    repo.conn.commit()
+
+    assert repo.delete_person(pid) is True
+    row = repo.conn.execute(
+        "SELECT state, suggested_person_id, match_score FROM faces WHERE id=?",
+        (fid,),
+    ).fetchone()
+    assert tuple(row) == ("new", None, None)

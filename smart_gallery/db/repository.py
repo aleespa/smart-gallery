@@ -701,6 +701,12 @@ class GalleryRepository:
             "suggested_person_id=NULL WHERE person_id=?",
             (person_id,),
         )
+        # Faces merely suggested to this person lose the suggestion too.
+        self.conn.execute(
+            "UPDATE faces SET state='new', suggested_person_id=NULL, "
+            "match_score=NULL WHERE suggested_person_id=? AND state='suggested'",
+            (person_id,),
+        )
         cur = self.conn.execute("DELETE FROM persons WHERE id=?", (person_id,))
         self.conn.commit()
         return cur.rowcount > 0

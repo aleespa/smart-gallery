@@ -89,10 +89,15 @@ def file_faces(
         ]
 
     repo.apply_filing(decisions, groups)
+    if groups:
+        # The faces were filed before the new groups existed. File them once
+        # more against the new groups too, so a second run finds nothing to do.
+        faces, candidates = repo.load_filing_inputs()
+        decisions = decide(faces, candidates, config)
+        repo.apply_filing(decisions, [])
     tick(3)
 
     report = FileFacesReport(groups_created=len(groups))
-    report.grouped = sum(len(g) for g in groups)
     for d in decisions:
         if d.state == "auto":
             report.auto += 1

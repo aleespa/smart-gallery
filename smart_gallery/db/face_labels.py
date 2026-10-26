@@ -208,27 +208,36 @@ class FaceLabelsMixin:
         self, decisions: "list[Decision]", new_groups: list[list[int]]
     ) -> None:
         """Write decisions and new groups in one transaction, then refresh
-        every person whose faces changed."""
+        every person whose faces changed. Rows a decision leaves as they are
+        are not written."""
         touched: set[int] = set()
         try:
-            old = {
-                r["id"]: r["person_id"]
-                for r in self.conn.execute("SELECT id, person_id FROM faces")
-            }
-            for d in decisions:
-                self.conn.execute(
-                    "UPDATE faces SET state=?, person_id=?, suggested_person_id=?, "
-                    "match_score=? WHERE id=?",
-                    (
-                        d.state,
-                        d.person_id,
-                        d.suggested_person_id,
-                        None if d.score is None else float(d.score),
-                        d.face_id,
-                    ),
+            rows = {
+                r[0]: tuple(r[1:])
+                for r in self.conn.execute(
+                    "SELECT id, state, person_id, suggested_person_id, match_score "
+                    "FROM faces"
                 )
+            }
+            old = {fid: row[1] for fid, row in rows.items()}
+            changed = []
+            for d in decisions:
+                new = (
+                    d.state,
+                    d.person_id,
+                    d.suggested_person_id,
+                    None if d.score is None else float(d.score),
+                )
+                if rows.get(d.face_id) == new:
+                    continue
+                changed.append((*new, d.face_id))
                 if old.get(d.face_id) != d.person_id:
                     touched.update(p for p in (old.get(d.face_id), d.person_id) if p)
+            self.conn.executemany(
+                "UPDATE faces SET state=?, person_id=?, suggested_person_id=?, "
+                "match_score=? WHERE id=?",
+                changed,
+            )
             for members in new_groups:
                 cur = self.conn.execute("INSERT INTO persons (hidden) VALUES (0)")
                 pid = int(cur.lastrowid)

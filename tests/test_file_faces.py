@@ -177,3 +177,62 @@ def test_cli_file_faces_wired():
     assert args.command == "file-faces"
     assert args.no_group is True
     assert "file-faces" in _HANDLERS
+
+
+def test_rejected_face_leaves_a_person_it_was_merged_into(cat, repo):
+    from smart_gallery.services.label_faces import LabelEntry, label_faces
+
+    alice = cat.person("Alice")
+    cat.face(_unit(0), "user", alice)
+    f = cat.face(_near(_unit(0), 0.9), "auto", alice)
+    label_faces(repo, [LabelEntry("reject", (f,), person_id=alice)])
+    group = cat.person()
+    repo.conn.execute(
+        "UPDATE faces SET state='cluster', person_id=? WHERE id=?", (group, f)
+    )
+    repo.conn.commit()
+    repo.recompute_person(group)
+    repo.merge_persons(alice, [group])
+    assert cat.row(f)["person_id"] == alice
+    file_faces(repo, group=False)
+    assert cat.row(f)["person_id"] != alice
+
+
+@pytest.mark.faces
+def test_hidden_one_offs_stay_hidden_after_a_correction_run(cat, repo):
+    pytest.importorskip("sklearn")
+    pytest.importorskip("hdbscan")
+    for e in _cluster(10, 6, 1):
+        cat.face(e)
+    noise = [cat.face(_unit(300)), cat.face(_unit(400))]
+    file_faces(repo)
+    assert [cat.row(i)["state"] for i in noise] == ["hidden", "hidden"]
+    file_faces(repo, group=False)
+    assert [cat.row(i)["state"] for i in noise] == ["hidden", "hidden"]
+
+
+@pytest.mark.faces
+def test_grouping_twice_without_changes_changes_nothing(cat, repo):
+    pytest.importorskip("sklearn")
+    pytest.importorskip("hdbscan")
+    alice = cat.person("Alice")
+    cat.face(_unit(0), "user", alice)
+    cat.face(_near(_unit(0), 0.9))
+    for e in _cluster(10, 6, 1) + _cluster(200, 5, 2):
+        cat.face(e)
+    cat.face(_unit(300))
+    cat.face(_unit(400))
+
+    def persons():
+        return [
+            tuple(r)
+            for r in repo.conn.execute(
+                "SELECT id, name, hidden, face_count, cover_face_id, centroid, "
+                "updated_at FROM persons ORDER BY id"
+            )
+        ]
+
+    file_faces(repo)
+    first = (cat.snapshot(), persons())
+    file_faces(repo)
+    assert (cat.snapshot(), persons()) == first

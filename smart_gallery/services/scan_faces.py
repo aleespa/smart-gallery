@@ -75,16 +75,19 @@ def scan_faces(
     crops = []  # (Face, jpeg bytes), written once the faces have ids
 
     def _flush() -> None:
-        repo.add_scan_results(buffer, FACE_DET_VERSION)
+        # Take the batch first: if writing it fails, the ``finally`` below
+        # must not try the same batch again and hide the original error.
+        batch, batch_crops = list(buffer), list(crops)
+        buffer.clear()
+        crops.clear()
+        repo.add_scan_results(batch, FACE_DET_VERSION)
         report.decisions_carried += repo.last_carryover[0]
         report.decisions_dropped += repo.last_carryover[1]
-        for face, data in crops:
+        for face, data in batch_crops:
             try:
                 write_crop(repo.drive_root, face.id, data)
             except Exception as exc:
                 logger.debug(f"could not save crop of face {face.id}: {exc}")
-        buffer.clear()
-        crops.clear()
 
     def _submit_next(ex) -> None:
         item = next(work_iter, None)
@@ -146,7 +149,8 @@ def scan_faces(
         f"{report.faces_found:,} faces (provider={report.provider}); "
         f"{report.decisions_carried:,} decisions carried over, "
         f"{report.decisions_dropped:,} dropped. "
-        f"Next: `smart-gallery identify-faces` with a sample directory for each person."
+        "Next: `smart-gallery file-faces` sorts them into people "
+        "(`find-faces` and the People page do this for you)."
     )
     return report
 

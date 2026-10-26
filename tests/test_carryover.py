@@ -306,6 +306,26 @@ def test_scan_writes_crops_and_carries(repo, make_item, drive, monkeypatch):
     assert repo.conn.execute("SELECT person_id FROM faces").fetchone()[0] == alice
 
 
+def test_failed_write_is_not_retried(repo, make_item, monkeypatch):
+    pytest.importorskip("cv2")
+    import importlib
+
+    scan_mod = importlib.import_module("smart_gallery.services.scan_faces")
+    monkeypatch.setattr(scan_mod, "FaceScanner", _FakeScanner)
+    monkeypatch.setattr(scan_mod, "_COMMIT_CHUNK", 1)  # flush inside the loop
+    _media(repo, make_item)
+    calls = []
+
+    def boom(results, version):
+        calls.append(list(results))
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(repo, "add_scan_results", boom)
+    with pytest.raises(RuntimeError, match="disk full"):
+        scan_mod.scan_faces(repo)
+    assert len(calls) == 1
+
+
 def test_cli_find_faces_wired():
     args = build_parser().parse_args(["find-faces", "E:/"])
     assert args.command == "find-faces"

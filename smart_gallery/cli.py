@@ -6,6 +6,7 @@ compiled to a FilterOptions.
 """
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -18,6 +19,7 @@ from loguru import logger
 from smart_gallery.config import resolve_db_path
 from smart_gallery.db import GalleryRepository
 from smart_gallery.mirror.faces import ensure_not_mirror
+from smart_gallery.mirror.peers import choose_mirror, find_peer
 from smart_gallery.organize import FilterOptions, Options, normalize_extensions
 from smart_gallery.progress import (
     CANCELLED_EXIT,
@@ -38,6 +40,13 @@ from smart_gallery.services import (
     init_drive,
     label_faces,
     LabelEntry,
+    MirrorChoices,
+    MirrorError,
+    apply_mirror_sync,
+    bring_back,
+    free_up_space,
+    pair_galleries,
+    plan_mirror_sync,
     read_label_list,
     read_list,
     recycle_files,
@@ -60,6 +69,9 @@ DETAIL_LOG_COMMANDS = {
     "file-faces",
     "find-faces",
     "recycle",
+    "sync-mirror",
+    "free-up",
+    "bring-back",
 }
 LOG_DIR = Path("logs")
 
@@ -199,6 +211,27 @@ def _clustering_args(g, *, eps: float, min_samples: int, min_cluster_size: int):
     )
 
 
+def _add_mirror_arg(parser: argparse.ArgumentParser) -> None:
+    g = parser.add_argument_group("Mirror")
+    g.add_argument(
+        "--mirror",
+        type=Path,
+        default=None,
+        help="The mirror drive or its gallery.db (needed with several mirrors).",
+    )
+
+
+def _add_folder_arg(parser: argparse.ArgumentParser) -> None:
+    g = parser.add_argument_group("Folders")
+    g.add_argument(
+        "--folder",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="A folder on the drive to include (repeatable).",
+    )
+
+
 def build_filter_query(args) -> FilterOptions:
     date_range = None
     if args.date_start or args.date_end:
@@ -282,6 +315,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Plan the placement without copying or writing to the catalog.",
     )
 
+    import_mirror = p_import.add_argument_group("Mirror")
+    import_mirror.add_argument(
+        "--no-mirror",
+        action="store_true",
+        help="Import only into the working drive, even if it has mirrors.",
+    )
+
     p_sync = sub.add_parser("sync", help="Reconcile the catalog with the live drive.")
     p_sync.add_argument("drive", type=Path, help=DRIVE_HELP)
     p_sync.add_argument(
@@ -289,6 +329,80 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Report the add/update/delete plan without changing the catalog.",
     )
+
+    p_pair = sub.add_parser("pair", help="Pair a working drive with a mirror drive.")
+    p_pair.add_argument(
+        "working", type=Path, metavar="WORKING", help="The working drive. " + DRIVE_HELP
+    )
+    p_pair.add_argument(
+        "mirror", type=Path, metavar="MIRROR", help="The mirror drive. " + DRIVE_HELP
+    )
+
+    p_smirror = sub.add_parser(
+        "sync-mirror", help="Bring a mirror drive in step with the working drive."
+    )
+    p_smirror.add_argument("drive", type=Path, help=DRIVE_HELP)
+    _add_mirror_arg(p_smirror)
+    smirror_run = p_smirror.add_argument_group("Run")
+    smirror_run.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Plan the sync without copying or changing anything.",
+    )
+    smirror_run.add_argument(
+        "--plan-out",
+        type=Path,
+        default=None,
+        help="Write the plan to this file as JSON.",
+    )
+    smirror_run.add_argument(
+        "--confirm-large-delete",
+        action="store_true",
+        help="Allow a sync that moves many mirror files to the trash.",
+    )
+    smirror_ask = p_smirror.add_argument_group("Differences")
+    smirror_ask.add_argument(
+        "--only-on-mirror",
+        choices=["later", "keep-on-mirror", "copy-back"],
+        default="later",
+        help="Files found only on the mirror: decide later, keep them there, "
+        "or copy them back to the working drive.",
+    )
+    smirror_ask.add_argument(
+        "--changed-on-mirror",
+        choices=["skip", "take-working", "keep-mirror"],
+        default="skip",
+        help="Files edited on the mirror: leave them, overwrite from the "
+        "working drive, or keep the mirror's version.",
+    )
+    smirror_ask.add_argument(
+        "--conflicts",
+        choices=["skip", "take-working", "keep-mirror"],
+        default="skip",
+        help="Files edited on both drives: leave them, keep the working "
+        "version, or keep the mirror's version.",
+    )
+
+    p_free = sub.add_parser(
+        "free-up", help="Delete files from the working drive that the mirror holds."
+    )
+    p_free.add_argument("drive", type=Path, help=DRIVE_HELP)
+    _add_mirror_arg(p_free)
+    _add_filter_args(p_free)
+    _add_folder_arg(p_free)
+    p_free.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List what would be freed without deleting anything.",
+    )
+
+    p_back = sub.add_parser(
+        "bring-back", help="Copy freed-up files from the mirror to the working drive."
+    )
+    p_back.add_argument("drive", type=Path, help=DRIVE_HELP)
+    _add_mirror_arg(p_back)
+    _add_filter_args(p_back)
+    _add_folder_arg(p_back)
 
     p_compare = sub.add_parser(
         "compare", help="Compare the contents of two gallery catalogs."
@@ -669,6 +783,39 @@ def _handle_init(args):
     logger.success(f"Initialized {report.db_path} with {report.indexed:,} items.")
 
 
+def _mirrors_for_import(repo):
+    """Every paired mirror that can be found and opened; the others stay pending."""
+    pairing = repo.get_pairing()
+    if pairing is None or pairing.role != "working":
+        return []
+    uuid = repo.get_meta("db_uuid")
+    opened = []
+    for peer in pairing.peers:
+        path = find_peer(peer)
+        if path is None:
+            logger.warning(
+                f"Mirror {peer.uuid} is not connected; it stays pending "
+                "until the next sync-mirror."
+            )
+            continue
+        try:
+            mirror = GalleryRepository.open(path)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Could not open mirror {peer.uuid} at {path}: {exc}")
+            continue
+        back = mirror.get_pairing()
+        if (
+            back is None
+            or back.role != "mirror"
+            or uuid not in {p.uuid for p in back.peers}
+        ):
+            logger.warning(f"{path} is not paired with this drive; skipping it.")
+            mirror.close()
+            continue
+        opened.append(mirror)
+    return opened
+
+
 def _handle_import(args):
     options = Options(
         by_media_type=args.by_media_type,
@@ -678,6 +825,7 @@ def _handle_import(args):
     )
     cb = progress_reporter()
     with GalleryRepository.open(args.drive) as repo:
+        mirrors = [] if args.no_mirror else _mirrors_for_import(repo)
         try:
             report = import_media(
                 repo,
@@ -685,13 +833,19 @@ def _handle_import(args):
                 output_dir=args.output,
                 options=options,
                 query=build_filter_query(args),
+                mirrors=mirrors,
                 progress_callback=cb,
             )
         finally:
             cb.close()
+            for m in mirrors:
+                m.close()
     logger.success(
         f"Imported: copied={report.copied} skipped={report.skipped} inserted={report.inserted}"
     )
+    for uuid, done in report.mirrored.items():
+        pending = report.mirror_pending.get(uuid, 0)
+        logger.info(f"Mirror {uuid}: {done} file(s) copied, {pending} pending.")
 
 
 def _handle_sync(args):
@@ -705,6 +859,157 @@ def _handle_sync(args):
         f"Sync {'(dry-run) ' if args.dry_run else ''}— "
         f"+{report.added} ~{report.updated} -{report.deleted} ={report.unchanged}"
     )
+
+
+def _open_mirror_of(working, override):
+    """Open the working drive's chosen mirror read-write (MirrorError if absent)."""
+    pairing = working.get_pairing()
+    if pairing is not None and pairing.role == "mirror":
+        raise MirrorError("Run sync-mirror on the working drive.")
+    if pairing is None:
+        raise MirrorError("This gallery has no mirror.")
+    peer = choose_mirror(pairing, override)
+    path = find_peer(peer)
+    if path is None:
+        raise MirrorError(f"The mirror {peer.uuid} cannot be found; connect it first.")
+    return GalleryRepository.open(path)
+
+
+def _handle_pair(args):
+    with GalleryRepository.open(args.working) as working:
+        with GalleryRepository.open(args.mirror) as mirror:
+            pair_galleries(working, mirror)
+            w_id, m_id = working.get_meta("db_uuid"), mirror.get_meta("db_uuid")
+            w_name = working.get_meta("label") or w_id
+            m_name = mirror.get_meta("label") or m_id
+            logger.success(
+                f"Paired working {w_name} ({w_id}) with mirror {m_name} ({m_id})."
+            )
+
+
+_PLAN_CLASSES = (
+    "copy_new",
+    "overwrite",
+    "trash",
+    "moves",
+    "only_on_mirror",
+    "changed_on_mirror",
+    "conflicts",
+    "adopt",
+    "offloaded_changed",
+    "offloaded_missing",
+)
+
+
+def _plan_json(preview) -> dict:
+    """The preview as the dict written to --plan-out."""
+    plan = preview.plan
+    lists = {name: list(getattr(plan, name)) for name in _PLAN_CLASSES}
+    lists["adopt"] = [row.relpath for row in plan.adopt]
+    lists["moves"] = [list(pair) for pair in plan.moves]
+    return {
+        "counts": {name: len(rels) for name, rels in lists.items()},
+        **lists,
+        "copy_bytes": preview.copy_bytes,
+        "mirror_free_bytes": preview.mirror_free_bytes,
+        "mirror_trash_bytes": preview.mirror_trash_bytes,
+        "large_delete": preview.large_delete,
+    }
+
+
+def _log_plan(preview) -> None:
+    data = _plan_json(preview)
+    counts = ", ".join(f"{n}={c}" for n, c in data["counts"].items() if c)
+    logger.info(
+        f"Plan: {counts or 'nothing to do'}; copy {format_bytes(preview.copy_bytes)} "
+        f"(mirror free {format_bytes(preview.mirror_free_bytes)}, "
+        f"trash {format_bytes(preview.mirror_trash_bytes)})."
+    )
+    if preview.large_delete:
+        logger.warning("This sync would trash a large share of the mirror's files.")
+    missing = preview.plan.offloaded_missing
+    if missing:
+        logger.warning(
+            f"{len(missing)} freed-up file(s) are missing from the mirror, so the "
+            "only copy may be gone: " + ", ".join(missing[:10])
+        )
+
+
+def _handle_sync_mirror(args):
+    choices = MirrorChoices(
+        only_on_mirror=args.only_on_mirror,
+        changed_on_mirror=args.changed_on_mirror,
+        conflicts=args.conflicts,
+        confirm_large_delete=args.confirm_large_delete,
+    )
+    cb = progress_reporter()
+    with GalleryRepository.open(args.drive) as working:
+        with _open_mirror_of(working, args.mirror) as mirror:
+            try:
+                preview = plan_mirror_sync(working, mirror, progress_callback=cb)
+                if args.plan_out:
+                    args.plan_out.write_text(
+                        json.dumps(_plan_json(preview), indent=2), encoding="utf-8"
+                    )
+                _log_plan(preview)
+                if args.dry_run:
+                    return
+                report = apply_mirror_sync(
+                    working, mirror, preview, choices, progress_callback=cb
+                )
+            finally:
+                cb.close()
+    logger.success(
+        f"Mirror sync: copied={report.copied} overwritten={report.overwritten} "
+        f"trashed={report.trashed} moved={report.moved} "
+        f"copied_back={report.copied_back} skipped={report.skipped}"
+    )
+    for failure in report.failures:
+        logger.error(failure)
+    if report.failures:
+        sys.exit(1)
+
+
+def _handle_free_up(args):
+    cb = progress_reporter()
+    with GalleryRepository.open(args.drive) as working:
+        with _open_mirror_of(working, args.mirror) as mirror:
+            try:
+                report = free_up_space(
+                    working,
+                    mirror,
+                    build_filter_query(args),
+                    args.folder,
+                    dry_run=args.dry_run,
+                    progress_callback=cb,
+                )
+            finally:
+                cb.close()
+    verb = "Would free" if args.dry_run else "Freed"
+    logger.success(f"{verb} {report.files} file(s), {format_bytes(report.bytes)}.")
+    for note in report.skipped:
+        logger.info(f"Skipped: {note}")
+
+
+def _handle_bring_back(args):
+    cb = progress_reporter()
+    with GalleryRepository.open(args.drive) as working:
+        with _open_mirror_of(working, args.mirror) as mirror:
+            try:
+                report = bring_back(
+                    working,
+                    mirror,
+                    build_filter_query(args),
+                    args.folder,
+                    progress_callback=cb,
+                )
+            finally:
+                cb.close()
+    logger.success(
+        f"Brought back {report.files} file(s), {format_bytes(report.bytes)}."
+    )
+    for note in report.skipped:
+        logger.info(f"Skipped: {note}")
 
 
 def _handle_compare(args):
@@ -1091,6 +1396,10 @@ _HANDLERS = {
     "init": _handle_init,
     "import": _handle_import,
     "sync": _handle_sync,
+    "pair": _handle_pair,
+    "sync-mirror": _handle_sync_mirror,
+    "free-up": _handle_free_up,
+    "bring-back": _handle_bring_back,
     "compare": _handle_compare,
     "export": _handle_export,
     "convert-raw": _handle_convert_cr3,

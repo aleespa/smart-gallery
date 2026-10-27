@@ -20,6 +20,7 @@ from smart_gallery.config import FACE_DET_VERSION
 from smart_gallery.db import GalleryRepository
 from smart_gallery.face_crops import crop_box, encode_crop, write_crop
 from smart_gallery.models import Face
+from smart_gallery.mirror.faces import ensure_not_mirror
 from smart_gallery.progress import SCANNING, ProgressCallback, ProgressEvent
 from smart_gallery.services.file_faces import FileFacesReport, file_faces
 
@@ -52,6 +53,7 @@ def scan_faces(
     limit: Optional[int] = None,
     progress_callback: Optional[ProgressCallback] = None,
 ) -> ScanFacesReport:
+    ensure_not_mirror(repo)
     if rescan:
         logger.info("--rescan: clearing all existing face data first")
         repo.reset_all_faces()
@@ -161,6 +163,7 @@ def find_faces(
     progress_callback: Optional[ProgressCallback] = None,
 ) -> tuple[ScanFacesReport, FileFacesReport]:
     """Scan new images for faces, then sort every face into people."""
+    ensure_not_mirror(repo)
     scanned = scan_faces(repo, progress_callback=progress_callback)
     filed = file_faces(repo, group=True, progress_callback=progress_callback)
     return scanned, filed

@@ -16,6 +16,7 @@ from typing import Literal, Optional, Sequence, get_args
 from loguru import logger
 
 from smart_gallery.db import GalleryRepository
+from smart_gallery.mirror.faces import ensure_not_mirror
 
 Action = Literal["confirm", "reject", "move", "new_person", "ignore"]
 ACTIONS: tuple[str, ...] = get_args(Action)
@@ -102,6 +103,7 @@ def label_faces(
     """Apply corrections. An entry naming a person that no longer exists is an
     error, or, with ``skip_missing`` (a ``--list`` written by the app, which a
     person deleted meanwhile can outdate), is left out and counted."""
+    ensure_not_mirror(repo)
     for e in entries:
         _check_entry(e)
     wanted = {e.person_id for e in entries if e.person_id is not None}

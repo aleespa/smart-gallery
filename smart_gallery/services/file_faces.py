@@ -14,6 +14,7 @@ from loguru import logger
 
 from smart_gallery.analysis.filing import Decision, FilingConfig, decide
 from smart_gallery.db import GalleryRepository
+from smart_gallery.mirror.faces import ensure_not_mirror
 from smart_gallery.progress import FILING, ProgressCallback, ProgressEvent
 
 
@@ -61,6 +62,8 @@ def file_faces(
     config: FilingConfig = FilingConfig(),
     progress_callback: Optional[ProgressCallback] = None,
 ) -> FileFacesReport:
+    ensure_not_mirror(repo)
+
     def tick(done: int) -> None:
         if progress_callback:
             progress_callback(ProgressEvent(FILING, done, 3, unit="steps"))

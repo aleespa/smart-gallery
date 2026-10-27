@@ -22,6 +22,7 @@ from loguru import logger
 
 from smart_gallery.analysis.filing import FilingConfig
 from smart_gallery.db import GalleryRepository
+from smart_gallery.mirror.faces import ensure_not_mirror
 from smart_gallery.services.file_faces import file_faces
 
 DEFAULT_EPS = 0.45
@@ -105,6 +106,7 @@ def cluster_faces(
     accepted for old command lines but no longer used; ``match_thresh`` is the
     filing step's ``auto_thresh``.
     """
+    ensure_not_mirror(repo)
     if (algo, eps, min_samples, min_cluster_size, pca) != (
         "hdbscan",
         DEFAULT_EPS,
@@ -172,6 +174,7 @@ def split_person(
     Defaults are deliberately stricter than a full run (smaller eps / cluster
     size) since the point is to break an over-merged cluster apart.
     """
+    ensure_not_mirror(repo)
     if repo.get_person(person_id) is None:
         raise ValueError(f"No person with id {person_id}.")
 

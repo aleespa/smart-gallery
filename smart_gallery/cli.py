@@ -17,6 +17,7 @@ from loguru import logger
 
 from smart_gallery.config import resolve_db_path
 from smart_gallery.db import GalleryRepository
+from smart_gallery.mirror.faces import ensure_not_mirror
 from smart_gallery.organize import FilterOptions, Options, normalize_extensions
 from smart_gallery.progress import (
     CANCELLED_EXIT,
@@ -978,6 +979,7 @@ def _handle_people(args):
 
 def _handle_name_person(args):
     with GalleryRepository.open(args.drive) as repo:
+        ensure_not_mirror(repo)
         if repo.get_person(args.person_id) is None:
             logger.error(f"No person with id {args.person_id}.")
             sys.exit(1)
@@ -1013,6 +1015,7 @@ def _handle_name_person(args):
 
 def _handle_merge_persons(args):
     with GalleryRepository.open(args.drive) as repo:
+        ensure_not_mirror(repo)
         if repo.get_person(args.dest) is None:
             logger.error(f"No destination person with id {args.dest}.")
             sys.exit(1)
@@ -1026,6 +1029,7 @@ def _handle_merge_persons(args):
 
 def _handle_hide_person(args):
     with GalleryRepository.open(args.drive) as repo:
+        ensure_not_mirror(repo)
         if repo.get_person(args.person_id) is None:
             logger.error(f"No person with id {args.person_id}.")
             sys.exit(1)
@@ -1038,6 +1042,7 @@ def _handle_hide_person(args):
 
 def _handle_split_person(args):
     with GalleryRepository.open(args.drive) as repo:
+        ensure_not_mirror(repo)
         try:
             report = split_person(
                 repo,
@@ -1060,6 +1065,7 @@ def _handle_split_person(args):
 
 def _handle_delete_person(args):
     with GalleryRepository.open(args.drive) as repo:
+        ensure_not_mirror(repo)
         if not repo.delete_person(args.person_id):
             logger.error(f"No person with id {args.person_id}.")
             sys.exit(1)

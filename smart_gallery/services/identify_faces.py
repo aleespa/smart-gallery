@@ -9,6 +9,7 @@ from loguru import logger
 from smart_gallery.analysis.faces import FaceScanner
 from smart_gallery.config import IMAGE_EXTENSIONS
 from smart_gallery.db import GalleryRepository
+from smart_gallery.mirror.faces import ensure_not_mirror
 
 DEFAULT_IDENTIFY_THRESHOLD = 0.5
 DEFAULT_IDENTIFY_MARGIN = 0.05
@@ -95,6 +96,7 @@ def identify_faces(
     reassign: bool = False,
 ) -> IdentifyFacesReport:
     """Build sample references and assign catalog faces on confident matches."""
+    ensure_not_mirror(repo)
     if not 0.0 <= threshold <= 1.0:
         raise ValueError("--threshold must be between 0 and 1.")
     if not 0.0 <= margin <= 2.0:

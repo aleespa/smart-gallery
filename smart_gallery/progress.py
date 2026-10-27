@@ -28,6 +28,7 @@ CANCELLED_EXIT = 130  # the conventional exit code for an interrupted command
 
 # Step names, shown as-is in the terminal and the UI.
 FINDING = "Finding files"
+HASHING = "Comparing files"
 READING = "Reading metadata"
 COPYING = "Copying files"
 SCANNING = "Scanning faces"

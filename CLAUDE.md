@@ -71,6 +71,34 @@ drift apart:
   `db/schema.py:migrate()` runs on every **read-write** open, so it must stay
   idempotent; add an `if current < N:` block for each new version. Read-only
   opens (export, report, people, compare, dashboard) never migrate.
+- **Mirror schema (v7, `SCHEMA_VERSION = 7`).** `mirror_peers`,
+  `mirror_baseline` and `mirror_offloaded` (`db/schema.py`, accessed through
+  `db/mirror_store.py`) are keyed by relpath and deliberately have **no FK to
+  `media_items`**: baseline rows must outlive a deleted media row (that is how
+  "deleted on E" is recognised) and offloaded rows describe files absent from
+  disk. Read-only opens can meet a catalog without them, so readers tolerate a
+  missing table.
+
+### Mirror sync (`mirror/`, `services/mirror.py`)
+
+A working catalog (E) pairs with mirror catalogs (D); sync is E -> D only.
+`mirror/` holds the pure parts: `types`, `hashing` (blake2b-160), `plan` (the
+planner), `faces` (face transfer, face guard), `peers` (find a peer by
+`db_uuid`, `choose_mirror`) and `fileops` (per-drive trash under
+`.smart_gallery/trash/<stamp>/`, 30-day purge). `services/mirror.py` does
+pairing, preview (`plan_mirror_sync`), apply and `MirrorSyncReport`; `free-up`
+and `bring-back` live there too, and `import_media` copies to mirrors unless
+`--no-mirror`.
+
+- **Planner rule.** "Changed" is decided per drive: size or mtime differs from
+  that drive's own snapshot in `mirror_baseline` (cross-drive mtimes are
+  unreliable on exFAT/DST). Cross-drive equality is size+mtime, or size+hash
+  when they differ. Hashes are computed only when needed.
+- **Offloaded rows.** Files freed up from E keep their `media_items` row (and
+  faces); `sync_drive` keeps an offloaded row whose file is missing and clears
+  the flag when the file returns. The planner excludes them from deletes.
+- **Safeguards.** Refuse on a missing root, `db_uuid` mismatch or empty walk;
+  `--confirm-large-delete` above 5% trashed.
 
 ### Why face data is never stored on `media_items`
 
@@ -178,6 +206,9 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   `gui/titlebar.py:TitleBar` (drag to move, double-click to maximize) with
   `WindowButtons` at the right, and a `ResizeFrame` margin resizes it. Moving
   and resizing use `startSystemMove`/`startSystemResize`, so snapping works.
+- **Mirror button.** `gui/mirror/` (`menu.py`, `dialogs.py`) is the Library
+  header's Mirror menu: sync (preview dialog), free up, bring back, pair. It
+  acts only on its own dry run. No new area.
 - **Theme** lives in `gui/theme.py`: Segoe UI Variable Text for controls,
   Georgia (`serif_font`) for headings only, and one accent (`ACCENT`, the
   first Sunset stop) set as the palette's Highlight/Accent so every
@@ -188,6 +219,11 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   `QT_QPA_PLATFORM=offscreen`) and are skipped when PySide6 is missing.
 
 ### Face pipeline
+
+**Mirror guard.** Faces are scanned on E only. `mirror.faces.ensure_not_mirror`
+makes scan, filing and every label/person command refuse on a `mirror`-role
+catalog; sync copies faces/persons by id (D's tables are cleared on the first
+transfer) and invalidates D's cached face crops when they change.
 
 1. **`scan-faces`** is resumable. Images already scanned at the current
    `config.FACE_DET_VERSION` are skipped; bump that constant when the model

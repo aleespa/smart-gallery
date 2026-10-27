@@ -153,6 +153,49 @@ whose files are gone** and **analyzes only new or changed files** (detected by
 size + mtime). Unchanged files are never re-read. Prints a summary like
 `+12 ~3 -5 =40100` (added / updated / deleted / unchanged).
 
+### Keeping two drives in step — `pair`, `sync-mirror`, `free-up`, `bring-back`
+
+Keep a **working drive** (where you edit, say `E:/`) and one or more **mirror
+drives** (the stable copy, say `D:/`) identical. Sync only flows working →
+mirror; nothing on a mirror is ever deleted outright.
+
+```bash
+smart-gallery pair E:/ D:/                  # once; both catalogs must exist
+smart-gallery sync-mirror E:/ --dry-run --plan-out plan.json   # preview
+smart-gallery sync-mirror E:/               # apply
+smart-gallery free-up E:/ --years 2019 --dry-run               # then without --dry-run
+smart-gallery bring-back E:/ --years 2019
+```
+
+- **`pair <working> <mirror>`** links the two catalogs (matched by catalog id,
+  so a new drive letter is fine). A working drive may have several mirrors; with
+  more than one, pass `--mirror D:/` to `sync-mirror`, `free-up` and `bring-back`.
+- **`sync-mirror <drive>`** refreshes both catalogs, then copies new and edited
+  files to the mirror, moves files you deleted or renamed on the working drive
+  into the mirror's trash, and carries face data across. Files seen only on the
+  mirror, or edited there or on both, are your call: `--only-on-mirror
+  later|keep-on-mirror|copy-back`, `--changed-on-mirror
+  skip|take-working|keep-mirror`, `--conflicts skip|take-working|keep-mirror`
+  (all default to leaving them). `--dry-run` previews, `--plan-out FILE` writes
+  the plan as JSON. A sync that would trash more than 5% of the mirror needs
+  `--confirm-large-delete`. It refuses when either drive is missing or its
+  catalog does not match the pairing.
+- **`free-up <drive>`** deletes files from the working drive once the mirror
+  holds a verified copy (same size and hash). Takes the usual filter flags and
+  `--folder`. The catalog rows stay, shown greyed out in the app.
+- **`bring-back <drive>`** copies such files from the mirror back.
+- **`import`** also copies into every reachable mirror, from the fresh working
+  copy. If a mirror is absent the import still completes and the next
+  `sync-mirror` finishes the job. `--no-mirror` skips mirrors for one import.
+- The mirror's trash is `<mirror>/.smart_gallery/trash/<run>/…`; runs older than
+  30 days are purged by the next sync.
+- Faces are scanned on the working drive only. Face and person commands
+  (`scan-faces`, `label-faces`, `merge-persons`, …) refuse on a mirror; its face
+  data is a copy that each sync refreshes.
+
+In the desktop app the Library header has a **Mirror** button with the same
+actions (sync with a preview dialog, free up, bring back, pair).
+
 ### `compare` — compare two catalogs
 
 ```bash

@@ -34,7 +34,9 @@ E is the working copy, D is the mirror. D must never lose a file by accident.
   only on D, are surfaced and the user decides; nothing flows D -> E
   automatically except *Bring back* and an explicit "copy back" choice.
 - Continuous or background sync. Sync runs when the user presses a button.
-- More than two drives, or a cloud target.
+- Several working drives (changes made in two places and merged), or a cloud
+  target. One working drive with several mirrors is supported by the schema
+  and the commands (see "Several mirrors"), though the user has one today.
 - A new top-level section/tab in the desktop app.
 
 ## Anti-goals (a failure even if it technically works)
@@ -71,20 +73,22 @@ reused on D without first clearing D's face tables.
 
 ### Pairing
 
-Each catalog stores its peer: the other catalog's `db_uuid` (so a drive-letter
-change survives), a hint path, and a role (`working` for E, `mirror` for D).
-The sync buttons appear when the current gallery has a pairing.
+Each catalog stores its role (`working` for E, `mirror` for D) and its peers:
+each peer's `db_uuid` (so a drive-letter change survives) and a hint path. A
+working catalog may have several mirrors; a mirror has exactly one working
+peer. The sync buttons appear when the current gallery has a pairing.
 
 The working catalog (E) also stores:
 
-- **Baseline**: for each relpath that was identical on both drives at the end
-  of the last successful sync, its size and **each drive's own mtime** at that
-  moment. "Changed since the last sync" is then decided within one drive
+- **Baseline**, one per mirror: for each relpath that was identical on both
+  drives at the end of the last successful sync with that mirror, its size and
+  **each drive's own mtime** at that moment. "Changed since the last sync" is then decided within one drive
   (size or mtime differs from that drive's snapshot), where mtime is reliable,
   so unchanged files are never hashed. The baseline also tells "deleted on E"
   from "new on D". It lives only on E.
-- **Offloaded set**: relpaths deliberately kept on D only. Their rows stay in
-  E's catalog (with faces and thumbnails), drawn greyed out.
+- **Offloaded set**: relpaths deliberately kept off E, each with the mirrors
+  that hold a verified copy. Their rows stay in E's catalog (with faces and
+  thumbnails), drawn greyed out.
 - **Offload rules**: filters (file type, extension, date range) describing
   what new imports should send to D only.
 
@@ -113,7 +117,8 @@ The working catalog (E) also stores:
 | not B, W, M | first sight of a common file | equal size and mtime: in step; otherwise compare hashes: equal is in step, different is a conflict |
 | O, M, D unchanged | offloaded, safe | none |
 | O, M, D changed | offloaded file edited on D | report only (E has no file to compare) |
-| O, not M | offloaded file missing on D: **the only copy is gone** | report loudly; never act |
+| O, not M, D listed as a holder | offloaded file missing on D: **a kept copy is gone** | report loudly; never act |
+| O, not M, D not a holder | kept on another mirror | none |
 
    Any "changed" case first compares hashes; if E's and D's bytes are in fact
    equal (only a timestamp moved), it is in step and the baseline is refreshed.
@@ -177,6 +182,21 @@ only.
 - Both drives get a free-space check before copying; D's check counts the
   space its trash already uses.
 
+### Several mirrors
+
+The user has one mirror today; the design keeps the door open for more
+without a later migration:
+
+- Peers, baselines and offloaded holders are stored per mirror (above).
+- Sync, Free up and Bring back work on one pair at a time. With more than one
+  mirror, the command names which one; the Mirror menu shows one "Sync to
+  <label>" entry per mirror.
+- Free up requires a verified copy on the chosen mirror and records it as the
+  holder. Bring back copies from any reachable holder.
+- Import copies to every reachable mirror; each one that fails counts as
+  pending for that mirror.
+- Each mirror records E as its face source, so face transfer is per pair.
+
 ### Safeguards
 
 - Refuse to sync if E or D root is not mounted, or its catalog `db_uuid` does
@@ -199,8 +219,9 @@ only.
 - CLI: `pair`, `sync-mirror` (preview / apply, choice flags), `free-up`,
   `bring-back`, and a mirror switch on `import`. Options go in the proper
   argparse groups with `help=` text, so the generated forms work.
-- Schema v7: baseline and offloaded tables (no `media_items` column, so the
-  lock-step contracts and filter parity are untouched).
+- Schema v7: peers, baseline (keyed by mirror and relpath) and offloaded
+  (keyed by relpath and holding mirror) tables; no `media_items` column, so
+  the lock-step contracts and filter parity are untouched.
 - GUI: one "Mirror" menu button in the Library header (no new area). On E:
   sync, free up, bring back. On D: a disabled entry saying to open the working
   drive to sync. On an unpaired gallery: "Pair with another gallery...". The

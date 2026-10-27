@@ -108,3 +108,11 @@ def test_set_hashes_survives_until_row_changes(repo, make_item):
     assert repo.mirror_rows()["a.jpg"].content_hash == "abc"
     repo.upsert_many([make_item("a.jpg")])
     assert repo.mirror_rows()["a.jpg"].content_hash is None
+
+
+def test_two_drives_fixture_has_distinct_catalogs(two_drives):
+    e, d = two_drives
+    assert e.is_dir() and d.is_dir()
+    with GalleryRepository.open(e) as re_, GalleryRepository.open(d) as rd:
+        assert re_.get_meta("db_uuid") and rd.get_meta("db_uuid")
+        assert re_.get_meta("db_uuid") != rd.get_meta("db_uuid")

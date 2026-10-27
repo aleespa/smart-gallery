@@ -29,6 +29,19 @@ def repo(drive) -> GalleryRepository:
 
 
 @pytest.fixture
+def two_drives(tmp_path):
+    """A working drive E and a mirror drive D, each with its own catalog."""
+    from smart_gallery.services import init_drive
+
+    e, d = tmp_path / "E", tmp_path / "D"
+    e.mkdir()
+    d.mkdir()
+    init_drive(e)
+    init_drive(d)
+    return e, d
+
+
+@pytest.fixture
 def make_item():
     """Factory for MediaItems with sensible image defaults."""
 

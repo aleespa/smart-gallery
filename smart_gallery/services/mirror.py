@@ -3,6 +3,10 @@
 Planning never writes files. Applying copies atomically, moves replaced or
 deleted files into the drive's trash (never a permanent delete), and records
 each finished file in the baseline so an interrupted run resumes.
+
+Free up space is the one permanent delete: it removes working-drive files
+whose verified copy is on the mirror (faces scanned and transferred first) and
+never touches the mirror's files. Bring back copies them home again.
 """
 
 from __future__ import annotations
@@ -12,11 +16,11 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Literal, Optional, Tuple
+from typing import Callable, Dict, List, Literal, Optional, Sequence, Set, Tuple
 
 from loguru import logger
 
-from smart_gallery.config import DB_DIRNAME, iter_files
+from smart_gallery.config import DB_DIRNAME, FACE_DET_VERSION, iter_files
 from smart_gallery.db import GalleryRepository
 from smart_gallery.mirror.faces import FaceSyncReport, sync_face_data
 from smart_gallery.mirror.fileops import (
@@ -36,6 +40,7 @@ from smart_gallery.mirror.types import (
     key,
 )
 from smart_gallery.models import DB_COLUMNS, MediaItem
+from smart_gallery.organize.filters import FilterOptions, is_query_empty, matches
 from smart_gallery.organize.organize import copy_atomic, copy_progress
 from smart_gallery.progress import ProgressCallback
 from smart_gallery.services.sync import sync_drive
@@ -50,7 +55,11 @@ __all__ = [
     "MirrorError",
     "MirrorPreview",
     "MirrorSyncReport",
+    "OffloadReport",
     "apply_mirror_sync",
+    "bring_back",
+    "free_up_space",
+    "offload_rule_matches",
     "pair_galleries",
     "plan_mirror_sync",
     "purge_trash",
@@ -85,7 +94,9 @@ class MirrorPreview:
     mirror_files: int
 
 
-def _check(working: GalleryRepository, mirror: GalleryRepository) -> str:
+def _check(
+    working: GalleryRepository, mirror: GalleryRepository, *, require_files=True
+) -> str:
     wp, mp = working.get_pairing(), mirror.get_pairing()
     if wp is None or mp is None:
         raise MirrorError("These galleries are not paired.")
@@ -99,7 +110,7 @@ def _check(working: GalleryRepository, mirror: GalleryRepository) -> str:
     for repo, name in ((working, "working"), (mirror, "mirror")):
         if not repo.drive_root.is_dir():
             raise MirrorError(f"The {name} drive {repo.drive_root} is not available.")
-    if next(iter_files(working.drive_root), None) is None:
+    if require_files and next(iter_files(working.drive_root), None) is None:
         raise MirrorError(
             f"The working drive {working.drive_root} has no files; "
             "it may be unmounted or empty. Refusing to plan."
@@ -473,4 +484,255 @@ def apply_mirror_sync(
     report.faces = sync_face_data(working, mirror, progress_callback)
     purge_trash(mirror)
     purge_trash(working)
+    return report
+
+
+# -- free up space / bring back -----------------------------------------------
+
+NO_COPY = "no verified copy on mirror"
+NOT_SCANNED = "faces not scanned"
+CHANGED = "changed on the working drive"
+_SCANNED_SQL = (
+    "SELECT mi.relpath FROM media_items mi JOIN face_scan_state s "
+    "ON s.media_id = mi.id WHERE s.det_version=?"
+)
+
+
+@dataclass
+class OffloadReport:
+    files: int = 0
+    bytes: int = 0
+    skipped: List[str] = field(default_factory=list)
+
+
+def offload_rule_matches(rules: Sequence[FilterOptions], item: MediaItem) -> bool:
+    """True when ``item`` matches any offload rule."""
+    return any(matches(item, rule) for rule in rules)
+
+
+def _rule_key(rule: FilterOptions) -> tuple:
+    """What an offload rule stores (file types, extensions, date range)."""
+    return (
+        tuple(rule.filetypes or ()),
+        tuple(rule.extensions or ()),
+        tuple(rule.date_range) if rule.date_range else None,
+    )
+
+
+def _storable_as_rule(selection: FilterOptions) -> bool:
+    """True when the selection uses only what an offload rule can keep."""
+    return is_query_empty(
+        FilterOptions(
+            cameras=selection.cameras,
+            lenses=selection.lenses,
+            aperture_range=selection.aperture_range,
+            iso_range=selection.iso_range,
+            shutter_speed_range=selection.shutter_speed_range,
+            people=selection.people,
+            person_ids=selection.person_ids,
+        )
+    )
+
+
+def _folder_keys(folders: Sequence[str]) -> List[str]:
+    """Folder prefixes as case-insensitive POSIX keys; blanks are dropped."""
+    out = []
+    for folder in folders:
+        k = key(str(folder).replace("\\", "/").strip().strip("/"))
+        if k and k != ".":
+            out.append(k)
+    return out
+
+
+def _selected(
+    repo: GalleryRepository, selection: FilterOptions, folders: Sequence[str]
+) -> List[str]:
+    prefixes = _folder_keys(folders)
+    rels = repo.query_relpaths(selection)
+    if not prefixes:
+        return rels
+    return [
+        r
+        for r in rels
+        if any(key(r) == p or key(r).startswith(p + "/") for p in prefixes)
+    ]
+
+
+def _keys(repo: GalleryRepository, sql: str, params: tuple = ()) -> Set[str]:
+    return {key(r["relpath"]) for r in repo.conn.execute(sql, params)}
+
+
+def free_up_space(
+    working: GalleryRepository,
+    mirror: GalleryRepository,
+    selection: FilterOptions,
+    folders: Sequence[str] = (),
+    *,
+    dry_run: bool = False,
+    progress_callback: Optional[ProgressCallback] = None,
+) -> OffloadReport:
+    """Permanently delete selected files from the working drive once the
+    mirror holds a verified copy and their faces are scanned and transferred.
+    No file on the mirror changes; only its catalog gets the face data."""
+    if is_query_empty(selection) and not _folder_keys(folders):
+        raise MirrorError("Choose what to free up.")
+    if not _folder_keys(folders) and not _storable_as_rule(selection):
+        raise MirrorError(
+            "Free up space by file type, extension, date range or folder; "
+            "other filters cannot be kept as an offload rule."
+        )
+    uuid = _check(working, mirror)
+    # Fresh catalogs: a changed file loses its stored hash and its face scan.
+    sync_drive(working, progress_callback=progress_callback)
+    sync_drive(mirror, progress_callback=progress_callback)
+    offloaded = {key(r) for r in working.offloaded_relpaths()}
+    candidates = [
+        r for r in _selected(working, selection, folders) if key(r) not in offloaded
+    ]
+    w_rows, m_rows = working.mirror_rows(), mirror.mirror_rows()
+    report = OffloadReport()
+
+    same_size = [
+        r
+        for r in candidates
+        if key(r) in m_rows and m_rows[key(r)].size_bytes == w_rows[key(r)].size_bytes
+    ]
+    w_hash = ensure_hashes(working, same_size, progress_callback, rows=w_rows)
+    m_hash = ensure_hashes(
+        mirror,
+        [m_rows[key(r)].relpath for r in same_size],
+        progress_callback,
+        rows=m_rows,
+    )
+    images = _keys(working, "SELECT relpath FROM media_items WHERE media_type='image'")
+    scanned = _keys(working, _SCANNED_SQL, (FACE_DET_VERSION,))
+    eligible: List[str] = []
+    for rel in candidates:
+        k = key(rel)
+        if not (w_hash.get(k) and w_hash.get(k) == m_hash.get(k)):
+            report.skipped.append(f"{rel}: {NO_COPY}")
+        elif k in images and k not in scanned:
+            report.skipped.append(f"{rel}: {NOT_SCANNED}")
+        else:
+            eligible.append(rel)
+
+    if dry_run:
+        report.files = len(eligible)
+        report.bytes = sum(w_rows[key(r)].size_bytes for r in eligible)
+        return report
+
+    if eligible:
+        # Faces reach the mirror before any working copy goes.
+        sync_face_data(working, mirror, progress_callback)
+    removed: List[str] = []
+    try:
+        for done, rel in enumerate(eligible, 1):
+            row, m_row = w_rows[key(rel)], m_rows[key(rel)]
+            path = working.drive_root / row.relpath
+            try:
+                st = path.stat()
+                m_size = (mirror.drive_root / m_row.relpath).stat().st_size
+                if (st.st_size, st.st_mtime_ns) != (row.size_bytes, row.mtime_ns):
+                    report.skipped.append(f"{rel}: {CHANGED}")
+                elif m_size != row.size_bytes:
+                    report.skipped.append(f"{rel}: {NO_COPY}")
+                else:
+                    os.remove(path)
+                    removed.append(row.relpath)
+                    report.files += 1
+                    report.bytes += row.size_bytes
+                    logger.debug(f"Freed up: {rel}")
+            except FileNotFoundError:
+                report.skipped.append(f"{rel}: {NO_COPY}")
+            except OSError as exc:
+                logger.warning(f"Could not free up {rel}: {exc}")
+                report.skipped.append(f"{rel}: {exc}")
+            if progress_callback:
+                progress_callback(copy_progress(done, len(eligible), report.files, 0))
+    finally:
+        if removed:
+            working.add_offloaded(removed, uuid)
+
+    if not _folder_keys(folders):
+        rules = working.get_pairing().offload_rules
+        if all(_rule_key(r) != _rule_key(selection) for r in rules):
+            working.set_offload_rules(rules + [selection])
+    return report
+
+
+def bring_back(
+    working: GalleryRepository,
+    mirror: GalleryRepository,
+    selection: FilterOptions,
+    folders: Sequence[str] = (),
+    *,
+    progress_callback: Optional[ProgressCallback] = None,
+) -> OffloadReport:
+    """Copy offloaded files held by ``mirror`` back to the working drive."""
+    uuid = _check(working, mirror, require_files=False)
+    held = {key(r) for r in working.offloaded_on(uuid)}
+    candidates = [r for r in _selected(working, selection, folders) if key(r) in held]
+    w_rows, m_rows = working.mirror_rows(), mirror.mirror_rows()
+    report = OffloadReport()
+
+    sources: List[Tuple[str, str, int]] = []
+    for rel in candidates:
+        m_rel = m_rows[key(rel)].relpath if key(rel) in m_rows else rel
+        try:
+            sources.append((rel, m_rel, (mirror.drive_root / m_rel).stat().st_size))
+        except OSError:
+            report.skipped.append(f"{rel}: not on the mirror")
+    need = sum(size for _, _, size in sources)
+    free = shutil.disk_usage(working.drive_root).free
+    if need > free:
+        raise MirrorError(
+            f"The working drive has {free} bytes free but bringing these "
+            f"files back needs {need} bytes."
+        )
+
+    restored: List[str] = []
+    upserts: List[MediaItem] = []
+    changed: List[str] = []
+    base: List[BaselineRow] = []
+    try:
+        for done, (rel, m_rel, size) in enumerate(sources, 1):
+            src, dest = mirror.drive_root / m_rel, working.drive_root / rel
+            try:
+                _copy(src, dest)
+            except OSError as exc:
+                logger.warning(f"Could not bring back {rel}: {exc}")
+                report.skipped.append(f"{rel}: {exc}")
+            else:
+                upserts.append(_row_for(mirror, m_rel, dest, working.drive_root))
+                old, new = w_rows[key(rel)], m_rows.get(key(rel))
+                if (
+                    new is None
+                    or old.size_bytes != size
+                    or (
+                        old.content_hash
+                        and new.content_hash
+                        and old.content_hash != new.content_hash
+                    )
+                ):
+                    changed.append(rel)  # different content: its faces re-scan
+                base.append(_baseline_row(rel, dest, src))
+                restored.append(rel)
+                report.files += 1
+                report.bytes += size
+                logger.debug(f"Brought back: {rel}")
+            if progress_callback:
+                progress_callback(copy_progress(done, len(sources), report.files, 0))
+    finally:
+        if upserts:
+            working.upsert_many(upserts)
+        if changed:
+            working.invalidate_faces_by_relpath(changed)
+        if restored:
+            working.remove_offloaded(restored)
+            working.update_baseline(uuid, base, [])
+
+    pairing = working.get_pairing()
+    rules = [r for r in pairing.offload_rules if _rule_key(r) != _rule_key(selection)]
+    if len(rules) != len(pairing.offload_rules):
+        working.set_offload_rules(rules)
     return report

@@ -277,3 +277,61 @@ def test_offload_rule_matches_any_rule(make_item):
     assert offload_rule_matches([OTHER, FilterOptions(filetypes=["video"])], item)
     assert not offload_rule_matches([OTHER], item)
     assert not offload_rule_matches([], item)
+
+
+def test_free_up_case_differing_pair_transfers_faces_before_delete(
+    two_drives, make_item
+):
+    e, d = two_drives
+    _put(e, "Photos/IMG_1.JPG", "img")
+    (d / "photos").mkdir()
+    shutil.copy2(e / "Photos/IMG_1.JPG", d / "photos/img_1.jpg")
+    w, m = _paired(e, d)
+    with w, m:
+        _catalog_image(w, make_item, e, "Photos/IMG_1.JPG")
+        _catalog_image(m, make_item, d, "photos/img_1.jpg")
+        _mark_scanned(w, "Photos/IMG_1.JPG")
+        w.conn.execute(
+            "INSERT INTO faces (id, media_id, bbox_x, bbox_y, bbox_w, bbox_h, "
+            "det_score, embedding, state) VALUES "
+            "(1, (SELECT id FROM media_items WHERE relpath=?), 1, 2, 3, 4, 0.9, "
+            "?, 'new')",
+            ("Photos/IMG_1.JPG", b"\xaa"),
+        )
+        w.conn.commit()
+
+        report = free_up_space(w, m, FilterOptions(filetypes=["image"]))
+
+        assert report.files == 1 and report.skipped == []
+        assert not (e / "Photos/IMG_1.JPG").exists()
+        assert (d / "photos/img_1.jpg").exists()
+        d_id = m.conn.execute(
+            "SELECT id FROM media_items WHERE relpath='photos/img_1.jpg'"
+        ).fetchone()[0]
+        assert (
+            m.conn.execute("SELECT media_id FROM faces WHERE id=1").fetchone()[0]
+            == d_id
+        )
+        assert (
+            m.conn.execute(
+                "SELECT det_version FROM face_scan_state WHERE media_id=?", (d_id,)
+            ).fetchone()[0]
+            == FACE_DET_VERSION
+        )
+
+
+def test_free_up_skips_image_whose_scan_state_did_not_reach_mirror(
+    two_drives, make_item, monkeypatch
+):
+    e, d = two_drives
+    _mirror_copy(e, d, "a.jpg", "img")
+    w, m = _paired(e, d)
+    monkeypatch.setattr(mirror_service, "sync_face_data", lambda *a, **k: None)
+    with w, m:
+        _catalog_image(w, make_item, e, "a.jpg")
+        _catalog_image(m, make_item, d, "a.jpg")
+        _mark_scanned(w, "a.jpg")
+        report = free_up_space(w, m, FilterOptions(filetypes=["image"]))
+        assert report.files == 0
+        assert report.skipped == ["a.jpg: faces not scanned"]
+        assert (e / "a.jpg").exists()

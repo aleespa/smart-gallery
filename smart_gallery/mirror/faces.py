@@ -15,6 +15,7 @@ from loguru import logger
 
 from smart_gallery.db import GalleryRepository
 from smart_gallery.face_crops import crop_path
+from smart_gallery.mirror.types import key
 from smart_gallery.progress import FILING, ProgressCallback, ProgressEvent
 
 _FACE_META = (
@@ -103,8 +104,9 @@ def _read_embeddings(repo: GalleryRepository, ids: List[int]) -> Dict[int, bytes
 
 
 def _relpaths(repo: GalleryRepository) -> Dict[int, str]:
+    """``{media_id: key(relpath)}``: media match across drives case-insensitively."""
     return {
-        r["id"]: r["relpath"].casefold()
+        r["id"]: key(r["relpath"])
         for r in repo.conn.execute("SELECT id, relpath FROM media_items")
     }
 

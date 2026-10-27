@@ -166,3 +166,28 @@ def test_updated_face_crop_is_invalidated(pair):
     assert sync_face_data(w, m).updated == 1
     assert not c1.exists()
     assert c2.exists()
+
+
+def test_case_differing_relpath_transfers_faces(two_drives, make_item):
+    e, d = two_drives
+    with GalleryRepository.open(e) as w, GalleryRepository.open(d) as m:
+        w.upsert_many([make_item("Photos/IMG_1.JPG")])
+        m.upsert_many([make_item("z.jpg"), make_item("photos/img_1.jpg")])
+        _face(w, 1, "Photos/IMG_1.JPG", b"\xaa")
+        w.conn.execute(
+            "INSERT INTO face_scan_state(media_id, n_faces, det_version) "
+            "VALUES(?, 1, 'v1')",
+            (_mid(w, "Photos/IMG_1.JPG"),),
+        )
+        w.conn.commit()
+
+        sync_face_data(w, m)
+
+        d_id = _mid(m, "photos/img_1.jpg")
+        assert [tuple(r) for r in m.conn.execute("SELECT id, media_id FROM faces")] == [
+            (1, d_id)
+        ]
+        state = m.conn.execute(
+            "SELECT media_id, det_version FROM face_scan_state"
+        ).fetchall()
+        assert [tuple(r) for r in state] == [(d_id, "v1")]

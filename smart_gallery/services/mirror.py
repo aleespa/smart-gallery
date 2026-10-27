@@ -624,6 +624,12 @@ def free_up_space(
     if eligible:
         # Faces reach the mirror before any working copy goes.
         sync_face_data(working, mirror, progress_callback)
+        # Confirm the transfer: each image's scan state must now be on the
+        # mirror's row for that file (relpaths compared case-insensitively).
+        on_mirror = _keys(mirror, _SCANNED_SQL, (FACE_DET_VERSION,))
+        missing = {r for r in eligible if key(r) in images and key(r) not in on_mirror}
+        report.skipped.extend(f"{r}: {NOT_SCANNED}" for r in sorted(missing))
+        eligible = [r for r in eligible if r not in missing]
     removed: List[str] = []
     try:
         for done, rel in enumerate(eligible, 1):

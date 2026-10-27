@@ -230,3 +230,142 @@ def test_offloaded_item_no_mirror_received_stays_on_working(
         assert w.offloaded_relpaths() == set()
         assert report.mirror_pending == {_uuid(m): 2}
         assert report.copied == 2 and report.inserted == 2
+
+
+def _stop_on_copy(monkeypatch, root, nth):
+    """Raise ``Cancelled`` (a stop request) on the ``nth`` copy into ``root``;
+    every copy is recorded as (source, destination)."""
+    from smart_gallery.progress import Cancelled
+
+    calls = []
+    real = organize_module.copy_atomic
+
+    def spy(source, destination):
+        calls.append((Path(source), Path(destination)))
+        if _under(root, destination):
+            if sum(_under(root, dest) for _, dest in calls) == nth:
+                raise Cancelled()
+        real(source, destination)
+
+    monkeypatch.setattr(organize_module, "copy_atomic", spy)
+    monkeypatch.setattr(mirror_service, "copy_atomic", spy)
+    return calls
+
+
+def test_import_onto_offloaded_relpath_gets_new_name(
+    two_drives, tmp_path, drive_file, monkeypatch
+):
+    from smart_gallery.services import apply_mirror_sync, plan_mirror_sync
+
+    sync_module = importlib.import_module("smart_gallery.services.sync")
+    monkeypatch.setattr(sync_module, "analyze_paths", _fake_analyze)
+    rename = Options(by_media_type=False, structure=[], on_exist="rename")
+    e, d = two_drives
+    old_sd, new_sd = tmp_path / "sd1", tmp_path / "sd2"
+    drive_file(old_sd, "a.txt", b"OLD photo")
+    drive_file(new_sd, "a.txt", b"NEW, different photo")
+    w, (m,) = _paired(e, d)
+    with w, m:
+        uuid = _uuid(m)
+        import_media(w, [old_sd], options=rename, mirrors=[m])
+        # Freed up: the only copy of the old photo is on D.
+        (e / "No Info" / "a.txt").unlink()
+        w.add_offloaded(["No Info/a.txt"], uuid)
+
+        report = import_media(w, [new_sd], options=rename, mirrors=[m])
+        assert (e / "No Info" / "a_1.txt").read_bytes() == b"NEW, different photo"
+        assert not (e / "No Info" / "a.txt").exists()
+        assert _row(w, "No Info/a.txt")["size_bytes"] == len(b"OLD photo")
+        assert w.offloaded_on(uuid) == {"No Info/a.txt"}
+        assert w.baseline(uuid)["no info/a.txt"].size_bytes == len(b"OLD photo")
+        assert (d / "No Info" / "a_1.txt").read_bytes() == b"NEW, different photo"
+        assert report.mirrored == {uuid: 1} and report.mirror_pending == {uuid: 0}
+
+        preview = plan_mirror_sync(w, m)
+        apply_mirror_sync(w, m, preview)
+        assert (d / "No Info" / "a.txt").read_bytes() == b"OLD photo"
+        assert w.offloaded_on(uuid) == {"No Info/a.txt"}
+        trash = d / ".smart_gallery" / "trash"
+        assert not trash.exists() or not [p for p in trash.rglob("*") if p.is_file()]
+
+
+def test_import_skip_onto_offloaded_relpath_leaves_row(
+    two_drives, tmp_path, drive_file
+):
+    e, d = two_drives
+    drive_file(tmp_path / "sd2", "a.txt", b"NEW, different photo")
+    drive_file(d, "No Info/a.txt", b"OLD photo")
+    w, (m,) = _paired(e, d)
+    with w, m:
+        uuid = _uuid(m)
+        w.upsert_many(
+            [MediaItem.from_path(d / "No Info" / "a.txt", d)]  # row for the old file
+        )
+        w.add_offloaded(["No Info/a.txt"], uuid)
+        report = import_media(w, [tmp_path / "sd2"], options=FLAT, mirrors=[m])
+        assert report.skipped == 1 and report.copied == 0 and report.inserted == 0
+        assert not (e / "No Info" / "a.txt").exists()
+        assert _row(w, "No Info/a.txt")["size_bytes"] == len(b"OLD photo")
+        assert (d / "No Info" / "a.txt").read_bytes() == b"OLD photo"
+
+
+def test_cancel_during_working_placement_stops_before_mirroring(
+    two_drives, sd, drive_file, monkeypatch
+):
+    from smart_gallery.progress import Cancelled
+
+    e, d = two_drives
+    drive_file(sd, "b.txt", b"bravo")
+    calls = _stop_on_copy(monkeypatch, e, nth=2)
+    w, (m,) = _paired(e, d)
+    with w, m:
+        with pytest.raises(Cancelled):
+            import_media(w, [sd], options=FLAT, mirrors=[m])
+        placed = [p for p in (e / "No Info").iterdir()]
+        assert len(placed) == 1
+        assert _row(w, f"No Info/{placed[0].name}") is not None
+        assert w.counts()["total"] == 1
+        assert not any(_under(d, dest) for _, dest in calls)
+        assert not (d / "No Info").exists()
+        assert m.counts()["total"] == 0
+        assert w.baseline(_uuid(m)) == {}
+
+
+def test_cancel_during_mirror_copy_records_finished_files(
+    two_drives, sd, drive_file, monkeypatch
+):
+    from smart_gallery.progress import Cancelled
+
+    e, d = two_drives
+    drive_file(sd, "b.txt", b"bravo")
+    _stop_on_copy(monkeypatch, d, nth=2)
+    w, (m,) = _paired(e, d)
+    with w, m:
+        with pytest.raises(Cancelled):
+            import_media(w, [sd], options=FLAT, mirrors=[m])
+        assert w.counts()["total"] == 2  # the working import is complete
+        on_d = [p.name for p in (d / "No Info").iterdir()]
+        assert len(on_d) == 1
+        assert list(w.baseline(_uuid(m))) == [f"no info/{on_d[0]}"]
+        assert _row(m, f"No Info/{on_d[0]}") is not None
+        assert m.counts()["total"] == 1
+
+
+def test_same_file_already_on_mirror_is_recorded_without_copying(
+    two_drives, sd, monkeypatch
+):
+    import shutil
+
+    e, d = two_drives
+    (d / "No Info").mkdir()
+    shutil.copy2(sd / "a.txt", d / "No Info" / "a.txt")
+    calls = _spy_copies(monkeypatch)
+    w, (m,) = _paired(e, d)
+    with w, m:
+        report = import_media(w, [sd], options=FLAT, mirrors=[m])
+        assert not any(_under(d, dest) for _, dest in calls)
+        assert report.mirrored == {_uuid(m): 0}
+        assert report.mirror_pending == {_uuid(m): 0}
+        assert _row(m, "No Info/a.txt") is not None
+        assert "no info/a.txt" in w.baseline(_uuid(m))
+        assert (d / "No Info" / "a.txt").read_bytes() == b"alpha"

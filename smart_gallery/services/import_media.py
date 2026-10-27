@@ -31,15 +31,13 @@ from smart_gallery.organize import (
     organize_items,
     target_dir_for,
 )
-from smart_gallery.organize.organize import copy_progress
+from smart_gallery.organize.organize import _unique_destination, copy_progress
 from smart_gallery.progress import Cancelled, ProgressCallback
 from smart_gallery.services.mirror import (
     _baseline_row,
     _copy,
     offload_rule_matches,
 )
-
-_IN_CATALOG_SQL = "SELECT 1 FROM media_items WHERE relpath=?"
 
 
 @dataclass
@@ -152,39 +150,24 @@ def _mirror_placed(
                 progress_callback(copy_progress(done, total, held, 0))
 
 
-def _offload_destination(
-    repo: GalleryRepository,
-    output_dir: Path,
-    options: Options,
-    item: MediaItem,
-    taken: Set[str],
-) -> Optional[Path]:
-    """Where an offloaded-on-arrival file belongs on the working drive. Like
-    ``_unique_destination``, but a name is also taken when the working catalog
-    has it (an offloaded file has no copy on disk) or an earlier file of this
-    import claimed it. None when ``on_exist='skip'`` and the name is taken."""
-    target_dir = target_dir_for(output_dir, options, item)
-    filename = Path(item.abspath).name
+class _Taken:
+    """Working-drive destinations already in use besides files on disk:
+    catalog rows (an offloaded file has a row but no file), offloaded
+    relpaths and names this import has claimed. Relpaths compare
+    case-insensitively. Shared by kept and offloaded-on-arrival items."""
 
-    def used(path: Path) -> bool:
-        rel = to_relpath(path, repo.drive_root)
-        return (
-            path.exists()
-            or key(rel) in taken
-            or repo.conn.execute(_IN_CATALOG_SQL, (rel,)).fetchone() is not None
-        )
+    def __init__(self, repo: GalleryRepository) -> None:
+        self.repo = repo
+        self.offloaded = {key(r) for r in repo.offloaded_relpaths()}
+        self.claimed: Set[str] = set()
 
-    destination = target_dir / filename
-    if not used(destination):
-        return destination
-    if options.on_exist == "skip":
-        return None
-    stem, suffix = Path(filename).stem, Path(filename).suffix
-    counter = 1
-    while used(destination):
-        destination = target_dir / f"{stem}_{counter}{suffix}"
-        counter += 1
-    return destination
+    def __call__(self, path: Path) -> bool:
+        rel = to_relpath(path, self.repo.drive_root)
+        k = key(rel)
+        return k in self.claimed or k in self.offloaded or self.repo.has_relpath(rel)
+
+    def claim(self, path: Path) -> None:
+        self.claimed.add(key(to_relpath(path, self.repo.drive_root)))
 
 
 def _import_offloaded(
@@ -194,11 +177,11 @@ def _import_offloaded(
     options: Options,
     mirrors: Sequence[_Mirror],
     report: ImportReport,
+    taken: _Taken,
 ) -> None:
     """Copy offloaded-on-arrival files from the source straight to each
     mirror and give each an offloaded row on the working drive. A file no
     mirror received is copied to the working drive instead."""
-    taken: Set[str] = set()
     rows: List[MediaItem] = []
     try:
         for item in items:
@@ -206,12 +189,13 @@ def _import_offloaded(
                 report.excluded += 1
                 continue
             source = Path(item.abspath)
-            dest = _offload_destination(repo, output_dir, options, item, taken)
+            target_dir = target_dir_for(output_dir, options, item)
+            dest = _unique_destination(target_dir, source.name, options.on_exist, taken)
             if dest is None:
                 report.skipped += 1
                 continue
             rel = to_relpath(dest, repo.drive_root)
-            taken.add(key(rel))
+            taken.claim(dest)
             received: List[_Mirror] = []
             try:
                 for m in mirrors:
@@ -279,7 +263,10 @@ def import_media(
     for it in items:
         (offload if rules and offload_rule_matches(rules, it) else kept).append(it)
 
-    org = organize_items(kept, output_dir, repo.drive_root, options, progress_callback)
+    taken = _Taken(repo)
+    org = organize_items(
+        kept, output_dir, repo.drive_root, options, progress_callback, taken
+    )
     report.copied = org.copied
     report.skipped = org.skipped
     report.excluded = len(org.excluded)
@@ -287,19 +274,22 @@ def import_media(
     if not options.dry_run and org.placed:
         report.inserted = repo.insert_many(org.placed)
 
-    try:
-        # A cancelled placement still mirrors what reached the working drive.
-        _mirror_placed(org.placed, targets, report, progress_callback)
-        if offload and not org.cancelled:
-            _import_offloaded(repo, offload, output_dir, options, targets, report)
-    finally:
-        for m in targets:
-            m.flush(repo)
-
     if org.cancelled:
-        # Everything copied is catalogued; now let the cancel through.
+        # A stop request ends the import here: what reached the working drive
+        # is catalogued, and the next mirror sync copies it to the mirrors.
         logger.warning(f"Import cancelled — copied={report.copied}")
         raise Cancelled()
+
+    try:
+        _mirror_placed(org.placed, targets, report, progress_callback)
+        if offload:
+            _import_offloaded(
+                repo, offload, output_dir, options, targets, report, taken
+            )
+    finally:
+        # A mirror copy cut short by a stop request leaves finished rows here.
+        for m in targets:
+            m.flush(repo)
 
     mirrored = "".join(
         f" mirror {u}: copied={n} pending={report.mirror_pending[u]}"

@@ -81,3 +81,19 @@ def test_sync_clears_offloaded_flag_when_file_returns(drive, drive_file):
         assert repo.offloaded_relpaths() == {"a.txt"}
         sync_drive(repo)
         assert repo.offloaded_relpaths() == set()
+
+
+def test_sync_keeps_offloaded_flag_when_different_file_returns(drive, drive_file):
+    from smart_gallery.mirror.types import Peer
+
+    drive_file(drive, "a.txt", content=b"x" * 16)
+    init_drive(drive)
+    (drive / "a.txt").unlink()
+    with GalleryRepository.open(drive) as repo:
+        repo.add_peer("working", Peer("d1", "D:/g.db"))
+        repo.add_offloaded(["a.txt"], "d1")
+        drive_file(drive, "a.txt", content=b"someone else's file")
+        report = sync_drive(repo)
+        assert report.updated == 0
+        assert repo.offloaded_relpaths() == {"a.txt"}
+        assert repo.index_for_sync()["a.txt"][0] == 16

@@ -10,7 +10,7 @@ import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Callable, List, Literal, Optional
 
 from loguru import logger
 
@@ -25,6 +25,10 @@ from smart_gallery.progress import (
 )
 
 StructurePart = Literal["Year", "Month", "Model", "Lens"]
+
+# Extra "this destination is already in use" check beside the disk (e.g. a
+# catalog row whose file is offloaded to a mirror).
+Taken = Callable[[Path], bool]
 
 # A stop request is checked between chunks, so cancelling never waits for a
 # multi-GB video to finish copying.
@@ -81,18 +85,26 @@ def target_dir_for(output: Path, options: Options, item: MediaItem) -> Path:
 
 
 def _unique_destination(
-    target_dir: Path, filename: str, on_exist: str
+    target_dir: Path,
+    filename: str,
+    on_exist: str,
+    taken: Optional[Taken] = None,
 ) -> Optional[Path]:
     """Resolve the final destination path, applying the on_exist policy.
-    Returns None when the policy is 'skip' and the file already exists."""
+    Returns None when the policy is 'skip' and the file already exists.
+    ``taken`` marks further destinations as in use besides existing files."""
+
+    def used(path: Path) -> bool:
+        return path.exists() or (taken is not None and taken(path))
+
     destination = target_dir / filename
-    if not destination.exists():
+    if not used(destination):
         return destination
     if on_exist == "skip":
         return None
     stem, suffix = Path(filename).stem, Path(filename).suffix
     counter = 1
-    while destination.exists():
+    while used(destination):
         destination = target_dir / f"{stem}_{counter}{suffix}"
         counter += 1
     return destination
@@ -104,14 +116,17 @@ def organize_items(
     drive_root: Path,
     options: Options,
     progress_callback: Optional[ProgressCallback] = None,
+    taken: Optional[Taken] = None,
 ) -> OrganizeReport:
-    """Place each item under ``output`` and return them anchored to ``drive_root``."""
+    """Place each item under ``output`` and return them anchored to ``drive_root``.
+    ``taken`` marks destinations in use beyond existing files; ``on_exist``
+    applies to them too."""
     report = OrganizeReport()
     output = Path(output)
 
     for done, item in enumerate(items, 1):
         try:
-            _place(item, output, drive_root, options, report)
+            _place(item, output, drive_root, options, report, taken)
             if progress_callback:
                 progress_callback(
                     copy_progress(done, len(items), report.copied, report.skipped)
@@ -167,6 +182,7 @@ def _place(
     drive_root: Path,
     options: Options,
     report: OrganizeReport,
+    taken: Optional[Taken] = None,
 ) -> None:
     if not item.abspath:
         report.excluded.append(item.relpath or item.name or "<unknown>")
@@ -184,13 +200,18 @@ def _place(
             return
 
         target_dir.mkdir(parents=True, exist_ok=True)
-        destination = _unique_destination(target_dir, filename, options.on_exist)
+        destination = _unique_destination(target_dir, filename, options.on_exist, taken)
 
         if destination is None:  # skip: already present on the drive
             destination = target_dir / filename
+            report.skipped += 1
+            if not destination.exists():
+                # Taken without a file here (e.g. offloaded): leave its row be.
+                if options.verbose:
+                    logger.debug(f"Skipped (name in use): {destination}")
+                return
             item.relocate(destination, drive_root)
             report.placed.append(item)
-            report.skipped += 1
             if options.verbose:
                 logger.debug(f"Skipped (already exists): {destination}")
             return

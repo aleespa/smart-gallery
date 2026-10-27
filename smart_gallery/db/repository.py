@@ -224,6 +224,13 @@ class GalleryRepository(FaceLabelsMixin, MirrorStoreMixin):
         cur = self.conn.execute("SELECT relpath, size_bytes, mtime_ns FROM media_items")
         return {r["relpath"]: (r["size_bytes"], r["mtime_ns"]) for r in cur}
 
+    def has_relpath(self, relpath: str) -> bool:
+        """True when the catalog has a row at ``relpath`` (case-insensitive)."""
+        row = self.conn.execute(
+            "SELECT 1 FROM media_items WHERE relpath=?", (relpath,)
+        ).fetchone()
+        return row is not None
+
     def all_relpaths(self) -> set:
         return {
             r["relpath"] for r in self.conn.execute("SELECT relpath FROM media_items")

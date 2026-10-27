@@ -50,6 +50,10 @@ def diff_drive(
     progress_callback: Optional[ProgressCallback] = None,
 ) -> Tuple[Set[str], Set[str], Set[str], LiveIndex]:
     """Return (to_delete, to_add, to_update, live_index)."""
+    return _diff(repo, progress_callback)[:4]
+
+
+def _diff(repo: GalleryRepository, progress_callback: Optional[ProgressCallback]):
     live = _scan_live(repo.drive_root, progress_callback)
     db_index = repo.index_for_sync()
 
@@ -64,7 +68,7 @@ def diff_drive(
         for rel in (live_keys & db_keys)
         if (live[rel][1], live[rel][2]) != db_index[rel]
     }
-    return to_delete, to_add, to_update, live
+    return to_delete, to_add, to_update, live, db_index
 
 
 def sync_drive(
@@ -73,7 +77,25 @@ def sync_drive(
     dry_run: bool = False,
     progress_callback: Optional[ProgressCallback] = None,
 ) -> SyncReport:
-    to_delete, to_add, to_update, live = diff_drive(repo, progress_callback)
+    to_delete, to_add, to_update, live, db_index = _diff(repo, progress_callback)
+
+    # An offloaded file that came back is no longer offloaded, but only when
+    # it matches the catalog row's size: a different file put at that path
+    # (by hand, say) must neither replace the row nor un-offload it.
+    offloaded = {rel.casefold() for rel in repo.offloaded_relpaths()}
+    returned: List[str] = []
+    for rel in live:
+        if rel.casefold() not in offloaded or rel not in db_index:
+            continue
+        if live[rel][1] == db_index[rel][0]:
+            returned.append(rel)
+        else:
+            logger.warning(
+                f"{rel} is offloaded but a different file is now at that path; "
+                "it stays offloaded and its catalog row is unchanged."
+            )
+            to_update.discard(rel)
+
     report = SyncReport(
         added=len(to_add),
         updated=len(to_update),
@@ -94,10 +116,8 @@ def sync_drive(
     )
     repo.apply_sync(to_delete, items)
 
-    # A file that came back is no longer offloaded.
-    offloaded = {rel.casefold() for rel in repo.offloaded_relpaths()}
-    if offloaded:
-        repo.remove_offloaded([rel for rel in live if rel.casefold() in offloaded])
+    if returned:
+        repo.remove_offloaded(returned)
 
     # Deleted media cascade their faces via the FK; changed media keep their row
     # id but their pixels (and thus faces) are now stale, so drop those face rows

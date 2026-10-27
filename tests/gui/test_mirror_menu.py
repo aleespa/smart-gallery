@@ -3,7 +3,6 @@
 import json
 from pathlib import Path
 
-import pytest
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QDialog, QMessageBox
 
@@ -264,16 +263,91 @@ def test_sync_not_applied_when_dialog_cancelled(qtbot, tmp_path, monkeypatch):
     assert len(ctx.jobs.specs) == 1
 
 
+def _recording_preview(monkeypatch, result=QDialog.DialogCode.Accepted):
+    shown = []
+
+    class Preview:
+        def __init__(self, plan, parent=None, mirror_label=""):
+            shown.append(plan)
+
+        def exec(self):
+            return result
+
+        def flags(self):
+            return ["--only-on-mirror", "keep-on-mirror"]
+
+    monkeypatch.setattr(menu_module, "SyncPreviewDialog", Preview)
+    return shown
+
+
+def _start_sync(ctx, button, d, plan=None):
+    """Click "Sync to D…" and write the plan the dry run would leave."""
+    before = len(ctx.jobs.specs)
+    _action(button, "Sync to Drive D…").trigger()
+    assert len(ctx.jobs.specs) == before + 1
+    path = Path(ctx.jobs.specs[-1].argvs[0][6])
+    path.write_text(json.dumps(plan or _plan()), encoding="utf-8")
+    return len(ctx.jobs.specs) - 1
+
+
 def test_other_jobs_finishing_are_ignored(qtbot, tmp_path, monkeypatch):
     e, d = _drives(tmp_path, "E", "D")
     _pair(e, d)
     ctx, button = _button(qtbot, e, [e, d])
-    monkeypatch.setattr(
-        menu_module, "SyncPreviewDialog", lambda *a, **k: pytest.fail("shown")
-    )
+    shown = _recording_preview(monkeypatch)
+    plan = _plan(copy_new=["a.jpg"])
+    dry = _start_sync(ctx, button, d, plan)
+
+    # An unrelated job ends first: it must not be taken for the dry run.
     ctx.jobs.specs.append(menu_module.JobSpec("Other", (("sync", e.db_path),)))
     ctx.jobs.finish()
-    qtbot.wait(20)
+    qtbot.wait(50)
+    assert shown == []
+    assert len(ctx.jobs.specs) == 2  # the dry run and the other job only
+
+    ctx.jobs.finish(index=dry)
+    qtbot.waitUntil(lambda: len(ctx.jobs.specs) == 3)
+    assert shown == [plan]
+    assert ctx.jobs.specs[2].argvs == (
+        (
+            "sync-mirror",
+            e.db_path,
+            "--mirror",
+            d.db_path,
+            "--only-on-mirror",
+            "keep-on-mirror",
+        ),
+    )
+
+
+def _dry_run_ending_without_preview(qtbot, tmp_path, monkeypatch, status):
+    e, d = _drives(tmp_path, "E", "D")
+    _pair(e, d)
+    ctx, button = _button(qtbot, e, [e, d])
+    shown = _recording_preview(monkeypatch)
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a: warned.append(a[2]))
+    dry = _start_sync(ctx, button, d)
+
+    ctx.jobs.finish(index=dry, status=status, tail=["boom"])
+    qtbot.wait(50)
+    assert shown == [] and len(ctx.jobs.specs) == 1
+    assert button._pending == {}
+    assert len(warned) == (1 if status == "failed" else 0)
+
+    # A later click starts afresh and its dry run still leads to a preview.
+    again = _start_sync(ctx, button, d)
+    ctx.jobs.finish(index=again)
+    qtbot.waitUntil(lambda: len(ctx.jobs.specs) == 3)
+    assert len(shown) == 1
+
+
+def test_failed_dry_run_does_not_preview_or_apply(qtbot, tmp_path, monkeypatch):
+    _dry_run_ending_without_preview(qtbot, tmp_path, monkeypatch, "failed")
+
+
+def test_cancelled_dry_run_does_not_preview_or_apply(qtbot, tmp_path, monkeypatch):
+    _dry_run_ending_without_preview(qtbot, tmp_path, monkeypatch, "cancelled")
 
 
 def test_running_job_refuses_sync(qtbot, tmp_path, monkeypatch):
@@ -408,3 +482,36 @@ def test_library_greys_offloaded_items(qtbot, tmp_path, make_item):
     assert not model.needs_thumbnail(offloaded)
     assert view.mirror_btn.parent() is view.header_controls
     assert not view.mirror_btn.isHidden()
+
+
+def test_free_up_unparseable_output_does_not_delete(qtbot, tmp_path, monkeypatch):
+    e, d = _drives(tmp_path, "E", "D")
+    _pair(e, d)
+    ctx, button = _button(qtbot, e, [e, d])
+
+    class Picker:
+        def __init__(self, parent=None, mirrors=(), **kwargs):
+            pass
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+        def argv(self):
+            return ["--file-types", "video"]
+
+    told, asked = [], []
+    monkeypatch.setattr(menu_module, "FreeUpDialog", Picker)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a: told.append(a[2]))
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a: asked.append(a) or QMessageBox.Yes
+    )
+    _action(button, "Free up space…").trigger()
+    assert len(ctx.jobs.specs) == 1
+
+    ctx.jobs.finish(tail=["x - INFO - Syncing catalogs", "Skipped: a.mp4"])
+    qtbot.waitUntil(lambda: bool(told))
+
+    assert told == [menu_module.NOTHING_TO_FREE]
+    assert asked == []
+    assert len(ctx.jobs.specs) == 1
+    assert button._pending == {}

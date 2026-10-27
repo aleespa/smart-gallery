@@ -570,3 +570,45 @@ def test_baseline_row_for_file_gone_from_both_is_dropped(two_drives):
     pv = _plan(e, d)
     assert pv.plan.only_on_mirror == ["a.txt"]
     assert pv.plan.trash == []
+
+
+def test_keep_mirror_invalidates_working_faces(two_drives):
+    e, d = two_drives
+    _setup_pair(e, d, "a.txt", "b.txt")
+    _put(d, "a.txt", "edited on D")
+    _put(e, "a.txt", "edited on E too")
+    with GalleryRepository.open(e) as w, GalleryRepository.open(d) as m:
+        pv = plan_mirror_sync(w, m)
+        assert pv.plan.conflicts == ["a.txt"]
+        mid = w.conn.execute(
+            "SELECT id FROM media_items WHERE relpath='a.txt'"
+        ).fetchone()[0]
+        w.conn.execute(
+            "INSERT INTO faces (id, media_id, bbox_x, bbox_y, bbox_w, bbox_h, "
+            "det_score, embedding, person_id, state) VALUES "
+            "(5, ?, 1, 2, 30, 40, 0.9, x'0102', NULL, 'new')",
+            (mid,),
+        )
+        w.conn.execute(
+            "INSERT INTO face_scan_state (media_id, n_faces, det_version) "
+            "VALUES (?, 1, 'v')",
+            (mid,),
+        )
+        w.conn.commit()
+        rep = apply_mirror_sync(w, m, pv, MirrorChoices(conflicts="keep-mirror"))
+        assert rep.copied_back == 1
+        for repo in (w, m):
+            n = repo.conn.execute(
+                "SELECT (SELECT COUNT(*) FROM faces f JOIN media_items i "
+                "ON i.id=f.media_id WHERE i.relpath='a.txt') + "
+                "(SELECT COUNT(*) FROM face_scan_state s JOIN media_items i "
+                "ON i.id=s.media_id WHERE i.relpath='a.txt')"
+            ).fetchone()[0]
+            assert n == 0
+        assert (
+            w.conn.execute(
+                "SELECT id FROM media_items WHERE relpath='a.txt'"
+            ).fetchone()[0]
+            == mid
+        )
+    assert (e / "a.txt").read_text() == "edited on D"

@@ -258,6 +258,7 @@ class _Pending:
         self.mirror_moves: List[Tuple[str, MediaItem]] = []
         self.mirror_upserts: List[MediaItem] = []
         self.working_upserts: List[MediaItem] = []
+        self.replaced_on_working: List[str] = []
         self.offloaded: List[str] = []
         self.base_upserts: List[BaselineRow] = []
         self.base_removals: List[str] = []
@@ -287,6 +288,10 @@ class _Pending:
             m.upsert_many(self.mirror_upserts)
         if self.working_upserts:
             self.working.upsert_many(self.working_upserts)
+        if self.replaced_on_working:
+            # E's content changed under a kept media id: drop its faces and
+            # scan state (decisions go to carry-over) so the file re-scans.
+            self.working.invalidate_faces_by_relpath(self.replaced_on_working)
         if self.offloaded:
             self.working.add_offloaded(self.offloaded, self.uuid)
         if self.base_upserts or self.base_removals:
@@ -349,6 +354,7 @@ class _Applier:
             _copy(src, dest)
         else:
             _replace(src, self.e, target, relpath, self.stamp)
+            self.pending.replaced_on_working.append(target)
         self.pending.working_upserts.append(
             _row_for(self.mirror, mirror_relpath, dest, self.e)
         )

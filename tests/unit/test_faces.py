@@ -538,7 +538,7 @@ def test_migrate_v5_to_v6_adds_indexes(drive):
     for _ in range(2):  # idempotent
         with Repo.open(db) as repo:
             assert V6_INDEXES <= _indexes(repo)
-            assert repo.schema_version == SCHEMA_VERSION == 6
+            assert repo.schema_version == SCHEMA_VERSION == 7
 
 
 def _face_on(repo, mid, person_id=None, state="new"):

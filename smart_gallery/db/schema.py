@@ -149,6 +149,35 @@ CREATE_V6_INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_rejections_person ON face_rejections(person_id);",
 ]
 
+# -- mirror sync (schema v7) --------------------------------------------------
+# No FK to media_items: the baseline must remember relpaths whose media row was
+# deleted, which is how a deletion on the working drive is recognised.
+CREATE_MIRROR_TABLES = [
+    """
+    CREATE TABLE IF NOT EXISTS mirror_peers (
+        uuid    TEXT PRIMARY KEY,
+        db_path TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS mirror_baseline (
+        peer_uuid        TEXT NOT NULL REFERENCES mirror_peers(uuid) ON DELETE CASCADE,
+        relpath          TEXT NOT NULL COLLATE NOCASE,
+        size_bytes       INTEGER NOT NULL,
+        working_mtime_ns INTEGER NOT NULL,
+        mirror_mtime_ns  INTEGER NOT NULL,
+        PRIMARY KEY (peer_uuid, relpath)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS mirror_offloaded (
+        relpath     TEXT NOT NULL COLLATE NOCASE,
+        holder_uuid TEXT NOT NULL REFERENCES mirror_peers(uuid) ON DELETE CASCADE,
+        PRIMARY KEY (relpath, holder_uuid)
+    );
+    """,
+]
+
 
 def init_schema(conn: sqlite3.Connection) -> None:
     """Create tables/indexes if missing and seed the schema version."""
@@ -160,6 +189,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute(CREATE_FACE_REJECTIONS)
     conn.execute(CREATE_FACE_CARRYOVER)
     for stmt in CREATE_INDEXES + CREATE_V6_INDEXES:
+        conn.execute(stmt)
+    for stmt in CREATE_MIRROR_TABLES:
         conn.execute(stmt)
     conn.execute(
         "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
@@ -239,6 +270,10 @@ def migrate(conn: sqlite3.Connection) -> None:
 
     if current < 6:
         for stmt in CREATE_V6_INDEXES:
+            conn.execute(stmt)
+
+    if current < 7:
+        for stmt in CREATE_MIRROR_TABLES:
             conn.execute(stmt)
 
     conn.execute(

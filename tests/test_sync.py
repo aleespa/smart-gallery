@@ -53,3 +53,31 @@ def test_sync_only_analyzes_changed(drive, drive_file, monkeypatch):
 
     assert len(seen) == 1
     assert {p.name for p in seen[0]} == {"c.txt"}
+
+
+def test_sync_keeps_offloaded_rows(drive, drive_file):
+    from smart_gallery.mirror.types import Peer
+
+    drive_file(drive, "a.txt")
+    init_drive(drive)
+    (drive / "a.txt").unlink()
+    with GalleryRepository.open(drive) as repo:
+        assert sync_drive(repo, dry_run=True).deleted == 1
+        repo.add_peer("working", Peer("d1", "D:/g.db"))
+        repo.add_offloaded(["A.txt"], "d1")
+        assert sync_drive(repo).deleted == 0
+        assert repo.counts()["total"] == 1
+
+
+def test_sync_clears_offloaded_flag_when_file_returns(drive, drive_file):
+    from smart_gallery.mirror.types import Peer
+
+    drive_file(drive, "a.txt")
+    init_drive(drive)
+    with GalleryRepository.open(drive) as repo:
+        repo.add_peer("working", Peer("d1", "D:/g.db"))
+        repo.add_offloaded(["a.txt"], "d1")
+        sync_drive(repo, dry_run=True)
+        assert repo.offloaded_relpaths() == {"a.txt"}
+        sync_drive(repo)
+        assert repo.offloaded_relpaths() == set()

@@ -55,7 +55,9 @@ def diff_drive(
 
     live_keys = set(live)
     db_keys = set(db_index)
-    to_delete = db_keys - live_keys
+    # Offloaded files are deliberately absent from this drive; keep their rows.
+    offloaded = {rel.casefold() for rel in repo.offloaded_relpaths()}
+    to_delete = {rel for rel in db_keys - live_keys if rel.casefold() not in offloaded}
     to_add = live_keys - db_keys
     to_update = {
         rel
@@ -91,6 +93,11 @@ def sync_drive(
         changed_paths, drive_root=repo.drive_root, progress_callback=progress_callback
     )
     repo.apply_sync(to_delete, items)
+
+    # A file that came back is no longer offloaded.
+    offloaded = {rel.casefold() for rel in repo.offloaded_relpaths()}
+    if offloaded:
+        repo.remove_offloaded([rel for rel in live if rel.casefold() in offloaded])
 
     # Deleted media cascade their faces via the FK; changed media keep their row
     # id but their pixels (and thus faces) are now stale, so drop those face rows

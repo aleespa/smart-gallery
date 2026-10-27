@@ -77,12 +77,18 @@ def _check(working: GalleryRepository, mirror: GalleryRepository) -> str:
     return m_uuid
 
 
-def _cached(repo: GalleryRepository, rows: Dict[str, MirrorRow]) -> Callable:
+def _cached(
+    repo: GalleryRepository,
+    rows: Dict[str, MirrorRow],
+    progress_callback: Optional[ProgressCallback] = None,
+) -> Callable:
     cache: Dict[str, Optional[str]] = {}
 
     def provider(k: str) -> Optional[str]:
         if k not in cache:
-            cache[k] = ensure_hashes(repo, [rows[k].relpath]).get(k)
+            cache[k] = ensure_hashes(
+                repo, [rows[k].relpath], progress_callback, rows=rows
+            ).get(k)
         return cache[k]
 
     return provider
@@ -105,8 +111,8 @@ def plan_mirror_sync(
         working.baseline(m_uuid),
         offloaded,
         held,
-        _cached(working, w_rows),
-        _cached(mirror, m_rows),
+        _cached(working, w_rows, progress_callback),
+        _cached(mirror, m_rows, progress_callback),
     )
     copy_bytes = sum(w_rows[key(r)].size_bytes for r in plan.copy_new + plan.overwrite)
     trash_dir = mirror.drive_root / DB_DIRNAME / "trash"

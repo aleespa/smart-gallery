@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from smart_gallery.db import GalleryRepository
-from smart_gallery.mirror.types import key
+from smart_gallery.mirror.types import MirrorRow, key
 from smart_gallery.progress import HASHING, ProgressCallback, counted
 
 logger = logging.getLogger(__name__)
@@ -29,12 +29,17 @@ def ensure_hashes(
     repo: GalleryRepository,
     relpaths: Iterable[str],
     progress_callback: Optional[ProgressCallback] = None,
+    *,
+    rows: Optional[dict[str, MirrorRow]] = None,
 ) -> dict[str, str]:
     """Hash the requested files that have no stored hash and store the results.
 
+    ``rows`` (``repo.mirror_rows()``) may be passed to avoid re-reading the table.
+
     Returns ``{key(relpath): hash}`` for every requested file that has or got a
     hash; unreadable files are logged and left out."""
-    rows = repo.mirror_rows()
+    if rows is None:
+        rows = repo.mirror_rows()
     result: dict[str, str] = {}
     fresh: list[tuple[str, str]] = []
     for relpath in counted(list(relpaths), HASHING, progress_callback):

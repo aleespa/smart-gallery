@@ -45,3 +45,17 @@ def test_ensure_hashes_skips_unreadable(repo, drive, drive_file, make_item):
     (drive / "A/gone.jpg").unlink()
     got = ensure_hashes(repo, ["A/ok.jpg", "A/gone.jpg"])
     assert set(got) == {key("A/ok.jpg")}
+
+
+def test_ensure_hashes_with_rows_does_not_reread_catalog(
+    repo, drive, drive_file, make_item, monkeypatch
+):
+    _add(repo, make_item, drive_file, drive, "A/one.jpg", b"one")
+    rows = repo.mirror_rows()
+
+    def boom():
+        raise AssertionError("mirror_rows called")
+
+    monkeypatch.setattr(repo, "mirror_rows", boom)
+    out = ensure_hashes(repo, ["A/one.jpg"], rows=rows)
+    assert set(out) == {key("A/one.jpg")}

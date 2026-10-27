@@ -224,3 +224,23 @@ def test_plan_does_not_modify_mirror_files(two_drives):
     with w, m:
         plan_mirror_sync(w, m)
     assert snap() == before
+
+
+def test_first_plan_reads_catalog_rows_once_per_side(two_drives, monkeypatch):
+    e, d = two_drives
+    for i in range(8):
+        _mirror_copy(e, d, f"f{i}.txt", str(i))
+        os.utime(d / f"f{i}.txt", ns=(1_000_000_000, 1_000_000_000))
+    w, m = _paired(e, d)
+    calls = []
+    real = GalleryRepository.mirror_rows
+
+    def spy(self):
+        calls.append(self.drive_root)
+        return real(self)
+
+    monkeypatch.setattr(GalleryRepository, "mirror_rows", spy)
+    with w, m:
+        pv = plan_mirror_sync(w, m)
+    assert len(pv.plan.adopt) == 8
+    assert len(calls) <= 2

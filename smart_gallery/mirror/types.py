@@ -8,6 +8,10 @@ from typing import List, Literal, Optional, Tuple
 from smart_gallery.organize.filters import FilterOptions
 
 
+class MirrorError(ValueError):
+    """A mirror operation was refused (bad pairing, missing or empty drive)."""
+
+
 def key(relpath: str) -> str:
     """Case-insensitive comparison key for a relpath."""
     return relpath.casefold()

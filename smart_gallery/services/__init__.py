@@ -26,6 +26,14 @@ from smart_gallery.services.label_faces import (
     read_label_list,
     write_label_list,
 )
+from smart_gallery.services.mirror import (
+    DELETE_GUARD_FRACTION,
+    TRASH_DAYS,
+    MirrorError,
+    MirrorPreview,
+    pair_galleries,
+    plan_mirror_sync,
+)
 from smart_gallery.services.recycle import (
     RecycleReport,
     read_list,
@@ -40,6 +48,12 @@ from smart_gallery.services.scan_faces import (
 from smart_gallery.services.sync import SyncReport, diff_drive, sync_drive
 
 __all__ = [
+    "DELETE_GUARD_FRACTION",
+    "TRASH_DAYS",
+    "MirrorError",
+    "MirrorPreview",
+    "pair_galleries",
+    "plan_mirror_sync",
     "init_drive",
     "import_media",
     "ImportReport",

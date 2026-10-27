@@ -163,8 +163,8 @@ mirror; nothing on a mirror is ever deleted outright.
 smart-gallery pair E:/ D:/                  # once; both catalogs must exist
 smart-gallery sync-mirror E:/ --dry-run --plan-out plan.json   # preview
 smart-gallery sync-mirror E:/               # apply
-smart-gallery free-up E:/ --years 2019 --dry-run               # then without --dry-run
-smart-gallery bring-back E:/ --years 2019
+smart-gallery free-up E:/ --date-end 2019-12-31 --dry-run    # then without --dry-run
+smart-gallery bring-back E:/ --date-end 2019-12-31
 ```
 
 - **`pair <working> <mirror>`** links the two catalogs (matched by catalog id,

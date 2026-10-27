@@ -227,3 +227,25 @@ def test_group_rows_by_month_and_size(repo, make_item):
         ("Under 1 MB", 2),
     ]
     assert group_rows([], "date") == []
+
+
+def test_offloaded_rows_are_flagged(repo, make_item):
+    from smart_gallery.mirror.types import Peer
+
+    _add(repo, make_item, "a/x.jpg", "a/y.jpg")
+    repo.add_peer("working", Peer("d1", "D:/g.db"))
+    repo.add_offloaded(["A/X.jpg"], "d1")  # matched ignoring case, like relpath
+
+    rows = {r.relpath: r.offloaded for r in library_rows(repo, LibraryQuery())}
+
+    assert rows == {"a/x.jpg": True, "a/y.jpg": False}
+
+
+def test_unmigrated_catalog_loads_without_offloaded_table(repo, make_item):
+    _add(repo, make_item, "a/x.jpg")
+    repo.conn.execute("DROP TABLE mirror_offloaded")
+    repo.conn.commit()
+
+    (row,) = library_rows(repo, LibraryQuery())
+
+    assert row.relpath == "a/x.jpg" and row.offloaded is False

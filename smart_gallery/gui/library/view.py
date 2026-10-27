@@ -23,12 +23,14 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QFont,
     QPainter,
+    QPalette,
     QPixmap,
     QPolygonF,
     QStandardItem,
     QStandardItemModel,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QHBoxLayout,
@@ -56,6 +58,8 @@ from smart_gallery.gui.library.model import (
     library_stats,
 )
 from smart_gallery.gui.library.viewer import MediaViewer, format_duration, format_size
+from smart_gallery.gui.mirror.menu import MirrorButton, peer_label
+from smart_gallery.mirror.types import key as relpath_key
 from smart_gallery.gui.repo_query import RepoQuery
 from smart_gallery.organize.filters import is_query_empty
 
@@ -74,6 +78,8 @@ NO_GALLERY = "Open or create a gallery to browse it here."
 DISCONNECTED = "Drive not connected. Plug in {label} to browse it."
 NOTHING = "Nothing matches this folder and the current filters."
 READ_ERROR = "Could not read the catalog: {error}"
+OFFLOADED_TIP = "On {label} only"
+OFFLOADED_OPACITY = 0.35
 
 _TILE_BG = theme.qcolor(theme.TILE_BACK)
 _TILE_FG = theme.qcolor(theme.TILE_GLYPH)
@@ -164,6 +170,25 @@ def _with_video_badge(frame: QPixmap, duration: str) -> QPixmap:
     return tile
 
 
+_faded: dict[int, QPixmap] = {}
+
+
+def _faded_placeholder(row: LibraryRow) -> QPixmap:
+    """The row's placeholder drawn faint: the file is kept on a mirror only."""
+    tile = _placeholder_for(row)
+    cached = _faded.get(tile.cacheKey())
+    if cached is not None:
+        return cached
+    faded = QPixmap(tile.size())
+    faded.fill(Qt.GlobalColor.transparent)
+    p = QPainter(faded)
+    p.setOpacity(OFFLOADED_OPACITY)
+    p.drawPixmap(0, 0, tile)
+    p.end()
+    _faded[tile.cacheKey()] = faded
+    return faded
+
+
 def _placeholder_for(row: LibraryRow) -> QPixmap:
     if row.media_type == "video":
         return _placeholder("video", format_duration(row.duration_ms))
@@ -185,6 +210,7 @@ class LibraryGridModel(QAbstractListModel):
         self._row_of: dict[int, int] = {}
         self._pixmaps: OrderedDict[tuple, QPixmap] = OrderedDict()
         self._missing: set[tuple] = set()  # no thumbnail: keep the placeholder
+        self.holders: dict[int, str] = {}  # offloaded row id -> mirror label
 
     @staticmethod
     def _key(row: LibraryRow) -> tuple:
@@ -200,8 +226,17 @@ class LibraryGridModel(QAbstractListModel):
         if role == Qt.ItemDataRole.DisplayRole:
             return PurePosixPath(row.relpath).name
         if role == Qt.ItemDataRole.ToolTipRole:
+            if row.offloaded:
+                label = self.holders.get(row.id) or "the mirror"
+                return OFFLOADED_TIP.format(label=label)
             return row.relpath
+        if role == Qt.ItemDataRole.ForegroundRole and row.offloaded:
+            return QApplication.palette().color(
+                QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text
+            )
         if role == Qt.ItemDataRole.DecorationRole:
+            if row.offloaded:
+                return _faded_placeholder(row)
             key = self._key(row)
             pixmap = self._pixmaps.get(key)
             if pixmap is None:
@@ -210,9 +245,12 @@ class LibraryGridModel(QAbstractListModel):
             return pixmap
         return None
 
-    def set_rows(self, rows: list[LibraryRow]) -> None:
+    def set_rows(
+        self, rows: list[LibraryRow], holders: dict[int, str] | None = None
+    ) -> None:
         self.beginResetModel()
         self.rows, self._row_of = [], {}
+        self.holders = dict(holders or {})
         self.endResetModel()
         if rows:
             self.beginInsertRows(QModelIndex(), 0, len(rows) - 1)
@@ -229,6 +267,7 @@ class LibraryGridModel(QAbstractListModel):
         key = self._key(row)
         return (
             row.media_type in ("image", "video")
+            and not row.offloaded  # not on this drive: nothing to read
             and key not in self._pixmaps
             and key not in self._missing
         )
@@ -259,6 +298,18 @@ class LibraryGridModel(QAbstractListModel):
         index = self.index(i)
         self.dataChanged.emit(index, index, [Qt.ItemDataRole.DecorationRole])
         return True
+
+
+def _holders(repo) -> dict:
+    """Offloaded relpath key -> the ``Peer`` that keeps the file. No Qt."""
+    pairing = repo.get_pairing()
+    if pairing is None:
+        return {}
+    return {
+        relpath_key(rel): peer
+        for peer in pairing.peers
+        for rel in repo.offloaded_on(peer.uuid)
+    }
 
 
 def _tree_items(node: FolderNode, label: str) -> QStandardItem:
@@ -325,6 +376,8 @@ class LibraryView(QWidget):
         header.setContentsMargins(0, 0, 0, 0)
         header.addWidget(self.stats)
         header.addSpacing(12)
+        self.mirror_btn = MirrorButton(ctx)
+        header.addWidget(self.mirror_btn)
         header.addWidget(self.filters_btn)
         header.addSpacing(12)
         header.addWidget(QLabel("Sort by"))
@@ -410,7 +463,8 @@ class LibraryView(QWidget):
 
         def load(repo):
             rows = library_rows(repo, q)
-            return repo.drive_root, rows, library_stats(repo, q), q.sort
+            holders = _holders(repo) if any(r.offloaded for r in rows) else {}
+            return repo.drive_root, rows, library_stats(repo, q), q.sort, holders
 
         self._rows_query.run(load)
 
@@ -486,18 +540,31 @@ class LibraryView(QWidget):
             self.reload_rows()
 
     def _on_rows(self, result) -> None:
-        root, rows, (count, size), sort = result
+        root, rows, (count, size), sort, holders = result
         if self._root is not None and Path(root) != self._root:
             self.grid_model.forget_thumbnails()
         self._root = Path(root)
         self.grid.set_groups(group_rows(rows, sort))
-        self.grid_model.set_rows(rows)
+        self.grid_model.set_rows(rows, self._holder_labels(rows, holders))
         noun = "item" if count == 1 else "items"
         self.stats.setText(f"{count:,} {noun} · {format_size(size)}")
         if rows:
             self.stack.setCurrentWidget(self.grid)
         else:
             self._show_message(NOTHING, clear=False)
+
+    def _holder_labels(self, rows: list[LibraryRow], holders: dict) -> dict:
+        """Offloaded row id -> label of the mirror that keeps its only copy."""
+        if not holders:
+            return {}
+        store = self.ctx.galleries
+        galleries = store.all() if store is not None else []
+        labels = {peer.uuid: peer_label(galleries, peer) for peer in holders.values()}
+        return {
+            r.id: labels[holders[relpath_key(r.relpath)].uuid]
+            for r in rows
+            if r.offloaded and relpath_key(r.relpath) in holders
+        }
 
     def _on_failed(self, error) -> None:
         if self.ctx.current is None:

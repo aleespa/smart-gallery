@@ -11,6 +11,7 @@ from typing import Literal, Optional
 
 from smart_gallery.db.repository import GalleryRepository
 from smart_gallery.db.where import build_where
+from smart_gallery.mirror.types import key
 from smart_gallery.organize.filters import FilterOptions
 
 _ESCAPE = r"'\'"
@@ -54,6 +55,7 @@ class LibraryRow:
     duration_ms: Optional[int] = None  # videos, for the tile label
     date_taken: Optional[str] = None  # 'YYYY-MM-DD', for date groups
     size_bytes: Optional[int] = None  # for size groups
+    offloaded: bool = False  # freed up: the file is kept on a mirror only
 
 
 @dataclass(frozen=True)
@@ -120,6 +122,8 @@ def library_rows(repo: GalleryRepository, q: LibraryQuery) -> list[LibraryRow]:
         f" FROM media_items{where} ORDER BY {order}",
         params,
     )
+    # An unmigrated catalog (no mirror tables) reads as nothing offloaded.
+    offloaded = {key(rel) for rel in repo.offloaded_relpaths()}
     return [
         LibraryRow(
             r["id"],
@@ -130,6 +134,7 @@ def library_rows(repo: GalleryRepository, q: LibraryQuery) -> list[LibraryRow]:
             None if r["duration_ms"] is None else round(r["duration_ms"]),
             r["date_taken"],
             r["size_bytes"],
+            key(r["relpath"]) in offloaded,
         )
         for r in cur
     ]

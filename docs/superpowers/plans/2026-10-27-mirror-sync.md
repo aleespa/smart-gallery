@@ -6,7 +6,7 @@
 
 **Architecture:** The working catalog stores a pairing, a baseline (per relpath: size plus each drive's own mtime at the last sync), an offloaded set, and offload rules; the mirror catalog stores only its pairing. A pure planner classifies relpaths from the two catalogs after a stat-only refresh of both; a service applies the plan with atomic copies, a trash folder on the mirror, and a face-table transfer. The CLI exposes it (`pair`, `sync-mirror`, `free-up`, `bring-back`, an import switch); the desktop app adds a "Mirror" menu button in the Library header that runs those commands as jobs.
 
-**Tech Stack:** Python 3.12, sqlite3, argparse, loguru, pytest; PySide6 for the GUI task only.
+**Tech Stack:** Python 3.13+ (`requires-python = ">=3.13"` in `pyproject.toml`), sqlite3, argparse, loguru, pytest; PySide6 for the GUI task only.
 
 **Spec:** `docs/superpowers/specs/2026-10-27-mirror-sync-design.md`
 

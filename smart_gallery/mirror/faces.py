@@ -7,10 +7,14 @@ through ``relpath`` because media ids differ between catalogs.
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
+from loguru import logger
+
 from smart_gallery.db import GalleryRepository
+from smart_gallery.face_crops import crop_path
 from smart_gallery.progress import FILING, ProgressCallback, ProgressEvent
 
 _FACE_META = (
@@ -63,6 +67,27 @@ def ensure_not_mirror(repo: GalleryRepository) -> None:
         raise ValueError(
             "This gallery is a mirror; run face commands on the working drive."
         )
+
+
+def _invalidate_crops(mirror: GalleryRepository, reset: bool, ids: List[int]) -> None:
+    """Drop cached face crops on the mirror that no longer match its faces."""
+    root = mirror.drive_root
+    try:
+        if reset:
+            shutil.rmtree(crop_path(root, 0).parent.parent, ignore_errors=False)
+            return
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        logger.warning(f"Could not clear the mirror's face crops: {exc}")
+        return
+    for fid in ids:
+        try:
+            crop_path(root, fid).unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger.warning(f"Could not remove cached crop for face {fid}: {exc}")
 
 
 def _read_embeddings(repo: GalleryRepository, ids: List[int]) -> Dict[int, bytes]:
@@ -246,5 +271,6 @@ def sync_face_data(
     except BaseException:
         conn.rollback()
         raise
+    _invalidate_crops(mirror, report.reset, to_update + to_delete)
     tick(_STEPS)
     return report

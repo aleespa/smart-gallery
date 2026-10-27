@@ -137,3 +137,32 @@ def test_face_commands_refuse_on_mirror(pair):
         file_faces(m)
     with pytest.raises(ValueError, match="mirror"):
         label_faces(m, [])
+
+
+def _crop(repo, fid):
+    from smart_gallery.face_crops import crop_path, write_crop
+
+    write_crop(repo.drive_root, fid, b"jpg")
+    return crop_path(repo.drive_root, fid)
+
+
+def test_reset_clears_mirror_crop_cache(pair):
+    w, m = pair
+    _face(w, 1, "a.jpg")
+    old = _crop(m, 1)
+    assert old.exists()
+    sync_face_data(w, m)
+    assert not old.exists()
+
+
+def test_updated_face_crop_is_invalidated(pair):
+    w, m = pair
+    _face(w, 1, "a.jpg")
+    _face(w, 2, "b.jpg")
+    sync_face_data(w, m)
+    c1, c2 = _crop(m, 1), _crop(m, 2)
+    w.conn.execute("UPDATE faces SET bbox_x=99 WHERE id=1")
+    w.conn.commit()
+    assert sync_face_data(w, m).updated == 1
+    assert not c1.exists()
+    assert c2.exists()

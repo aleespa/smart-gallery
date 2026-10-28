@@ -630,34 +630,38 @@ def free_up_space(
         missing = {r for r in eligible if key(r) in images and key(r) not in on_mirror}
         report.skipped.extend(f"{r}: {NOT_SCANNED}" for r in sorted(missing))
         eligible = [r for r in eligible if r not in missing]
-    removed: List[str] = []
-    try:
-        for done, rel in enumerate(eligible, 1):
-            row, m_row = w_rows[key(rel)], m_rows[key(rel)]
-            path = working.drive_root / row.relpath
-            try:
-                st = path.stat()
-                m_size = (mirror.drive_root / m_row.relpath).stat().st_size
-                if (st.st_size, st.st_mtime_ns) != (row.size_bytes, row.mtime_ns):
-                    report.skipped.append(f"{rel}: {CHANGED}")
-                elif m_size != row.size_bytes:
-                    report.skipped.append(f"{rel}: {NO_COPY}")
-                else:
-                    os.remove(path)
-                    removed.append(row.relpath)
-                    report.files += 1
-                    report.bytes += row.size_bytes
-                    logger.debug(f"Freed up: {rel}")
-            except FileNotFoundError:
+    for done, rel in enumerate(eligible, 1):
+        row, m_row = w_rows[key(rel)], m_rows[key(rel)]
+        path = working.drive_root / row.relpath
+        try:
+            st = path.stat()
+            m_size = (mirror.drive_root / m_row.relpath).stat().st_size
+            if (st.st_size, st.st_mtime_ns) != (row.size_bytes, row.mtime_ns):
+                report.skipped.append(f"{rel}: {CHANGED}")
+            elif m_size != row.size_bytes:
                 report.skipped.append(f"{rel}: {NO_COPY}")
-            except OSError as exc:
-                logger.warning(f"Could not free up {rel}: {exc}")
-                report.skipped.append(f"{rel}: {exc}")
-            if progress_callback:
-                progress_callback(copy_progress(done, len(eligible), report.files, 0))
-    finally:
-        if removed:
-            working.add_offloaded(removed, uuid)
+            else:
+                # Flag first, delete second: a kill or power loss in between
+                # leaves a flag on a file still here, which the next sync
+                # clears; the other order would leave the mirror's copy
+                # looking deleted on E, and the next sync would trash it.
+                working.add_offloaded([row.relpath], uuid)
+                try:
+                    os.remove(path)
+                except OSError:
+                    if path.exists():  # still here: not freed after all
+                        working.remove_offloaded([row.relpath])
+                    raise
+                report.files += 1
+                report.bytes += row.size_bytes
+                logger.debug(f"Freed up: {rel}")
+        except FileNotFoundError:
+            report.skipped.append(f"{rel}: {NO_COPY}")
+        except OSError as exc:
+            logger.warning(f"Could not free up {rel}: {exc}")
+            report.skipped.append(f"{rel}: {exc}")
+        if progress_callback:
+            progress_callback(copy_progress(done, len(eligible), report.files, 0))
 
     if not _folder_keys(folders):
         rules = working.get_pairing().offload_rules

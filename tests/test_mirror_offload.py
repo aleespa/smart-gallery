@@ -335,3 +335,67 @@ def test_free_up_skips_image_whose_scan_state_did_not_reach_mirror(
         assert report.files == 0
         assert report.skipped == ["a.jpg: faces not scanned"]
         assert (e / "a.jpg").exists()
+
+
+_KILL_DURING_FREE_UP = """
+import os, sys
+from pathlib import Path
+from smart_gallery.db import GalleryRepository
+from smart_gallery.organize.filters import FilterOptions
+from smart_gallery.services import free_up_space
+import smart_gallery.services.mirror as ms
+
+real, n = os.remove, [0]
+
+def remove(path):
+    real(path)
+    n[0] += 1
+    if n[0] == 3:
+        os._exit(9)  # like a Force stop, a power loss or E unplugged
+
+ms.os.remove = remove
+e, d = Path(sys.argv[1]), Path(sys.argv[2])
+with GalleryRepository.open(e) as w, GalleryRepository.open(d) as m:
+    free_up_space(w, m, FilterOptions(extensions=[".txt"]))
+"""
+
+
+def test_killed_free_up_keeps_every_removed_file_offloaded(two_drives):
+    import subprocess
+    import sys
+
+    e, d = two_drives
+    for i in range(5):
+        _mirror_copy(e, d, f"p{i}.txt", f"photo {i}")
+    w, m = _paired(e, d)
+    with w, m:
+        apply_mirror_sync(w, m, plan_mirror_sync(w, m))
+    rc = subprocess.call([sys.executable, "-c", _KILL_DURING_FREE_UP, str(e), str(d)])
+    assert rc == 9
+    gone = {f"p{i}.txt" for i in range(5) if not (e / f"p{i}.txt").exists()}
+    assert len(gone) == 3
+    with GalleryRepository.open(e) as w, GalleryRepository.open(d) as m:
+        assert gone <= w.offloaded_relpaths()
+        pv = plan_mirror_sync(w, m)
+        assert pv.plan.trash == []
+        # A flag on a file still on E is harmless: the sync cleared it.
+        assert w.offloaded_relpaths() == gone
+    for i in range(5):
+        assert (d / f"p{i}.txt").read_text() == f"photo {i}"
+
+
+def test_free_up_unflags_a_file_it_could_not_delete(two_drives, monkeypatch):
+    e, d = two_drives
+    _mirror_copy(e, d, "a.txt", "aaa")
+    w, m = _paired(e, d)
+
+    def locked(path):
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(mirror_service.os, "remove", locked)
+    with w, m:
+        report = free_up_space(w, m, OTHER)
+        assert report.files == 0
+        assert report.skipped == ["a.txt: in use"]
+        assert (e / "a.txt").exists()
+        assert w.offloaded_relpaths() == set()

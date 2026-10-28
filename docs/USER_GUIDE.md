@@ -571,7 +571,10 @@ and the next sync copies the files across.
 
 ### Good habits
 
-- Make changes on the working drive, not on the mirror.
+- Make changes on the working drive, not on the mirror. Sync only ever copies
+  from the working drive, so a file you delete on the mirror alone comes back:
+  the next sync copies it from the working drive again. To delete a file from
+  both drives, delete it on the working drive and sync.
 - Sync after each import or editing session.
 - To get a freed-up photo back, use **Bring back**. Copying it back by hand
   from the mirror also works, as long as the copy keeps its date (File
@@ -579,7 +582,14 @@ and the next sync copies the files across.
   file name) is shown in the preview as *Different file at a freed-up path*
   and left alone; move it elsewhere to have it synced.
 - The mirror's trash is `.smart_gallery\trash\` on the mirror drive, one folder
-  per sync. To undo a deletion, copy the file back from there within 30 days.
+  per sync, named by date and time, with the files under their original folder
+  paths. To undo a deletion, copy the file from there back to the **working
+  drive** (same folder as before), then sync: the mirror gets its copy again.
+  Copying it back to the mirror alone doesn't undo it; the next preview lists
+  it as **Only on *mirror***.
+- Trash folders older than 30 days are removed at the end of a sync, so
+  nothing is cleaned up between syncs. If you haven't synced for two months,
+  the old trash is still there until the next sync finishes.
 
 ---
 
@@ -713,7 +723,13 @@ folder was deleted by mistake. Cancel unless you really meant it.
 
 **How do I undo a mirror sync's deletion?**
 Copy the file back from `<mirror>\.smart_gallery\trash\<date-time>\…` (kept
-30 days) to the working drive, then sync again.
+30 days) to the same folder on the working drive, then sync again. Don't copy
+it back to the mirror only: the sync would then list it as **Only on *mirror***.
+
+**I deleted a file on the mirror and the next sync copied it back.**
+That is expected: sync goes one way, from the working drive to the mirror, and
+a file missing from the mirror is simply copied again. Delete files on the
+working drive instead; the sync then moves the mirror's copy to its trash.
 
 **How do I undo "Move files to Recycle Bin" on the Storage page?**
 Restore the files from the Windows Recycle Bin, then run **sync**.

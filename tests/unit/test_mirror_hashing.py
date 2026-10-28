@@ -59,3 +59,12 @@ def test_ensure_hashes_with_rows_does_not_reread_catalog(
     monkeypatch.setattr(repo, "mirror_rows", boom)
     out = ensure_hashes(repo, ["A/one.jpg"], rows=rows)
     assert set(out) == {key("A/one.jpg")}
+
+
+def test_ensure_hashes_force_rereads_stored_hashes(repo, drive, drive_file, make_item):
+    _add(repo, make_item, drive_file, drive, "a.jpg", b"real")
+    repo.set_hashes([("a.jpg", "stale")])
+    assert ensure_hashes(repo, ["a.jpg"])[key("a.jpg")] == "stale"
+    fresh = ensure_hashes(repo, ["a.jpg"], force=True)[key("a.jpg")]
+    assert fresh == hash_file(drive / "a.jpg")
+    assert repo.mirror_rows()[key("a.jpg")].content_hash == fresh

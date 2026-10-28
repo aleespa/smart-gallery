@@ -31,10 +31,12 @@ def ensure_hashes(
     progress_callback: Optional[ProgressCallback] = None,
     *,
     rows: Optional[dict[str, MirrorRow]] = None,
+    force: bool = False,
 ) -> dict[str, str]:
     """Hash the requested files that have no stored hash and store the results.
 
     ``rows`` (``repo.mirror_rows()``) may be passed to avoid re-reading the table.
+    ``force`` re-reads every requested file, ignoring stored hashes.
 
     Returns ``{key(relpath): hash}`` for every requested file that has or got a
     hash; unreadable files are logged and left out."""
@@ -44,7 +46,7 @@ def ensure_hashes(
     fresh: list[tuple[str, str]] = []
     for relpath in counted(list(relpaths), HASHING, progress_callback):
         row = rows.get(key(relpath))
-        if row is not None and row.content_hash:
+        if not force and row is not None and row.content_hash:
             result[key(relpath)] = row.content_hash
             continue
         try:

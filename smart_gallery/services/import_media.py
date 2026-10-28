@@ -113,7 +113,9 @@ class _Mirror:
             )
             report.mirror_pending[self.uuid] += 1
             return False
-        self.rows.append(copy.copy(item).relocate(dest, self.repo.drive_root))
+        row = copy.copy(item)
+        row.content_hash = None  # a hash is only trusted for the bytes it read
+        self.rows.append(row.relocate(dest, self.repo.drive_root))
         self.baseline.append(base)
         return True
 

@@ -223,8 +223,10 @@ def _item(repo: GalleryRepository, relpath: str) -> Optional[MediaItem]:
 
 def _row_for(source: GalleryRepository, relpath: str, dest: Path, root: Path):
     """A catalog row for ``dest`` built from the source catalog's row (no
-    ExifTool); path fields, size and mtime come from ``dest``."""
+    ExifTool); path fields, size and mtime come from ``dest``. The source's
+    hash is dropped: it describes the source's bytes, not the copy's."""
     item = _item(source, relpath) or MediaItem.from_path(dest)
+    item.content_hash = None
     return item.relocate(dest, root)
 
 
@@ -376,6 +378,7 @@ class _Applier:
         src = self.d / relpath
         st = src.stat()
         item = _item(self.mirror, relpath) or MediaItem.from_path(src)
+        item.content_hash = None
         item.relocate(self.e / relpath, self.e)  # no file on E: keeps D's stat
         item.size_bytes, item.mtime_ns = st.st_size, st.st_mtime_ns
         self.pending.working_upserts.append(item)
@@ -597,12 +600,17 @@ def free_up_space(
         for r in candidates
         if key(r) in m_rows and m_rows[key(r)].size_bytes == w_rows[key(r)].size_bytes
     ]
-    w_hash = ensure_hashes(working, same_size, progress_callback, rows=w_rows)
+    # Read both copies from disk: a stored hash may have come with a copied
+    # row or predate an edit, and this check guards a permanent delete.
+    w_hash = ensure_hashes(
+        working, same_size, progress_callback, rows=w_rows, force=True
+    )
     m_hash = ensure_hashes(
         mirror,
         [m_rows[key(r)].relpath for r in same_size],
         progress_callback,
         rows=m_rows,
+        force=True,
     )
     images = _keys(working, "SELECT relpath FROM media_items WHERE media_type='image'")
     scanned = _keys(working, _SCANNED_SQL, (FACE_DET_VERSION,))

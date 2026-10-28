@@ -1,5 +1,7 @@
+import os
 import shutil
 from collections import namedtuple
+from pathlib import Path
 
 import pytest
 
@@ -399,3 +401,73 @@ def test_free_up_unflags_a_file_it_could_not_delete(two_drives, monkeypatch):
         assert report.skipped == ["a.txt: in use"]
         assert (e / "a.txt").exists()
         assert w.offloaded_relpaths() == set()
+
+
+def _bump_mtime(path, seconds=5):
+    st = path.stat()
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + seconds * 1_000_000_000))
+
+
+def test_free_up_reads_the_mirror_bytes_after_a_bad_copy(two_drives, monkeypatch):
+    e, d = two_drives
+    _put(e, "a.txt", "AAAA")
+    w, m = _paired(e, d)
+    with w, m:
+        apply_mirror_sync(w, m, plan_mirror_sync(w, m))
+    (e / "a.txt").write_text("BBBB")  # same size, edited on E
+    _bump_mtime(e / "a.txt")
+    real = mirror_service.copy_atomic
+
+    def bad_copy(src, dst):  # a silently corrupted copy of the same size
+        real(src, dst)
+        (dst if hasattr(dst, "write_bytes") else Path(dst)).write_bytes(b"XXXX")
+
+    monkeypatch.setattr(mirror_service, "copy_atomic", bad_copy)
+    with GalleryRepository.open(e) as w, GalleryRepository.open(d) as m:
+        pv = plan_mirror_sync(w, m)
+        assert pv.plan.overwrite == ["a.txt"]
+        apply_mirror_sync(w, m, pv)
+        assert m.mirror_rows()["a.txt"].content_hash is None
+    monkeypatch.setattr(mirror_service, "copy_atomic", real)
+    with GalleryRepository.open(e) as w, GalleryRepository.open(d) as m:
+        report = free_up_space(w, m, OTHER)
+        assert report.files == 0
+        assert report.skipped == ["a.txt: no verified copy on mirror"]
+        assert (e / "a.txt").read_text() == "BBBB"
+        assert w.offloaded_relpaths() == set()
+
+
+def test_free_up_ignores_stored_hashes(two_drives):
+    e, d = two_drives
+    _put(e, "a.txt", "AAAA")
+    _put(d, "a.txt", "XXXX")  # same size, different bytes
+    w, m = _paired(e, d)
+    with w, m:
+        plan_mirror_sync(w, m)  # catalogs both drives
+        w.set_hashes([("a.txt", "same")])
+        m.set_hashes([("a.txt", "same")])  # a stale or inherited hash
+        report = free_up_space(w, m, OTHER)
+        assert report.files == 0
+        assert report.skipped == ["a.txt: no verified copy on mirror"]
+        assert (e / "a.txt").read_text() == "AAAA"
+
+
+def test_rows_copied_to_the_other_drive_carry_no_hash(two_drives):
+    e, d = two_drives
+    _put(e, "new.txt", "new")
+    _put(d, "back.txt", "back")
+    w, m = _paired(e, d)
+    with w, m:
+        plan_mirror_sync(w, m)
+        w.set_hashes([("new.txt", "e-hash")])
+        m.set_hashes([("back.txt", "d-hash")])
+        pv = plan_mirror_sync(w, m)
+        apply_mirror_sync(
+            w, m, pv, mirror_service.MirrorChoices(only_on_mirror="copy-back")
+        )
+        assert m.mirror_rows()["new.txt"].content_hash is None
+        assert w.mirror_rows()["back.txt"].content_hash is None
+        free_up_space(w, m, OTHER, folders=["new.txt"])
+        m.set_hashes([("new.txt", "d-hash")])
+        bring_back(w, m, OTHER, folders=["new.txt"])
+        assert w.mirror_rows()["new.txt"].content_hash is None

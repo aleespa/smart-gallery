@@ -62,6 +62,9 @@ class MirrorPlan:
     adopt: List[BaselineRow] = field(default_factory=list)
     offloaded_changed: List[str] = field(default_factory=list)
     offloaded_missing: List[str] = field(default_factory=list)
+    # Freed-up paths where E now holds a different file (only listed: that
+    # file is on E alone until the user moves it aside).
+    offloaded_conflict: List[str] = field(default_factory=list)
 
     @property
     def delete_count(self) -> int:

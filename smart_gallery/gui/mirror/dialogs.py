@@ -50,6 +50,11 @@ MISSING_WARNING = (
     "{n} freed-up file(s) are missing from {d}. They were kept only there, so "
     "those copies may be gone. Check {d} before syncing."
 )
+CONFLICT_WARNING = (
+    "{n} freed-up file(s) kept only on {d} now have a different file at the "
+    "same place on this drive: {names}. Those new files are not synced; move "
+    "them to another folder to sync them."
+)
 LARGE_DELETE = "Yes, move this many files on {d} to its trash"
 NOTHING_TO_DO = "{d} is already in step. Nothing to copy or change."
 FILE_TYPES = (("image", "Photos"), ("video", "Videos"), ("other", "Other files"))
@@ -116,6 +121,15 @@ class SyncPreviewDialog(QDialog):
         self.missing_warning.setStyleSheet(theme.WARNING_BANNER_STYLE)
         self.missing_warning.setVisible(bool(missing))
 
+        clash = list(plan.get("offloaded_conflict") or [])
+        names = ", ".join(clash[:5]) + (", …" if len(clash) > 5 else "")
+        self.conflict_warning = QLabel(
+            CONFLICT_WARNING.format(n=len(clash), d=d, names=names)
+        )
+        self.conflict_warning.setWordWrap(True)
+        self.conflict_warning.setStyleSheet(theme.WARNING_BANNER_STYLE)
+        self.conflict_warning.setVisible(bool(clash))
+
         self.only_on = _combo(ONLY_ON_CHOICES, d)
         self.changed_on = _combo(CHANGED_ON_CHOICES, d)
         self.conflicts = _combo(CONFLICT_CHOICES, d)
@@ -145,6 +159,7 @@ class SyncPreviewDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(self.summary)
         layout.addWidget(self.missing_warning)
+        layout.addWidget(self.conflict_warning)
         layout.addLayout(form)
         layout.addWidget(self.confirm)
         layout.addWidget(buttons)

@@ -181,3 +181,18 @@ def test_deleted_on_working_but_changed_on_mirror_is_asked():
     assert p.changed_on_mirror == ["a.jpg"] and p.trash == []
     p, _, _ = plan(mirror=[row("a.jpg", size=12)], baseline=[base("a.jpg")])
     assert p.changed_on_mirror == ["a.jpg"] and p.trash == []
+
+
+def test_different_file_at_an_offloaded_path_is_listed():
+    p = build_plan(
+        {key("a.jpg"): row("a.jpg")},
+        {key("a.jpg"): row("a.jpg")},
+        {key("a.jpg"): base("a.jpg")},
+        {key("a.jpg")},
+        {key("a.jpg")},
+        Hashes(),
+        Hashes(),
+        offloaded_conflict={key("a.jpg")},
+    )
+    assert p.offloaded_conflict == ["a.jpg"]
+    assert not (p.trash or p.copy_new or p.overwrite or p.conflicts)

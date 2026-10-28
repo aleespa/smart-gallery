@@ -898,6 +898,7 @@ _PLAN_CLASSES = (
     "adopt",
     "offloaded_changed",
     "offloaded_missing",
+    "offloaded_conflict",
 )
 
 
@@ -932,6 +933,13 @@ def _log_plan(preview) -> None:
         logger.warning(
             f"{len(missing)} freed-up file(s) are missing from the mirror, so the "
             "only copy may be gone: " + ", ".join(missing[:10])
+        )
+    clash = preview.plan.offloaded_conflict
+    if clash:
+        logger.warning(
+            f"{len(clash)} freed-up path(s) now hold a different file on the "
+            "working drive; it is not mirrored until you move it elsewhere: "
+            + ", ".join(clash[:10])
         )
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, Dict, Optional, Set
+from typing import AbstractSet, Callable, Dict, Optional, Set
 
 from smart_gallery.mirror.types import BaselineRow, MirrorPlan, MirrorRow
 
@@ -17,8 +17,12 @@ def build_plan(
     held_here: Set[str],
     hash_working: HashFn,
     hash_mirror: HashFn,
+    offloaded_conflict: AbstractSet[str] = frozenset(),
 ) -> MirrorPlan:
-    """Classify every relpath (all dicts/sets keyed by ``key(relpath)``)."""
+    """Classify every relpath (all dicts/sets keyed by ``key(relpath)``).
+
+    ``offloaded_conflict``: offloaded keys where the working drive now has a
+    different file on disk; they are listed, never acted on."""
     plan = MirrorPlan()
 
     def same_bytes(k: str, w: MirrorRow, m: MirrorRow) -> bool:
@@ -38,6 +42,8 @@ def build_plan(
         b = baseline.get(k)
         is_off = k in offloaded
         if is_off:  # offloaded rows are classified separately
+            if k in offloaded_conflict:
+                plan.offloaded_conflict.append(w.relpath if w else k)
             _offloaded(plan, k, working.get(k), m, b, k in held_here)
             continue
         if w is None:

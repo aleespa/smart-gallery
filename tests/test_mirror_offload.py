@@ -471,3 +471,21 @@ def test_rows_copied_to_the_other_drive_carry_no_hash(two_drives):
         m.set_hashes([("new.txt", "d-hash")])
         bring_back(w, m, OTHER, folders=["new.txt"])
         assert w.mirror_rows()["new.txt"].content_hash is None
+
+
+def test_plan_lists_a_different_file_put_at_a_freed_up_path(two_drives):
+    e, d = two_drives
+    _mirror_copy(e, d, "a.txt", "aaa")
+    _mirror_copy(e, d, "b.txt", "bbb")
+    w, m = _paired(e, d)
+    with w, m:
+        apply_mirror_sync(w, m, plan_mirror_sync(w, m))
+        free_up_space(w, m, OTHER)
+        _put(e, "a.txt", "a new photo, not the freed one")
+        pv = plan_mirror_sync(w, m)
+        assert pv.plan.offloaded_conflict == ["a.txt"]
+        assert pv.plan.trash == [] and pv.plan.overwrite == []
+        apply_mirror_sync(w, m, pv)  # no automatic action
+        assert (d / "a.txt").read_text() == "aaa"
+        assert (e / "a.txt").read_text() == "a new photo, not the freed one"
+        assert w.offloaded_relpaths() == {"a.txt", "b.txt"}

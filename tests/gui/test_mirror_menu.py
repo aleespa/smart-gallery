@@ -27,6 +27,7 @@ PLAN_CLASSES = (
     "adopt",
     "offloaded_changed",
     "offloaded_missing",
+    "offloaded_conflict",
 )
 
 
@@ -515,3 +516,15 @@ def test_free_up_unparseable_output_does_not_delete(qtbot, tmp_path, monkeypatch
     assert asked == []
     assert len(ctx.jobs.specs) == 1
     assert button._pending == {}
+
+
+def test_preview_warns_about_files_at_freed_up_paths(qtbot):
+    dialog = SyncPreviewDialog(
+        _plan(offloaded_conflict=["a.jpg"]), mirror_label="Drive D"
+    )
+    qtbot.addWidget(dialog)
+    assert not dialog.conflict_warning.isHidden()
+    assert "a.jpg" in dialog.conflict_warning.text()
+    plain = SyncPreviewDialog(_plan(), mirror_label="Drive D")
+    qtbot.addWidget(plain)
+    assert plain.conflict_warning.isHidden()

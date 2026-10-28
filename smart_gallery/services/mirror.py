@@ -135,6 +135,25 @@ def _cached(
     return provider
 
 
+def _offloaded_conflicts(
+    working: GalleryRepository, w_rows: Dict[str, MirrorRow], offloaded: Set[str]
+) -> Set[str]:
+    """Offloaded keys whose path on the working drive holds a file of another
+    size: a different file put there (sync keeps the offloaded row)."""
+    out: Set[str] = set()
+    for k in offloaded:
+        row = w_rows.get(k)
+        if row is None:
+            continue
+        try:
+            size = (working.drive_root / row.relpath).stat().st_size
+        except OSError:
+            continue
+        if size != row.size_bytes:
+            out.add(k)
+    return out
+
+
 def plan_mirror_sync(
     working: GalleryRepository,
     mirror: GalleryRepository,
@@ -154,6 +173,7 @@ def plan_mirror_sync(
         held,
         _cached(working, w_rows, progress_callback),
         _cached(mirror, m_rows, progress_callback),
+        _offloaded_conflicts(working, w_rows, offloaded),
     )
     copy_bytes = sum(w_rows[key(r)].size_bytes for r in plan.copy_new + plan.overwrite)
     trash_dir = mirror.drive_root / DB_DIRNAME / "trash"

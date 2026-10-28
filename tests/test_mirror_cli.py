@@ -78,6 +78,7 @@ def test_pair_then_sync_mirror_dry_run_writes_plan_json(two_drives, tmp_path):
         "adopt",
         "offloaded_changed",
         "offloaded_missing",
+        "offloaded_conflict",
     ):
         assert key in plan and key in plan["counts"]
     assert plan["copy_bytes"] == 14

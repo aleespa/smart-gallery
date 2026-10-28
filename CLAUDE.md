@@ -102,11 +102,13 @@ and `bring-back` live there too, and `import_media` copies to mirrors unless
   before deleting anything.
 - **Offloaded rows.** Files freed up from E keep their `media_items` row (and
   faces); `sync_drive` keeps an offloaded row whose file is missing and clears
-  the flag when the file returns. The planner excludes them from deletes.
+  the flag only when a file returns with the row's size **and** mtime (a copy
+  of the original keeps both); any other file at that path leaves the row and
+  flag untouched. The planner excludes them from deletes.
   Free-up flags each file (committed) *before* deleting it, so a kill can
-  never leave D's only copy looking deleted on E. A different-size file put
-  at a freed-up path is listed as `offloaded_conflict` (no action). Offloaded
-  images are not face-scan candidates.
+  never leave D's only copy looking deleted on E. A file at a freed-up path
+  whose size or mtime differs from the row is listed as `offloaded_conflict`
+  (no action). Offloaded images are not face-scan candidates.
 - **Safeguards.** Refuse on a missing root, `db_uuid` mismatch or empty walk;
   `--confirm-large-delete` above 5% trashed. `sync-mirror --expect-plan` and
   `free-up --expect-plan` take a `--plan-out` preview and do nothing beyond

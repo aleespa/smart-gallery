@@ -80,14 +80,18 @@ def sync_drive(
     to_delete, to_add, to_update, live, db_index = _diff(repo, progress_callback)
 
     # An offloaded file that came back is no longer offloaded, but only when
-    # it matches the catalog row's size: a different file put at that path
-    # (by hand, say) must neither replace the row nor un-offload it.
+    # it matches the catalog row's size and mtime (a copy of the freed-up
+    # file keeps both): a different file put at that path, by hand say, must
+    # neither replace the row nor un-offload it, or the next mirror sync
+    # would take it for an edit and overwrite the mirror's only copy.
     offloaded = {rel.casefold() for rel in repo.offloaded_relpaths()}
+    db_by_key = {rel.casefold(): rel for rel in db_index}
     returned: List[str] = []
     for rel in live:
-        if rel.casefold() not in offloaded or rel not in db_index:
+        key = rel.casefold()
+        if key not in offloaded or key not in db_by_key:
             continue
-        if live[rel][1] == db_index[rel][0]:
+        if (live[rel][1], live[rel][2]) == db_index[db_by_key[key]]:
             returned.append(rel)
         else:
             logger.warning(
@@ -95,6 +99,7 @@ def sync_drive(
                 "it stays offloaded and its catalog row is unchanged."
             )
             to_update.discard(rel)
+            to_add.discard(rel)  # the same path in other letter case
 
     report = SyncReport(
         added=len(to_add),

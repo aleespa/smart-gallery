@@ -97,3 +97,66 @@ def test_sync_keeps_offloaded_flag_when_different_file_returns(drive, drive_file
         assert report.updated == 0
         assert repo.offloaded_relpaths() == {"a.txt"}
         assert repo.index_for_sync()["a.txt"][0] == 16
+
+
+def test_sync_keeps_offloaded_flag_when_same_size_different_file_returns(
+    drive, drive_file
+):
+    import os
+
+    from smart_gallery.mirror.types import Peer
+
+    drive_file(drive, "a.txt", content=b"x" * 16)
+    init_drive(drive)
+    (drive / "a.txt").unlink()
+    with GalleryRepository.open(drive) as repo:
+        before = repo.index_for_sync()["a.txt"]
+        repo.add_peer("working", Peer("d1", "D:/g.db"))
+        repo.add_offloaded(["a.txt"], "d1")
+        path = drive_file(drive, "a.txt", content=b"y" * 16)  # same size
+        os.utime(path, ns=(before[1] + 5_000_000_000, before[1] + 5_000_000_000))
+        report = sync_drive(repo)
+        assert report.updated == 0
+        assert repo.offloaded_relpaths() == {"a.txt"}
+        assert repo.index_for_sync()["a.txt"] == before
+
+
+def test_sync_keeps_offloaded_flag_when_different_file_returns_in_other_case(
+    drive, drive_file
+):
+    from smart_gallery.mirror.types import Peer
+
+    drive_file(drive, "a.txt", content=b"x" * 16)
+    init_drive(drive)
+    (drive / "a.txt").unlink()
+    with GalleryRepository.open(drive) as repo:
+        repo.add_peer("working", Peer("d1", "D:/g.db"))
+        repo.add_offloaded(["a.txt"], "d1")
+        drive_file(drive, "A.txt", content=b"someone else's file")
+        report = sync_drive(repo)
+        assert report.added == 0 and report.updated == 0
+        assert repo.offloaded_relpaths() == {"a.txt"}
+        assert repo.index_for_sync() == {
+            "a.txt": (16, repo.index_for_sync()["a.txt"][1])
+        }
+
+
+def test_sync_clears_offloaded_flag_when_a_hand_copied_original_returns(
+    drive, drive_file
+):
+    """Copying the freed-up file back keeps its size and mtime: it is the original."""
+    import shutil
+
+    from smart_gallery.mirror.types import Peer
+
+    drive_file(drive, "a.txt", content=b"x" * 16)
+    init_drive(drive)
+    keep = drive.parent / "kept-a.txt"
+    shutil.copy2(drive / "a.txt", keep)
+    (drive / "a.txt").unlink()
+    with GalleryRepository.open(drive) as repo:
+        repo.add_peer("working", Peer("d1", "D:/g.db"))
+        repo.add_offloaded(["a.txt"], "d1")
+        shutil.copy2(keep, drive / "a.txt")
+        sync_drive(repo)
+        assert repo.offloaded_relpaths() == set()

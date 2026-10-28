@@ -214,6 +214,29 @@ def test_sync_after_free_up_does_not_trash_on_mirror(two_drives):
         assert w.offloaded_relpaths() == {"a.txt"}
 
 
+def test_same_size_different_file_at_freed_up_path_never_replaces_mirror_copy(
+    two_drives,
+):
+    e, d = two_drives
+    _mirror_copy(e, d, "a.txt", "AAAA")
+    w, m = _paired(e, d)
+    with w, m:
+        apply_mirror_sync(w, m, plan_mirror_sync(w, m))
+        free_up_space(w, m, FilterOptions(extensions=[".txt"]), folders=["a.txt"])
+        assert not (e / "a.txt").exists()
+        stamp = (d / "a.txt").stat().st_mtime_ns + 7_000_000_000
+        _put(e, "a.txt", "ZZZZ")  # a different photo, exactly the same size
+        os.utime(e / "a.txt", ns=(stamp, stamp))
+        pv = plan_mirror_sync(w, m)
+        assert pv.plan.overwrite == []
+        assert pv.plan.offloaded_conflict == ["a.txt"]
+        assert w.offloaded_relpaths() == {"a.txt"}
+        apply_mirror_sync(w, m, pv)
+        assert (d / "a.txt").read_text() == "AAAA"
+        trash = d / ".smart_gallery" / "trash"
+        assert not trash.exists() or not any(trash.rglob("a.txt"))
+
+
 def test_bring_back_restores_file_and_clears_flag(two_drives):
     e, d = two_drives
     _mirror_copy(e, d, "a.txt", "aaa")

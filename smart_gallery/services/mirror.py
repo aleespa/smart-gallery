@@ -187,17 +187,17 @@ def _offloaded_conflicts(
     working: GalleryRepository, w_rows: Dict[str, MirrorRow], offloaded: Set[str]
 ) -> Set[str]:
     """Offloaded keys whose path on the working drive holds a file of another
-    size: a different file put there (sync keeps the offloaded row)."""
+    size or mtime: a different file put there (sync keeps the offloaded row)."""
     out: Set[str] = set()
     for k in offloaded:
         row = w_rows.get(k)
         if row is None:
             continue
         try:
-            size = (working.drive_root / row.relpath).stat().st_size
+            st = (working.drive_root / row.relpath).stat()
         except OSError:
             continue
-        if size != row.size_bytes:
+        if (st.st_size, st.st_mtime_ns) != (row.size_bytes, row.mtime_ns):
             out.add(k)
     return out
 

@@ -573,11 +573,11 @@ and the next sync copies the files across.
 
 - Make changes on the working drive, not on the mirror.
 - Sync after each import or editing session.
-- Don't put a **different** file at the exact path of a freed-up photo (same
-  folder and file name). The app flags most such cases, but not when the new
-  file has exactly the same size; then the next sync would treat it as an
-  edit and replace the mirror's copy. That copy can still be recovered from
-  the mirror's trash for 30 days.
+- To get a freed-up photo back, use **Bring back**. Copying it back by hand
+  from the mirror also works, as long as the copy keeps its date (File
+  Explorer does). Any other file at a freed-up photo's path (same folder and
+  file name) is shown in the preview as *Different file at a freed-up path*
+  and left alone; move it elsewhere to have it synced.
 - The mirror's trash is `.smart_gallery\trash\` on the mirror drive, one folder
   per sync. To undo a deletion, copy the file back from there within 30 days.
 

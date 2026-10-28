@@ -59,6 +59,7 @@ __all__ = [
     "OffloadReport",
     "apply_mirror_sync",
     "bring_back",
+    "check_previewed",
     "free_up_space",
     "offload_rule_matches",
     "pair_galleries",
@@ -513,6 +514,47 @@ def _operations(
     return ops
 
 
+def check_previewed(
+    preview: MirrorPreview, choices: MirrorChoices, previewed: dict
+) -> None:
+    """Refuse (MirrorError) unless every trash, overwrite, move and chosen
+    action in ``preview`` was already in ``previewed``, the plan the user saw
+    (``--plan-out`` JSON). New copies are allowed: they only add files."""
+    plan = preview.plan
+
+    def keys(name: str) -> Set[str]:
+        return {key(r) for r in previewed.get(name) or []}
+
+    checks: List[Tuple[str, List[str]]] = [
+        ("trash", plan.trash),
+        ("overwrite", plan.overwrite),
+    ]
+    for name, choice in (
+        ("changed_on_mirror", choices.changed_on_mirror),
+        ("conflicts", choices.conflicts),
+    ):
+        if choice != "skip":
+            checks.append((name, getattr(plan, name)))
+    if choices.only_on_mirror != "later":
+        checks.append(("only_on_mirror", plan.only_on_mirror))
+    unseen = [
+        rel for name, rels in checks for rel in rels if key(rel) not in keys(name)
+    ]
+    seen_moves = {(key(old), key(new)) for old, new in previewed.get("moves") or []}
+    unseen += [
+        f"{old} -> {new}"
+        for old, new in plan.moves
+        if (key(old), key(new)) not in seen_moves
+    ]
+    if unseen:
+        raise MirrorError(
+            f"The drives changed since the preview; {len(unseen)} file(s) would "
+            "be changed that it did not show: "
+            + ", ".join(unseen[:10])
+            + ". Nothing was synced; check the sync again."
+        )
+
+
 def _drop_stale_baseline(working, mirror, uuid: str) -> None:
     """Forget baseline rows whose file is in neither catalog, so a later
     D-only file with that relpath is asked about instead of trashed."""
@@ -584,11 +626,15 @@ _SCANNED_SQL = (
 )
 
 
+NOT_PREVIEWED = "not in the previewed list"
+
+
 @dataclass
 class OffloadReport:
     files: int = 0
     bytes: int = 0
     skipped: List[str] = field(default_factory=list)
+    relpaths: List[str] = field(default_factory=list)  # freed (or would be)
 
 
 def offload_rule_matches(rules: Sequence[FilterOptions], item: MediaItem) -> bool:
@@ -655,11 +701,15 @@ def free_up_space(
     folders: Sequence[str] = (),
     *,
     dry_run: bool = False,
+    only: Optional[Sequence[str]] = None,
     progress_callback: Optional[ProgressCallback] = None,
 ) -> OffloadReport:
     """Permanently delete selected files from the working drive once the
     mirror holds a verified copy and their faces are scanned and transferred.
-    No file on the mirror changes; only its catalog gets the face data."""
+    No file on the mirror changes; only its catalog gets the face data.
+
+    ``only`` (a dry run's ``relpaths``) limits the delete to those files; any
+    other selected file is skipped as not previewed."""
     if is_query_empty(selection) and not _folder_keys(folders):
         raise MirrorError("Choose what to free up.")
     if not _folder_keys(folders) and not _storable_as_rule(selection):
@@ -677,6 +727,12 @@ def free_up_space(
     ]
     w_rows, m_rows = working.mirror_rows(), mirror.mirror_rows()
     report = OffloadReport()
+    if only is not None:
+        allowed = {key(r) for r in only}
+        report.skipped.extend(
+            f"{r}: {NOT_PREVIEWED}" for r in candidates if key(r) not in allowed
+        )
+        candidates = [r for r in candidates if key(r) in allowed]
 
     same_size = [
         r
@@ -713,6 +769,7 @@ def free_up_space(
     if dry_run:
         report.files = len(eligible)
         report.bytes = sum(w_rows[key(r)].size_bytes for r in eligible)
+        report.relpaths = list(eligible)
         return report
 
     if eligible:
@@ -748,6 +805,7 @@ def free_up_space(
                     raise
                 report.files += 1
                 report.bytes += row.size_bytes
+                report.relpaths.append(row.relpath)
                 logger.debug(f"Freed up: {rel}")
         except FileNotFoundError:
             report.skipped.append(f"{rel}: {NO_COPY}")
@@ -831,6 +889,7 @@ def bring_back(
                     changed.append(rel)  # different content: its faces re-scan
                 base.append(_baseline_row(rel, dest, src))
                 restored.append(rel)
+                report.relpaths.append(rel)
                 report.files += 1
                 report.bytes += size
                 logger.debug(f"Brought back: {rel}")

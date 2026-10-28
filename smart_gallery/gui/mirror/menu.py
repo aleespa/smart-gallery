@@ -3,14 +3,15 @@
 One menu, built from the open gallery's pairing: sync to each mirror, free up
 space, bring files back, or pair with another gallery. Every write runs as a
 background job (``sync-mirror``, ``free-up``, ``bring-back``, ``pair``); a sync
-and a free-up first run a dry run and show what they would do.
+and a free-up first run a dry run that writes its plan (``--plan-out``) and
+show it, and the real run passes that file back (``--expect-plan``) so it does
+nothing the preview did not show.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,7 @@ from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.jobspec import JOB_RUNNING, JobSpec
 from smart_gallery.gui.mirror.dialogs import FreeUpDialog, PairDialog, SyncPreviewDialog
 from smart_gallery.gui.paths import app_data_dir
+from smart_gallery.storage.tree import format_bytes
 
 PLANS_DIR = "mirror"  # app_data_dir() / PLANS_DIR / f"{timestamp}.json"
 BUTTON_TEXT = "Mirror"
@@ -39,12 +41,17 @@ BRING_BACK_TITLE = "Bring back"
 PAIR_TITLE = "Pair galleries"
 JOB_FAILED = "The job did not finish: {summary}"
 PLAN_ERROR = "Could not read the sync plan: {error}"
+FREE_UP_PLAN_ERROR = "Could not read the free up preview: {error}"
+FREE_UP_RESULT = "Would free {files} ({size})."
+FREE_UP_SKIPPED = (
+    "{files} skipped (no verified copy on the mirror, faces not scanned, "
+    "or changed)."
+)
 FREE_UP_CONFIRM = (
     "{result}\n\nThese files will be deleted from this drive; the mirror keeps "
     "its copies and you can bring them back later. Free up the space now?"
 )
 NOTHING_TO_FREE = "Nothing was found to free up."
-_WOULD_FREE = re.compile(r"Would free .*$")
 
 logger = logging.getLogger(__name__)
 
@@ -211,7 +218,15 @@ class MirrorButton(QToolButton):
         dialog = SyncPreviewDialog(plan, self, mirror_label=label)
         if not dialog.exec():
             return
-        argv = ("sync-mirror", drive, "--mirror", peer.db_path, *dialog.flags())
+        argv = (
+            "sync-mirror",
+            drive,
+            "--mirror",
+            peer.db_path,
+            *dialog.flags(),
+            "--expect-plan",
+            str(plan_path),
+        )
         self._start(title, argv)
 
     # ── free up / bring back ────────────────────────────────────────────────
@@ -219,27 +234,36 @@ class MirrorButton(QToolButton):
         dialog = FreeUpDialog(self, mirrors=self._mirror_choices())
         if not dialog.exec():
             return
+        try:
+            plan_path = _new_plan_path()
+        except OSError as exc:
+            error = FREE_UP_PLAN_ERROR.format(error=exc)
+            QMessageBox.warning(self, FREE_UP_TITLE, error)
+            return
         drive, flags = self._drive(), list(dialog.argv())
-        argv = ("free-up", drive, *flags, "--dry-run")
+        argv = ("free-up", drive, *flags, "--dry-run", "--plan-out", str(plan_path))
         self._start(
             FREE_UP_PREVIEW_TITLE,
             argv,
-            then=lambda record: self._confirm_free_up(drive, flags, record),
+            then=lambda _r: self._confirm_free_up(drive, flags, plan_path),
         )
 
-    def _confirm_free_up(self, drive: str, flags: list[str], record) -> None:
-        result = ""
-        for line in reversed(record.output_tail):
-            match = _WOULD_FREE.search(line)
-            if match:
-                result = match.group(0)
-                break
-        if not result:
-            QMessageBox.information(self, FREE_UP_TITLE, NOTHING_TO_FREE)
+    def _confirm_free_up(self, drive: str, flags: list[str], plan_path: Path) -> None:
+        try:
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            files, size = int(plan["files"]), int(plan["bytes"])
+            skipped = len(plan.get("skipped") or [])
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+            error = FREE_UP_PLAN_ERROR.format(error=exc)
+            QMessageBox.warning(self, FREE_UP_TITLE, error)
             return
-        if result.startswith("Would free 0 "):
-            QMessageBox.information(self, FREE_UP_TITLE, result)
+        notes = [FREE_UP_SKIPPED.format(files=_files(skipped))] if skipped else []
+        if not files:
+            text = "\n\n".join([NOTHING_TO_FREE, *notes])
+            QMessageBox.information(self, FREE_UP_TITLE, text)
             return
+        result = FREE_UP_RESULT.format(files=_files(files), size=format_bytes(size))
+        result = "\n".join([result, *notes])
         answer = QMessageBox.question(
             self,
             FREE_UP_TITLE,
@@ -249,7 +273,8 @@ class MirrorButton(QToolButton):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self._start(FREE_UP_TITLE, ("free-up", drive, *flags))
+        argv = ("free-up", drive, *flags, "--expect-plan", str(plan_path))
+        self._start(FREE_UP_TITLE, argv)
 
     def bring_back(self) -> None:
         dialog = FreeUpDialog(
@@ -271,6 +296,10 @@ class MirrorButton(QToolButton):
         if mirror is None:
             return
         self._start(PAIR_TITLE, ("pair", self._drive(), mirror.db_path))
+
+
+def _files(n: int) -> str:
+    return f"{n:,} file" if n == 1 else f"{n:,} files"
 
 
 def _new_plan_path() -> Path:

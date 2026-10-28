@@ -239,6 +239,8 @@ def test_sync_runs_dry_run_then_apply_with_dialog_flags(qtbot, tmp_path, monkeyp
             "--only-on-mirror",
             "copy-back",
             "--confirm-large-delete",
+            "--expect-plan",
+            str(plan_path),
         ),
     )
 
@@ -317,6 +319,8 @@ def test_other_jobs_finishing_are_ignored(qtbot, tmp_path, monkeypatch):
             d.db_path,
             "--only-on-mirror",
             "keep-on-mirror",
+            "--expect-plan",
+            ctx.jobs.specs[dry].argvs[0][6],
         ),
     )
 
@@ -440,13 +444,42 @@ def test_free_up_runs_dry_run_then_asks(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(QMessageBox, "question", question)
     _action(button, "Free up space…").trigger()
     (spec,) = ctx.jobs.specs
-    assert spec.argvs == (("free-up", e.db_path, "--file-types", "video", "--dry-run"),)
+    (argv,) = spec.argvs
+    assert argv[:6] == (
+        "free-up",
+        e.db_path,
+        "--file-types",
+        "video",
+        "--dry-run",
+        "--plan-out",
+    )
+    plan_path = Path(argv[6])
+    assert plan_path.parent.is_dir()
+    skipped = [f"only{i}.mp4: no verified copy on mirror" for i in range(250)]
+    plan = {
+        "files": 3,
+        "bytes": 2_000_000,
+        "relpaths": ["a.mp4", "b.mp4", "c.mp4"],
+        "skipped": skipped,
+    }
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
 
-    ctx.jobs.finish(tail=["x - SUCCESS - Would free 3 file(s), 2.0 MB.", "Skipped: a"])
+    # The output tail holds only skipped lines: the plan file is what counts.
+    ctx.jobs.finish(tail=[f"Skipped: {s}" for s in skipped[-200:]])
     qtbot.waitUntil(lambda: len(ctx.jobs.specs) == 2)
 
-    assert "Would free 3 file(s), 2.0 MB." in asked[0]
-    assert ctx.jobs.specs[1].argvs == (("free-up", e.db_path, "--file-types", "video"),)
+    assert "Would free 3 files (" in asked[0]
+    assert "250 files skipped" in asked[0]
+    assert ctx.jobs.specs[1].argvs == (
+        (
+            "free-up",
+            e.db_path,
+            "--file-types",
+            "video",
+            "--expect-plan",
+            str(plan_path),
+        ),
+    )
 
 
 def test_button_hidden_when_drive_not_connected(qtbot, tmp_path):
@@ -485,7 +518,52 @@ def test_library_greys_offloaded_items(qtbot, tmp_path, make_item):
     assert not view.mirror_btn.isHidden()
 
 
-def test_free_up_unparseable_output_does_not_delete(qtbot, tmp_path, monkeypatch):
+def test_free_up_unreadable_plan_does_not_delete(qtbot, tmp_path, monkeypatch):
+    e, d = _drives(tmp_path, "E", "D")
+    _pair(e, d)
+    ctx, button = _button(qtbot, e, [e, d])
+
+    class Picker:
+        def __init__(self, parent=None, mirrors=(), **kwargs):
+            pass
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+        def argv(self):
+            return ["--file-types", "video"]
+
+    told, asked = [], []
+    monkeypatch.setattr(menu_module, "FreeUpDialog", Picker)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a: told.append(a[2]))
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a: asked.append(a) or QMessageBox.Yes
+    )
+    _action(button, "Free up space…").trigger()
+    assert len(ctx.jobs.specs) == 1  # the job wrote no plan file
+
+    ctx.jobs.finish(tail=["x - SUCCESS - Would free 3 file(s), 2.0 MB."])
+    qtbot.waitUntil(lambda: bool(told))
+
+    assert told[0].startswith("Could not read the free up preview")
+    assert asked == []
+    assert len(ctx.jobs.specs) == 1
+    assert button._pending == {}
+
+
+def test_preview_warns_about_files_at_freed_up_paths(qtbot):
+    dialog = SyncPreviewDialog(
+        _plan(offloaded_conflict=["a.jpg"]), mirror_label="Drive D"
+    )
+    qtbot.addWidget(dialog)
+    assert not dialog.conflict_warning.isHidden()
+    assert "a.jpg" in dialog.conflict_warning.text()
+    plain = SyncPreviewDialog(_plan(), mirror_label="Drive D")
+    qtbot.addWidget(plain)
+    assert plain.conflict_warning.isHidden()
+
+
+def test_free_up_nothing_to_free_does_not_ask(qtbot, tmp_path, monkeypatch):
     e, d = _drives(tmp_path, "E", "D")
     _pair(e, d)
     ctx, button = _button(qtbot, e, [e, d])
@@ -507,24 +585,11 @@ def test_free_up_unparseable_output_does_not_delete(qtbot, tmp_path, monkeypatch
         QMessageBox, "question", lambda *a: asked.append(a) or QMessageBox.Yes
     )
     _action(button, "Free up space…").trigger()
-    assert len(ctx.jobs.specs) == 1
-
-    ctx.jobs.finish(tail=["x - INFO - Syncing catalogs", "Skipped: a.mp4"])
+    (argv,) = ctx.jobs.specs[0].argvs
+    plan = {"files": 0, "bytes": 0, "relpaths": [], "skipped": ["a.mp4: x"]}
+    Path(argv[-1]).write_text(json.dumps(plan), encoding="utf-8")
+    ctx.jobs.finish()
     qtbot.waitUntil(lambda: bool(told))
 
-    assert told == [menu_module.NOTHING_TO_FREE]
-    assert asked == []
-    assert len(ctx.jobs.specs) == 1
-    assert button._pending == {}
-
-
-def test_preview_warns_about_files_at_freed_up_paths(qtbot):
-    dialog = SyncPreviewDialog(
-        _plan(offloaded_conflict=["a.jpg"]), mirror_label="Drive D"
-    )
-    qtbot.addWidget(dialog)
-    assert not dialog.conflict_warning.isHidden()
-    assert "a.jpg" in dialog.conflict_warning.text()
-    plain = SyncPreviewDialog(_plan(), mirror_label="Drive D")
-    qtbot.addWidget(plain)
-    assert plain.conflict_warning.isHidden()
+    assert told[0].startswith(menu_module.NOTHING_TO_FREE)
+    assert asked == [] and len(ctx.jobs.specs) == 1

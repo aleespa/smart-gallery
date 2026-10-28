@@ -44,6 +44,7 @@ from smart_gallery.services import (
     MirrorError,
     apply_mirror_sync,
     bring_back,
+    check_previewed,
     free_up_space,
     pair_galleries,
     plan_mirror_sync,
@@ -356,6 +357,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write the plan to this file as JSON.",
     )
     smirror_run.add_argument(
+        "--expect-plan",
+        type=Path,
+        default=None,
+        help="Apply only if nothing would be trashed, overwritten, moved or "
+        "decided beyond this --plan-out preview; otherwise change nothing.",
+    )
+    smirror_run.add_argument(
         "--confirm-large-delete",
         action="store_true",
         help="Allow a sync that moves many mirror files to the trash.",
@@ -390,10 +398,23 @@ def build_parser() -> argparse.ArgumentParser:
     _add_mirror_arg(p_free)
     _add_filter_args(p_free)
     _add_folder_arg(p_free)
-    p_free.add_argument(
+    free_run = p_free.add_argument_group("Run")
+    free_run.add_argument(
         "--dry-run",
         action="store_true",
         help="List what would be freed without deleting anything.",
+    )
+    free_run.add_argument(
+        "--plan-out",
+        type=Path,
+        default=None,
+        help="Write what would be freed, and what is skipped, to this file " "as JSON.",
+    )
+    free_run.add_argument(
+        "--expect-plan",
+        type=Path,
+        default=None,
+        help="Delete only the files listed in this --plan-out preview.",
     )
 
     p_back = sub.add_parser(
@@ -962,6 +983,8 @@ def _handle_sync_mirror(args):
                 _log_plan(preview)
                 if args.dry_run:
                     return
+                if args.expect_plan:
+                    check_previewed(preview, choices, _read_json(args.expect_plan))
                 report = apply_mirror_sync(
                     working, mirror, preview, choices, progress_callback=cb
                 )
@@ -978,7 +1001,21 @@ def _handle_sync_mirror(args):
         sys.exit(1)
 
 
+def _read_json(path: Path) -> dict:
+    """A preview written by --plan-out (ValueError when unreadable)."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Could not read the preview {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"The preview {path} is not a plan file.")
+    return data
+
+
 def _handle_free_up(args):
+    only = None
+    if args.expect_plan:
+        only = list(_read_json(args.expect_plan).get("relpaths") or [])
     cb = progress_reporter()
     with GalleryRepository.open(args.drive) as working:
         with _open_mirror_of(working, args.mirror) as mirror:
@@ -989,14 +1026,23 @@ def _handle_free_up(args):
                     build_filter_query(args),
                     args.folder,
                     dry_run=args.dry_run,
+                    only=only,
                     progress_callback=cb,
                 )
             finally:
                 cb.close()
-    verb = "Would free" if args.dry_run else "Freed"
-    logger.success(f"{verb} {report.files} file(s), {format_bytes(report.bytes)}.")
+    if args.plan_out:
+        data = {
+            "files": report.files,
+            "bytes": report.bytes,
+            "relpaths": report.relpaths,
+            "skipped": report.skipped,
+        }
+        args.plan_out.write_text(json.dumps(data, indent=2), encoding="utf-8")
     for note in report.skipped:
         logger.info(f"Skipped: {note}")
+    verb = "Would free" if args.dry_run else "Freed"
+    logger.success(f"{verb} {report.files} file(s), {format_bytes(report.bytes)}.")
 
 
 def _handle_bring_back(args):

@@ -29,6 +29,7 @@ from smart_gallery.mirror.fileops import (
     restore_from_trash,
     run_stamp,
 )
+from smart_gallery.mirror import hashing
 from smart_gallery.mirror.hashing import ensure_hashes
 from smart_gallery.mirror.plan import build_plan
 from smart_gallery.mirror.types import (
@@ -118,21 +119,66 @@ def _check(
     return m_uuid
 
 
-def _cached(
-    repo: GalleryRepository,
-    rows: Dict[str, MirrorRow],
-    progress_callback: Optional[ProgressCallback] = None,
-) -> Callable:
-    cache: Dict[str, Optional[str]] = {}
+class _Hashes:
+    """The planner's hash provider for one drive: ``prefetch`` hashes known
+    candidates in one batch; any other key asked for (rename pairing) is
+    hashed on demand and committed by ``flush``."""
 
-    def provider(k: str) -> Optional[str]:
-        if k not in cache:
-            cache[k] = ensure_hashes(
-                repo, [rows[k].relpath], progress_callback, rows=rows
-            ).get(k)
-        return cache[k]
+    def __init__(self, repo: GalleryRepository, rows: Dict[str, MirrorRow]):
+        self.repo, self.rows = repo, rows
+        self.cache: Dict[str, Optional[str]] = {}
+        self.fresh: List[Tuple[str, str]] = []
 
-    return provider
+    def prefetch(self, keys, progress_callback, done_before: int, total: int):
+        rels = [self.rows[k].relpath for k in keys]
+        got = ensure_hashes(
+            self.repo,
+            rels,
+            progress_callback,
+            rows=self.rows,
+            done_before=done_before,
+            total=total,
+        )
+        for k in keys:
+            self.cache[k] = got.get(k)
+
+    def __call__(self, k: str) -> Optional[str]:
+        if k not in self.cache:
+            row = self.rows[k]
+            digest = row.content_hash
+            if not digest:
+                try:
+                    digest = hashing.hash_file(self.repo.drive_root / row.relpath)
+                except OSError as exc:
+                    logger.warning(f"Could not hash {row.relpath}: {exc}")
+                    digest = None
+                else:
+                    self.fresh.append((row.relpath, digest))
+            self.cache[k] = digest
+        return self.cache[k]
+
+    def flush(self) -> None:
+        if self.fresh:
+            self.repo.set_hashes(self.fresh)
+            self.fresh = []
+
+
+def _hash_candidates(w_rows, m_rows, baseline, offloaded) -> List[str]:
+    """Keys the planner compares by content: on both drives, same size,
+    different mtime, and changed since the baseline (or never synced)."""
+    out = []
+    for k in sorted(set(w_rows) & set(m_rows)):
+        w, m, b = w_rows[k], m_rows[k], baseline.get(k)
+        if k in offloaded or w.size_bytes != m.size_bytes or w.mtime_ns == m.mtime_ns:
+            continue
+        if b is not None and (w.size_bytes, w.mtime_ns, m.mtime_ns) == (
+            b.size_bytes,
+            b.working_mtime_ns,
+            b.mirror_mtime_ns,
+        ):
+            continue
+        out.append(k)
+    return out
 
 
 def _offloaded_conflicts(
@@ -165,16 +211,28 @@ def plan_mirror_sync(
     w_rows, m_rows = working.mirror_rows(), mirror.mirror_rows()
     offloaded = {key(r) for r in working.offloaded_relpaths()}
     held = {key(r) for r in working.offloaded_on(m_uuid)}
-    plan = build_plan(
-        w_rows,
-        m_rows,
-        working.baseline(m_uuid),
-        offloaded,
-        held,
-        _cached(working, w_rows, progress_callback),
-        _cached(mirror, m_rows, progress_callback),
-        _offloaded_conflicts(working, w_rows, offloaded),
-    )
+    baseline = working.baseline(m_uuid)
+    w_hashes, m_hashes = _Hashes(working, w_rows), _Hashes(mirror, m_rows)
+    # Hash what the planner will compare up front: one counted step, one
+    # commit per batch, instead of a "1/1" step per file.
+    candidates = _hash_candidates(w_rows, m_rows, baseline, offloaded)
+    n = len(candidates)
+    w_hashes.prefetch(candidates, progress_callback, 0, 2 * n)
+    m_hashes.prefetch(candidates, progress_callback, n, 2 * n)
+    try:
+        plan = build_plan(
+            w_rows,
+            m_rows,
+            baseline,
+            offloaded,
+            held,
+            w_hashes,
+            m_hashes,
+            _offloaded_conflicts(working, w_rows, offloaded),
+        )
+    finally:
+        w_hashes.flush()
+        m_hashes.flush()
     copy_bytes = sum(w_rows[key(r)].size_bytes for r in plan.copy_new + plan.overwrite)
     trash_dir = mirror.drive_root / DB_DIRNAME / "trash"
     trash_bytes = (
@@ -627,8 +685,9 @@ def free_up_space(
     ]
     # Read both copies from disk: a stored hash may have come with a copied
     # row or predate an edit, and this check guards a permanent delete.
+    n = len(same_size)
     w_hash = ensure_hashes(
-        working, same_size, progress_callback, rows=w_rows, force=True
+        working, same_size, progress_callback, rows=w_rows, force=True, total=2 * n
     )
     m_hash = ensure_hashes(
         mirror,
@@ -636,6 +695,8 @@ def free_up_space(
         progress_callback,
         rows=m_rows,
         force=True,
+        done_before=n,
+        total=2 * n,
     )
     images = _keys(working, "SELECT relpath FROM media_items WHERE media_type='image'")
     scanned = _keys(working, _SCANNED_SQL, (FACE_DET_VERSION,))

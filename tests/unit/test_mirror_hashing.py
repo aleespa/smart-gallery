@@ -68,3 +68,21 @@ def test_ensure_hashes_force_rereads_stored_hashes(repo, drive, drive_file, make
     fresh = ensure_hashes(repo, ["a.jpg"], force=True)[key("a.jpg")]
     assert fresh == hash_file(drive / "a.jpg")
     assert repo.mirror_rows()[key("a.jpg")].content_hash == fresh
+
+
+def test_ensure_hashes_commits_in_batches_and_counts_on(
+    repo, drive, drive_file, make_item, monkeypatch
+):
+    for i in range(5):
+        _add(repo, make_item, drive_file, drive, f"f{i}.jpg", bytes([i]))
+    monkeypatch.setattr(hashing, "HASH_BATCH", 2)
+    commits = []
+    real = repo.set_hashes
+    monkeypatch.setattr(
+        repo, "set_hashes", lambda pairs: (commits.append(len(pairs)), real(pairs))
+    )
+    events = []
+    rels = [f"f{i}.jpg" for i in range(5)]
+    ensure_hashes(repo, rels, events.append, done_before=3, total=10)
+    assert commits == [2, 2, 1]
+    assert [(ev.done, ev.total) for ev in events] == [(n, 10) for n in range(4, 9)]

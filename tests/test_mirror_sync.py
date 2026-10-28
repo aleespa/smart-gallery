@@ -256,6 +256,33 @@ def test_first_plan_reads_catalog_rows_once_per_side(two_drives, monkeypatch):
     assert len(calls) <= 2
 
 
+def test_first_plan_hashing_progress_is_cumulative(two_drives, monkeypatch):
+    from smart_gallery.progress import HASHING
+
+    e, d = two_drives
+    for i in range(6):
+        _mirror_copy(e, d, f"f{i}.txt", str(i))
+        os.utime(d / f"f{i}.txt", ns=(1_000_000_000, 1_000_000_000))
+    _mirror_copy(e, d, "same.txt", "s")  # same mtime: never hashed
+    w, m = _paired(e, d)
+    commits = []
+    real = GalleryRepository.set_hashes
+
+    def spy(self, pairs):
+        pairs = list(pairs)
+        commits.append(len(pairs))
+        return real(self, pairs)
+
+    monkeypatch.setattr(GalleryRepository, "set_hashes", spy)
+    events = []
+    with w, m:
+        pv = plan_mirror_sync(w, m, progress_callback=events.append)
+    assert len(pv.plan.adopt) == 7
+    hashing_events = [(ev.done, ev.total) for ev in events if ev.step == HASHING]
+    assert hashing_events == [(n, 12) for n in range(1, 13)]
+    assert commits == [6, 6]  # one batch per side, not one commit per file
+
+
 # -- apply -------------------------------------------------------------------
 
 

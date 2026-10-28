@@ -218,9 +218,9 @@ class PeopleView(QWidget):
         self.loaded = True
 
     def _update_find(self) -> None:
-        self.find_button.setEnabled(
-            paths.faces_available() and self.ctx.current is not None
-        )
+        available = paths.faces_available()
+        self.find_button.setEnabled(available and self.ctx.current is not None)
+        self.find_button.setToolTip("" if available else NO_EXTRA)
 
     # ── right side ──────────────────────────────────────────────────────────
     def show_message(

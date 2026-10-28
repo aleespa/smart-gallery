@@ -227,6 +227,7 @@ def test_no_faces_state(qtbot, repo):
     assert not view.message_action.isHidden()
     assert view.message_action.isEnabled()
     assert view.find_button.isEnabled()
+    assert view.find_button.toolTip() == ""
 
 
 def test_faces_extra_missing_disables_find(qtbot, repo, monkeypatch):
@@ -235,6 +236,7 @@ def test_faces_extra_missing_disables_find(qtbot, repo, monkeypatch):
     assert view.message.text() == NO_EXTRA
     assert "uv sync --extra faces" in NO_EXTRA
     assert not view.find_button.isEnabled()
+    assert view.find_button.toolTip() == NO_EXTRA
     assert view.message_action.isHidden() or not view.message_action.isEnabled()
 
 

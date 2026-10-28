@@ -676,3 +676,16 @@ def test_deleted_on_working_edited_on_mirror_skip_leaves_it(two_drives):
     assert rep.skipped == 1 and rep.trashed == 0
     assert (d / "a.txt").read_text() == "edited on D"
     assert _plan(e, d).plan.changed_on_mirror == ["a.txt"]
+
+
+def test_preview_sizes_the_files_it_would_trash(two_drives):
+    e, d = two_drives
+    _setup_pair(e, d, "a.txt", "bb.txt", "keep.txt")
+    (d / ".smart_gallery" / "trash" / "old").mkdir(parents=True)
+    (d / ".smart_gallery" / "trash" / "old" / "x.bin").write_bytes(b"x" * 100)
+    (e / "a.txt").unlink()
+    (e / "bb.txt").unlink()
+    pv = _plan(e, d)
+    assert sorted(pv.plan.trash) == ["a.txt", "bb.txt"]
+    assert pv.trash_bytes == len("a.txt") + len("bb.txt")
+    assert pv.mirror_trash_bytes == 100

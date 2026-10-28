@@ -90,10 +90,11 @@ class MirrorPreview:
     plan: MirrorPlan
     copy_bytes: int
     mirror_free_bytes: int
-    mirror_trash_bytes: int
+    mirror_trash_bytes: int  # already in the mirror's trash folder
     large_delete: bool
     working_files: int
     mirror_files: int
+    trash_bytes: int = 0  # the mirror files this sync would move to its trash
 
 
 def _check(
@@ -249,6 +250,7 @@ def plan_mirror_sync(
         large_delete=len(plan.trash) > DELETE_GUARD_FRACTION * len(m_rows),
         working_files=len(w_rows),
         mirror_files=len(m_rows),
+        trash_bytes=sum(m_rows[key(r)].size_bytes for r in plan.trash),
     )
 
 

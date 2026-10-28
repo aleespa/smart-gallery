@@ -593,3 +593,41 @@ def test_free_up_nothing_to_free_does_not_ask(qtbot, tmp_path, monkeypatch):
 
     assert told[0].startswith(menu_module.NOTHING_TO_FREE)
     assert asked == [] and len(ctx.jobs.specs) == 1
+
+
+def test_preview_lists_files_per_class_and_sizes_the_trash(qtbot):
+    plan = _plan(
+        trash=["old/a.jpg", "old/b.jpg"],
+        overwrite=["c.jpg"],
+        conflicts=["both.jpg"],
+        changed_on_mirror=["d-edit.jpg"],
+        only_on_mirror=["extra.jpg"],
+        offloaded_missing=["gone.jpg"],
+        moves=[["x.jpg", "y/x.jpg"]],
+        trash_bytes=3_000_000,
+        mirror_trash_bytes=7,
+    )
+    dialog = SyncPreviewDialog(plan, mirror_label="Drive D")
+    qtbot.addWidget(dialog)
+    assert dialog.listed("trash") == ["old/a.jpg", "old/b.jpg"]
+    assert dialog.listed("overwrite") == ["c.jpg"]
+    assert dialog.listed("conflicts") == ["both.jpg"]
+    assert dialog.listed("changed_on_mirror") == ["d-edit.jpg"]
+    assert dialog.listed("only_on_mirror") == ["extra.jpg"]
+    assert dialog.listed("offloaded_missing") == ["gone.jpg"]
+    assert dialog.listed("moves") == ["x.jpg → y/x.jpg"]
+    assert dialog.listed("copy_new") == []  # empty classes get no entry
+    text = dialog.summary_text()
+    assert "Move 2 files on Drive D to its trash (2.86 MB)" in text
+    assert "Already in Drive D's trash: 7 B" in text
+
+
+def test_preview_file_list_is_capped(qtbot):
+    from smart_gallery.gui.mirror import dialogs
+
+    names = [f"f{i}.jpg" for i in range(dialogs.LIST_LIMIT + 5)]
+    dialog = SyncPreviewDialog(_plan(copy_new=names), mirror_label="Drive D")
+    qtbot.addWidget(dialog)
+    shown = dialog.listed("copy_new")
+    assert shown[: dialogs.LIST_LIMIT] == names[: dialogs.LIST_LIMIT]
+    assert shown[-1] == "… and 5 more"

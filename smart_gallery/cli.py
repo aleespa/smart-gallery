@@ -935,6 +935,7 @@ def _plan_json(preview) -> dict:
         "copy_bytes": preview.copy_bytes,
         "mirror_free_bytes": preview.mirror_free_bytes,
         "mirror_trash_bytes": preview.mirror_trash_bytes,
+        "trash_bytes": preview.trash_bytes,
         "large_delete": preview.large_delete,
     }
 
@@ -943,9 +944,10 @@ def _log_plan(preview) -> None:
     data = _plan_json(preview)
     counts = ", ".join(f"{n}={c}" for n, c in data["counts"].items() if c)
     logger.info(
-        f"Plan: {counts or 'nothing to do'}; copy {format_bytes(preview.copy_bytes)} "
+        f"Plan: {counts or 'nothing to do'}; copy {format_bytes(preview.copy_bytes)}, "
+        f"to trash {format_bytes(preview.trash_bytes)} "
         f"(mirror free {format_bytes(preview.mirror_free_bytes)}, "
-        f"trash {format_bytes(preview.mirror_trash_bytes)})."
+        f"already in its trash {format_bytes(preview.mirror_trash_bytes)})."
     )
     if preview.large_delete:
         logger.warning("This sync would trash a large share of the mirror's files.")

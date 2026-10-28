@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -55,6 +57,20 @@ CONFLICT_WARNING = (
     "same place on this drive: {names}. Those new files are not synced; move "
     "them to another folder to sync them."
 )
+# (plan class, heading) for the expandable file lists, most important first.
+LIST_CLASSES = (
+    ("trash", "Move to {d}'s trash"),
+    ("overwrite", "Update on {d}"),
+    ("conflicts", "Changed on both"),
+    ("changed_on_mirror", "Changed on {d}"),
+    ("only_on_mirror", "Only on {d}"),
+    ("offloaded_missing", "Kept only on {d}, now missing"),
+    ("offloaded_conflict", "Different file at a freed-up path"),
+    ("offloaded_changed", "Kept only on {d}, changed there"),
+    ("moves", "Move or rename on {d}"),
+    ("copy_new", "Copy to {d}"),
+)
+LIST_LIMIT = 1000  # files shown per class; the rest is counted
 LARGE_DELETE = "Yes, move this many files on {d} to its trash"
 NOTHING_TO_DO = "{d} is already in step. Nothing to copy or change."
 FILE_TYPES = (("image", "Photos"), ("video", "Videos"), ("other", "Other files"))
@@ -107,11 +123,14 @@ class SyncPreviewDialog(QDialog):
             lines.append(f"Leave {_files(changed)} kept only on {d} that changed there")
         trash = _n(plan, "trash")
         if trash:
-            size = format_bytes(int(plan.get("mirror_trash_bytes") or 0))
+            size = format_bytes(int(plan.get("trash_bytes") or 0))
             lines.append(f"<b>Move {_files(trash)} on {d} to its trash</b> ({size})")
         free = plan.get("mirror_free_bytes")
         if free is not None:
             lines.append(f"Free space on {d}: {format_bytes(int(free))}")
+        in_trash = int(plan.get("mirror_trash_bytes") or 0)
+        if in_trash:
+            lines.append(f"Already in {d}'s trash: {format_bytes(in_trash)}")
         self.summary = QLabel("<br>".join(lines) or NOTHING_TO_DO.format(d=d))
         self.summary.setWordWrap(True)
 
@@ -143,6 +162,26 @@ class SyncPreviewDialog(QDialog):
             form.addRow(f"{label} ({n:,})", combo)
             combo.setEnabled(bool(n))
 
+        self.file_lists = QTreeWidget()
+        self.file_lists.setHeaderHidden(True)
+        self._list_items: dict[str, QTreeWidgetItem] = {}
+        for name, heading in LIST_CLASSES:
+            rels = [
+                " → ".join(r) if isinstance(r, (list, tuple)) else str(r)
+                for r in plan.get(name) or []
+            ]
+            if not rels:
+                continue
+            item = QTreeWidgetItem([f"{heading.format(d=d)} ({len(rels):,})"])
+            children = [QTreeWidgetItem([rel]) for rel in rels[:LIST_LIMIT]]
+            if len(rels) > LIST_LIMIT:
+                more = f"… and {len(rels) - LIST_LIMIT:,} more"
+                children.append(QTreeWidgetItem([more]))
+            item.addChildren(children)
+            self.file_lists.addTopLevelItem(item)
+            self._list_items[name] = item
+        self.file_lists.setVisible(bool(self._list_items))
+
         self.confirm = QCheckBox(LARGE_DELETE.format(d=d))
         self.confirm.setVisible(bool(plan.get("large_delete")))
 
@@ -160,9 +199,17 @@ class SyncPreviewDialog(QDialog):
         layout.addWidget(self.summary)
         layout.addWidget(self.missing_warning)
         layout.addWidget(self.conflict_warning)
+        layout.addWidget(self.file_lists)
         layout.addLayout(form)
         layout.addWidget(self.confirm)
         layout.addWidget(buttons)
+
+    def listed(self, name: str) -> list[str]:
+        """The file lines shown under one plan class (empty when absent)."""
+        item = self._list_items.get(name)
+        if item is None:
+            return []
+        return [item.child(i).text(0) for i in range(item.childCount())]
 
     def summary_text(self) -> str:
         return self.summary.text().replace("<b>", "").replace("</b>", "")

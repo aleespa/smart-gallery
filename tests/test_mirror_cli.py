@@ -83,7 +83,7 @@ def test_pair_then_sync_mirror_dry_run_writes_plan_json(two_drives, tmp_path):
         assert key in plan and key in plan["counts"]
     assert plan["copy_bytes"] == 14
     assert plan["large_delete"] is False
-    assert {"mirror_free_bytes", "mirror_trash_bytes"} <= set(plan)
+    assert {"mirror_free_bytes", "mirror_trash_bytes", "trash_bytes"} <= set(plan)
     assert not (d / "a.txt").exists()
 
 

@@ -34,6 +34,7 @@ COPYING = "Copying files"
 SCANNING = "Scanning faces"
 FILING = "Sorting faces"
 RECYCLING = "Moving files to Recycle Bin"
+FREEING = "Freeing up space"
 
 
 @dataclass(frozen=True)

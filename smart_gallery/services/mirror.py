@@ -42,7 +42,7 @@ from smart_gallery.mirror.types import (
 from smart_gallery.models import DB_COLUMNS, MediaItem
 from smart_gallery.organize.filters import FilterOptions, is_query_empty, matches
 from smart_gallery.organize.organize import copy_atomic, copy_progress
-from smart_gallery.progress import ProgressCallback
+from smart_gallery.progress import FREEING, ProgressCallback, ProgressEvent
 from smart_gallery.services.sync import sync_drive
 
 DELETE_GUARD_FRACTION = 0.05
@@ -694,9 +694,19 @@ def free_up_space(
             logger.warning(f"Could not free up {rel}: {exc}")
             report.skipped.append(f"{rel}: {exc}")
         if progress_callback:
-            progress_callback(copy_progress(done, len(eligible), report.files, 0))
+            progress_callback(
+                ProgressEvent(
+                    FREEING,
+                    done,
+                    len(eligible),
+                    outcomes=(
+                        ("freed", report.files),
+                        ("skipped", done - report.files),
+                    ),
+                )
+            )
 
-    if not _folder_keys(folders):
+    if report.files and not _folder_keys(folders):
         rules = working.get_pairing().offload_rules
         if all(_rule_key(r) != _rule_key(selection) for r in rules):
             working.set_offload_rules(rules + [selection])

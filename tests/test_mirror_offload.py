@@ -489,3 +489,29 @@ def test_plan_lists_a_different_file_put_at_a_freed_up_path(two_drives):
         assert (d / "a.txt").read_text() == "aaa"
         assert (e / "a.txt").read_text() == "a new photo, not the freed one"
         assert w.offloaded_relpaths() == {"a.txt", "b.txt"}
+
+
+def test_free_up_adds_no_rule_when_nothing_was_freed(two_drives):
+    e, d = two_drives
+    _put(e, "a.txt", "only on E")
+    w, m = _paired(e, d)
+    with w, m:
+        report = free_up_space(w, m, OTHER)
+        assert report.files == 0
+        assert w.get_pairing().offload_rules == []
+
+
+def test_free_up_reports_its_own_progress_step(two_drives):
+    from smart_gallery.progress import FREEING
+
+    e, d = two_drives
+    _mirror_copy(e, d, "a.txt", "aaa")
+    _mirror_copy(e, d, "b.txt", "bbb")
+    w, m = _paired(e, d)
+    events = []
+    with w, m:
+        free_up_space(w, m, OTHER, progress_callback=events.append)
+    freeing = [ev for ev in events if ev.step == FREEING]
+    assert [(ev.done, ev.total) for ev in freeing] == [(1, 2), (2, 2)]
+    assert freeing[-1].outcomes[0] == ("freed", 2)
+    assert not [ev for ev in events if ev.step == "Copying files"]

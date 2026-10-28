@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import AbstractSet, Callable, Dict, Optional, Set
+from typing import AbstractSet, Callable, Dict, List, Optional, Set
 
 from smart_gallery.mirror.types import BaselineRow, MirrorPlan, MirrorRow
 
@@ -113,12 +113,15 @@ def _offloaded(
 def _pair_moves(plan, working, mirror, hash_working, hash_mirror) -> None:
     old_by_key = {r.casefold(): r for r in plan.trash}
     new_by_key = {r.casefold(): r for r in plan.copy_new}
+    by_size: Dict[int, List[str]] = {}  # copy_new keys per size, sorted
+    for nk in sorted(new_by_key):
+        by_size.setdefault(working[nk].size_bytes, []).append(nk)
     used_new: Set[str] = set()
     for ok in sorted(old_by_key):
         old = mirror[ok]
         hm = None
-        for nk in sorted(new_by_key):
-            if nk in used_new or working[nk].size_bytes != old.size_bytes:
+        for nk in by_size.get(old.size_bytes, ()):
+            if nk in used_new:
                 continue
             if hm is None:
                 hm = hash_mirror(ok)

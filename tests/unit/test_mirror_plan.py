@@ -196,3 +196,18 @@ def test_different_file_at_an_offloaded_path_is_listed():
     )
     assert p.offloaded_conflict == ["a.jpg"]
     assert not (p.trash or p.copy_new or p.overwrite or p.conflicts)
+
+
+def test_moves_pair_by_size_among_many_candidates():
+    n = 3000
+    old = [row(f"old{i:04}.jpg", size=i) for i in range(n)]
+    new = [row(f"new{i:04}.jpg", size=i) for i in range(n)]
+    hw = Hashes({f"new{i:04}.jpg": f"h{i}" for i in range(0, n, 2)})
+    hm = Hashes({f"old{i:04}.jpg": f"h{i}" for i in range(n)})
+    p, hw, _ = plan(
+        new, old, [base(r.relpath, size=r.size_bytes) for r in old], hw=hw, hm=hm
+    )
+    assert len(p.moves) == n // 2
+    assert ("old0002.jpg", "new0002.jpg") in p.moves
+    assert "old0001.jpg" in p.trash and "new0001.jpg" in p.copy_new
+    assert len(hw.calls) == n  # only the one same-size candidate per old file

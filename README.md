@@ -162,8 +162,9 @@ mirror; nothing on a mirror is ever deleted outright.
 ```bash
 smart-gallery pair E:/ D:/                  # once; both catalogs must exist
 smart-gallery sync-mirror E:/ --dry-run --plan-out plan.json   # preview
-smart-gallery sync-mirror E:/               # apply
-smart-gallery free-up E:/ --date-end 2019-12-31 --dry-run    # then without --dry-run
+smart-gallery sync-mirror E:/ --expect-plan plan.json           # apply just that
+smart-gallery free-up E:/ --date-end 2019-12-31 --dry-run --plan-out free.json
+smart-gallery free-up E:/ --date-end 2019-12-31 --expect-plan free.json
 smart-gallery bring-back E:/ --date-end 2019-12-31
 ```
 
@@ -173,16 +174,27 @@ smart-gallery bring-back E:/ --date-end 2019-12-31
 - **`sync-mirror <drive>`** refreshes both catalogs, then copies new and edited
   files to the mirror, moves files you deleted or renamed on the working drive
   into the mirror's trash, and carries face data across. Files seen only on the
-  mirror, or edited there or on both, are your call: `--only-on-mirror
+  mirror, edited there or on both, or deleted on the working drive but edited
+  on the mirror, are your call: `--only-on-mirror
   later|keep-on-mirror|copy-back`, `--changed-on-mirror
   skip|take-working|keep-mirror`, `--conflicts skip|take-working|keep-mirror`
-  (all default to leaving them). `--dry-run` previews, `--plan-out FILE` writes
-  the plan as JSON. A sync that would trash more than 5% of the mirror needs
-  `--confirm-large-delete`. It refuses when either drive is missing or its
-  catalog does not match the pairing.
+  (all default to leaving them; for a file deleted on the working drive,
+  `take-working` trashes the mirror's copy and `keep-mirror` copies it back).
+  `--dry-run` previews, `--plan-out FILE` writes the plan as JSON (each class
+  with its files, plus `copy_bytes` and `trash_bytes`). `--expect-plan FILE`
+  applies only if nothing would be trashed, overwritten, moved or decided that
+  this preview did not list; otherwise it changes nothing and exits 1. A sync
+  that would trash more than 5% of the mirror needs `--confirm-large-delete`.
+  It refuses when either drive is missing or its catalog does not match the
+  pairing. If you put a different file at the path of a freed-up one, the plan
+  lists it under `offloaded_conflict` and leaves it alone: move it elsewhere
+  to have it synced.
 - **`free-up <drive>`** deletes files from the working drive once the mirror
-  holds a verified copy (same size and hash). Takes the usual filter flags and
-  `--folder`. The catalog rows stay, shown greyed out in the app.
+  holds a verified copy (same size, and the same hash read from both files).
+  Takes the usual filter flags and `--folder`. The catalog rows stay, shown
+  greyed out in the app, and are not offered to `scan-faces`. `--plan-out
+  FILE` writes what would be freed (and what is skipped, and why) as JSON;
+  `--expect-plan FILE` deletes only the files that preview listed.
 - **`bring-back <drive>`** copies such files from the mirror back.
 - **`import`** also copies into every reachable mirror, from the fresh working
   copy. If a mirror is absent the import still completes and the next
@@ -194,7 +206,9 @@ smart-gallery bring-back E:/ --date-end 2019-12-31
   data is a copy that each sync refreshes.
 
 In the desktop app the Library header has a **Mirror** button with the same
-actions (sync with a preview dialog, free up, bring back, pair).
+actions (sync with a preview dialog that lists the files of each kind, free
+up, bring back, pair). Each sync or free-up runs exactly what its preview
+showed (`--expect-plan`).
 
 ### `compare` — compare two catalogs
 

@@ -93,12 +93,24 @@ and `bring-back` live there too, and `import_media` copies to mirrors unless
 - **Planner rule.** "Changed" is decided per drive: size or mtime differs from
   that drive's own snapshot in `mirror_baseline` (cross-drive mtimes are
   unreliable on exFAT/DST). Cross-drive equality is size+mtime, or size+hash
-  when they differ. Hashes are computed only when needed.
+  when they differ. Hashes are computed only when needed (the plan service
+  hashes the candidates up front as one counted step). A file deleted on E
+  but edited on D is asked about (`changed_on_mirror`), never trashed.
+- **Hashes describe the bytes they read.** A row copied to the other drive
+  (apply, keep-on-mirror, import, bring back) gets `content_hash = None`, and
+  free-up re-hashes both copies from disk (`ensure_hashes(force=True)`)
+  before deleting anything.
 - **Offloaded rows.** Files freed up from E keep their `media_items` row (and
   faces); `sync_drive` keeps an offloaded row whose file is missing and clears
   the flag when the file returns. The planner excludes them from deletes.
+  Free-up flags each file (committed) *before* deleting it, so a kill can
+  never leave D's only copy looking deleted on E. A different-size file put
+  at a freed-up path is listed as `offloaded_conflict` (no action). Offloaded
+  images are not face-scan candidates.
 - **Safeguards.** Refuse on a missing root, `db_uuid` mismatch or empty walk;
-  `--confirm-large-delete` above 5% trashed.
+  `--confirm-large-delete` above 5% trashed. `sync-mirror --expect-plan` and
+  `free-up --expect-plan` take a `--plan-out` preview and do nothing beyond
+  it (sync refuses outright; free-up skips files not listed).
 
 ### Why face data is never stored on `media_items`
 
@@ -207,8 +219,10 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   `WindowButtons` at the right, and a `ResizeFrame` margin resizes it. Moving
   and resizing use `startSystemMove`/`startSystemResize`, so snapping works.
 - **Mirror button.** `gui/mirror/` (`menu.py`, `dialogs.py`) is the Library
-  header's Mirror menu: sync (preview dialog), free up, bring back, pair. It
-  acts only on its own dry run. No new area.
+  header's Mirror menu: sync (preview dialog with per-class file lists), free
+  up, bring back, pair. It acts only on its own dry run, reads that dry run's
+  `--plan-out` JSON, and passes it to the real run as `--expect-plan`. No new
+  area.
 - **Theme** lives in `gui/theme.py`: Segoe UI Variable Text for controls,
   Georgia (`serif_font`) for headings only, and one accent (`ACCENT`, the
   first Sunset stop) set as the palette's Highlight/Accent so every

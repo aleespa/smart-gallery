@@ -5,6 +5,10 @@ database describing every media file on it. Imports update the catalog
 incrementally, `sync` reconciles it with the live drive, and `export` copies
 filtered subsets elsewhere — all without re-scanning the whole drive.
 
+New to Smart Gallery? Start with the **[User Guide](docs/USER_GUIDE.md)**, a
+walk-through of the desktop app for first-time users. This README is the
+command-line reference.
+
 ## Requirements
 
 - Python ≥ 3.13

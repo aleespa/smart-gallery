@@ -174,3 +174,10 @@ def test_same_size_different_content_is_not_a_move():
 def test_different_size_is_not_hashed_for_moves():
     p, hw, hm = plan([row("new.jpg", size=5)], [row("old.jpg")], [base("old.jpg")])
     assert not p.moves and not hw.calls and not hm.calls
+
+
+def test_deleted_on_working_but_changed_on_mirror_is_asked():
+    p, _, _ = plan(mirror=[row("a.jpg", mtime=7)], baseline=[base("a.jpg")])
+    assert p.changed_on_mirror == ["a.jpg"] and p.trash == []
+    p, _, _ = plan(mirror=[row("a.jpg", size=12)], baseline=[base("a.jpg")])
+    assert p.changed_on_mirror == ["a.jpg"] and p.trash == []

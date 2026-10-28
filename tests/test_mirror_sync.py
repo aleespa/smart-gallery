@@ -612,3 +612,40 @@ def test_keep_mirror_invalidates_working_faces(two_drives):
             == mid
         )
     assert (e / "a.txt").read_text() == "edited on D"
+
+
+def _deleted_on_e_edited_on_d(e, d):
+    _setup_pair(e, d, "a.txt", "b.txt")
+    (e / "a.txt").unlink()
+    _put(d, "a.txt", "edited on D")
+
+
+def test_deleted_on_working_edited_on_mirror_take_working_trashes(two_drives):
+    e, d = two_drives
+    _deleted_on_e_edited_on_d(e, d)
+    rep, pv = _sync(e, d, MirrorChoices(changed_on_mirror="take-working"))
+    assert pv.plan.changed_on_mirror == ["a.txt"] and pv.plan.trash == []
+    assert rep.trashed == 1 and not rep.failures
+    assert not (d / "a.txt").exists()
+    assert [p.read_text() for p in _trash(d, "a.txt")] == ["edited on D"]
+    assert _plan(e, d).plan.is_empty
+
+
+def test_deleted_on_working_edited_on_mirror_keep_mirror_copies_back(two_drives):
+    e, d = two_drives
+    _deleted_on_e_edited_on_d(e, d)
+    rep, pv = _sync(e, d, MirrorChoices(changed_on_mirror="keep-mirror"))
+    assert pv.plan.changed_on_mirror == ["a.txt"]
+    assert rep.copied_back == 1 and not rep.failures
+    assert (e / "a.txt").read_text() == "edited on D"
+    assert (d / "a.txt").read_text() == "edited on D"
+    assert _plan(e, d).plan.is_empty
+
+
+def test_deleted_on_working_edited_on_mirror_skip_leaves_it(two_drives):
+    e, d = two_drives
+    _deleted_on_e_edited_on_d(e, d)
+    rep, pv = _sync(e, d)
+    assert rep.skipped == 1 and rep.trashed == 0
+    assert (d / "a.txt").read_text() == "edited on D"
+    assert _plan(e, d).plan.changed_on_mirror == ["a.txt"]

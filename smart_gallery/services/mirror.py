@@ -414,10 +414,15 @@ def _operations(
         (plan.conflicts, choices.conflicts),
     ):
         for rel in rels:
-            if choice == "take-working":
+            on_e = key(rel) in w_rows  # not when deleted on E, edited on D
+            if choice == "take-working" and on_e:
                 ops.append((rel, lambda r=rel: a.to_mirror(e_rel(r), d_rel(r))))
-            elif choice == "keep-mirror":
+            elif choice == "take-working":  # E's deletion wins
+                ops.append((rel, lambda r=rel: a.trash(d_rel(r))))
+            elif choice == "keep-mirror" and on_e:
                 ops.append((rel, lambda r=rel: a.to_working(d_rel(r), e_rel(r))))
+            elif choice == "keep-mirror":
+                ops.append((rel, lambda r=rel: a.to_working(d_rel(r))))
             else:
                 a.report.skipped += 1
     for rel in plan.only_on_mirror:

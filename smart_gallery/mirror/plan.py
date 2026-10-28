@@ -43,10 +43,12 @@ def build_plan(
         if w is None:
             if m is None:
                 continue
-            if b is not None:
-                plan.trash.append(m.relpath)
-            else:
+            if b is None:
                 plan.only_on_mirror.append(m.relpath)
+            elif (m.size_bytes, m.mtime_ns) != (b.size_bytes, b.mirror_mtime_ns):
+                plan.changed_on_mirror.append(m.relpath)  # deleted on E, edited on D
+            else:
+                plan.trash.append(m.relpath)
             continue
         if m is None:
             plan.copy_new.append(w.relpath)  # new on E, or deleted on D

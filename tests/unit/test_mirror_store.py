@@ -116,3 +116,16 @@ def test_two_drives_fixture_has_distinct_catalogs(two_drives):
     with GalleryRepository.open(e) as re_, GalleryRepository.open(d) as rd:
         assert re_.get_meta("db_uuid") and rd.get_meta("db_uuid")
         assert re_.get_meta("db_uuid") != rd.get_meta("db_uuid")
+
+
+def test_offloaded_images_are_not_face_scan_candidates(drive, make_item):
+    with GalleryRepository.create(drive) as r:
+        r.upsert_many([make_item("a.jpg"), make_item("gone.jpg")])
+        r.add_peer("working", Peer("d1", "d1.db"))
+        r.add_offloaded(["GONE.jpg"], "d1")  # case-insensitive
+        assert [rel for _, rel in r.unscanned_images("v1")] == [str(drive / "a.jpg")]
+        assert r.count_unscanned_images("v1") == 1
+        _downgrade(r)
+    with GalleryRepository.open(drive, read_only=True) as r:
+        assert r.count_unscanned_images("v1") == 2
+        assert len(r.unscanned_images("v1")) == 2

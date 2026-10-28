@@ -337,11 +337,25 @@ class GalleryRepository(FaceLabelsMixin, MirrorStoreMixin):
         return (parse(row["lo"]), parse(row["hi"])) if row else (None, None)
 
     # ── faces: scanning (schema v2) ──────────────────────────────────────────
+    def _unscanned_where(self) -> str:
+        """Images not scanned at a det_version (the ``?``), leaving out files
+        freed up to a mirror: they are not on this drive to decode. A catalog
+        opened read-only before schema v7 has no offloaded table."""
+        where = (
+            "media_type='image' AND id NOT IN "
+            "(SELECT media_id FROM face_scan_state WHERE det_version=?)"
+        )
+        has_offloaded = self.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='mirror_offloaded'"
+        ).fetchone()
+        if has_offloaded:
+            where += " AND relpath NOT IN (SELECT relpath FROM mirror_offloaded)"
+        return where
+
     def count_unscanned_images(self, det_version: str) -> int:
         row = self.conn.execute(
-            "SELECT COUNT(*) AS n FROM media_items "
-            "WHERE media_type='image' AND id NOT IN "
-            "(SELECT media_id FROM face_scan_state WHERE det_version=?)",
+            "SELECT COUNT(*) AS n FROM media_items WHERE " + self._unscanned_where(),
             (det_version,),
         ).fetchone()
         return int(row["n"])
@@ -351,10 +365,9 @@ class GalleryRepository(FaceLabelsMixin, MirrorStoreMixin):
         ``det_version``. Materialized (not a live cursor) so the scan loop can
         write faces back on the same connection while iterating."""
         cur = self.conn.execute(
-            "SELECT id, relpath FROM media_items "
-            "WHERE media_type='image' AND id NOT IN "
-            "(SELECT media_id FROM face_scan_state WHERE det_version=?) "
-            "ORDER BY id",
+            "SELECT id, relpath FROM media_items WHERE "
+            + self._unscanned_where()
+            + " ORDER BY id",
             (det_version,),
         )
         return [(r["id"], str(to_abspath(r["relpath"], self.drive_root))) for r in cur]

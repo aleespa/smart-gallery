@@ -511,6 +511,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Also write a self-contained catalog at the destination.",
     )
+    export_extras.add_argument(
+        "--jpeg-only",
+        action="store_true",
+        help="Photos as JPEG only: CR2/CR3 photos are converted to JPEG (as "
+        "convert-raw does), videos are copied, and other files are left out.",
+    )
     p_export.add_argument(
         "--dry-run",
         action="store_true",
@@ -1111,6 +1117,7 @@ def _handle_export(args):
                 dry_run=args.dry_run,
                 manifest=args.manifest,
                 portable_db=args.portable_db,
+                jpeg_only=args.jpeg_only,
                 progress_callback=cb,
             )
         finally:

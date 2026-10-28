@@ -5,6 +5,10 @@ It edits a ``FilterValues`` and publishes the parsed query with
 button. Every panel also follows ``filters_changed``, so two panels never
 show different filters. "Clear all filters" sits at the end of the column.
 
+A panel made with ``shared=False`` (the Export page) keeps its own filters
+instead: it neither publishes nor follows ``ctx.filters``, and emits
+``changed`` with its query (``valid`` is False while a box holds an error).
+
 Each range (dates, aperture, ISO, shutter) is one line: lower bound, then
 upper. The date boxes open a calendar. Cameras, lenses, extensions and people
 are chip pickers, since a catalog can hold dozens of each.
@@ -14,7 +18,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -95,9 +99,16 @@ _LISTS = tuple(name for name, _, _ in _PICKERS)
 
 
 class FilterPanel(QWidget):
-    def __init__(self, ctx: AppContext, parent: QWidget | None = None):
+    changed = Signal(object)  # FilterOptions; only a panel with shared=False
+
+    def __init__(
+        self, ctx: AppContext, parent: QWidget | None = None, *, shared: bool = True
+    ):
         super().__init__(parent)
         self.ctx = ctx
+        self.shared = shared
+        self.options = FilterOptions()  # the query a shared=False panel holds
+        self.valid = True
         self._syncing = False  # widgets are being set from code, not edited
         self._choices = RepoQuery(ctx, self)
         self._timer = QTimer(self)
@@ -184,11 +195,12 @@ class FilterPanel(QWidget):
         self.clear_btn.clicked.connect(self.clear)
         self._choices.finished.connect(self._set_choices)
         self._choices.failed.connect(lambda _error: self._set_choices({}))
-        ctx.filters_changed.connect(self._follow)
+        if shared:
+            ctx.filters_changed.connect(self._follow)
         ctx.gallery_changed.connect(self.reload_choices)
         ctx.catalog_updated.connect(self.reload_choices)
 
-        self.set_values(from_filter_options(ctx.filters))
+        self.set_values(from_filter_options(ctx.filters if shared else None))
         self.reload_choices()
 
     def _dates_box(self) -> QGroupBox:
@@ -252,6 +264,16 @@ class FilterPanel(QWidget):
         self._timer.stop()
         options, errors = to_filter_options(self.values())
         self._show_errors(errors)
+        if not self.shared:
+            changed = bool(errors) != (not self.valid)
+            self.valid = not errors
+            if not errors:
+                options = options or FilterOptions()
+                changed = changed or options != self.options
+                self.options = options
+            if changed:
+                self.changed.emit(self.options)
+            return
         if errors:
             return
         options = options or FilterOptions()

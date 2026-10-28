@@ -8,7 +8,7 @@ def test_every_area_is_a_tab(qtbot):
     assert list(win.tabs) == [a.id for a in AREAS]
     assert [t.text() for t in win.tabs.values()] == [
         "Library",
-        "Import",
+        "Import / Export",
         "Stats",
         "Storage",
         "People",

@@ -168,7 +168,8 @@ def test_run_again_single_import_from_a_profile_opens_the_import_area(
 
 
 def test_run_again_import_preselects_the_profile_on_first_visit(qtbot, tmp_path):
-    from smart_gallery.gui.imports.view import PICK_AGAIN, ImportView
+    from smart_gallery.gui.imports.page import TransferPage
+    from smart_gallery.gui.imports.view import PICK_AGAIN
 
     win = MainWindow()
     qtbot.addWidget(win)
@@ -180,10 +181,28 @@ def test_run_again_import_preselects_the_profile_on_first_visit(qtbot, tmp_path)
     view.table.selectRow(0)
     view.run_button.click()
     page = win._pages["import"]
-    assert isinstance(page, ImportView)
+    assert isinstance(page, TransferPage)
     assert win.stack.currentWidget() is page
-    assert page.profile_combo.currentText() == "Pixel dump"
-    assert page.note.text() == PICK_AGAIN
+    assert page.stack.currentWidget() is page.import_view
+    assert page.import_view.profile_combo.currentText() == "Pixel dump"
+    assert page.import_view.note.text() == PICK_AGAIN
+
+
+def test_run_again_import_switches_back_from_export(qtbot, tmp_path):
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.ctx.jobs.history.append(_record("Import · Pixel dump", argvs=[["import"]]))
+    win.ctx.navigate.emit("import")
+    page = win._pages["import"]
+    page.show_export()
+    win.ctx.navigate.emit("history")
+    view = win._pages["history"]
+    view.refresh()
+    view.table.selectRow(0)
+    view.run_button.click()
+    assert win.stack.currentWidget() is page
+    assert page.stack.currentWidget() is page.import_view
+    assert page.import_button.isChecked()
 
 
 def test_run_again_disabled_while_a_job_runs(qtbot, tmp_path):

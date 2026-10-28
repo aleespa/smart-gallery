@@ -13,7 +13,6 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, QModelIndex, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QComboBox,
     QHBoxLayout,
     QLabel,
@@ -41,6 +40,7 @@ from smart_gallery.gui.people import model
 from smart_gallery.gui.people.faces_grid import FaceActionBar, FaceGrid
 from smart_gallery.gui.people.list_view import _round
 from smart_gallery.gui.repo_query import RepoQuery
+from smart_gallery.gui.segment import segment as _segment
 from smart_gallery.services.label_faces import LabelEntry
 
 NAME_PT = 16
@@ -84,25 +84,6 @@ def _years(first: int | None, last: int | None) -> str:
     if first is None or last is None:
         return ""
     return f"{first}" if first == last else f"{first}–{last}"
-
-
-def _segment(*labels: str) -> tuple[QWidget, QButtonGroup, list[QPushButton]]:
-    """Checkable buttons side by side, exactly one checked (the first)."""
-    box = QWidget()
-    layout = QHBoxLayout(box)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(0)
-    group = QButtonGroup(box)
-    group.setExclusive(True)
-    buttons = []
-    for label in labels:
-        button = QPushButton(label)
-        button.setCheckable(True)
-        group.addButton(button)
-        layout.addWidget(button)
-        buttons.append(button)
-    buttons[0].setChecked(True)
-    return box, group, buttons
 
 
 def _heading(text: str = "") -> QLabel:

@@ -17,7 +17,7 @@ look different, but the controls are the same.
 4. [The app window](#4-the-app-window)
 5. [Galleries](#5-galleries)
 6. [Library: browsing and finding photos](#6-library-browsing-and-finding-photos)
-7. [Import: bringing photos in](#7-import-bringing-photos-in)
+7. [Import and Export: bringing photos in and out](#7-import-and-export-bringing-photos-in-and-out)
 8. [Keeping the catalog up to date](#8-keeping-the-catalog-up-to-date)
 9. [Stats](#9-stats)
 10. [Storage: where the space goes](#10-storage-where-the-space-goes)
@@ -72,12 +72,13 @@ works.
 | Task | Where |
 |---|---|
 | Browse photos by folder, date, camera, lens, exposure | [Library](#6-library-browsing-and-finding-photos) |
-| Copy new photos from an SD card into dated folders | [Import](#7-import-bringing-photos-in) |
+| Copy new photos from an SD card into dated folders | [Import](#7-import-and-export-bringing-photos-in-and-out) |
 | See charts of how and when you shoot | [Stats](#9-stats) |
 | Find what takes up space; drop duplicate RAW or JPEG copies | [Storage](#10-storage-where-the-space-goes) |
 | Group photos by person (face recognition) | [People](#11-people-finding-photos-by-who-is-in-them) |
 | Keep a second drive as an identical backup | [Mirror](#12-two-drives-a-working-copy-and-a-mirror) |
-| Export a selection, write an Excel report, compare catalogs | [Actions](#13-actions-and-history-jobs) |
+| Copy a selection out (optionally with RAW photos as JPEGs) | [Export](#export) |
+| Write an Excel report, compare catalogs | [Actions](#13-actions-and-history-jobs) |
 
 ---
 
@@ -139,9 +140,9 @@ flowchart LR
    friendly name such as *Family Photos*. The name is stored on the drive.
 4. **Browse.** When the scan finishes, the **Library** page shows your
    folders on the left and the photos on the right.
-5. **Import new photos.** Put an SD card in, open the **Import** page, pick
+5. **Import new photos.** Put an SD card in, open the **Import / Export** page, pick
    the card as the source, tick your gallery, and press **Run import**
-   ([section 7](#7-import-bringing-photos-in)).
+   ([section 7](#7-import-and-export-bringing-photos-in-and-out)).
 
 > **Already have a gallery?** If the drive already has a
 > `.smart_gallery` folder (made on another computer, or by an earlier
@@ -157,7 +158,7 @@ From top to bottom:
 
 - **Top bar.** The *Smart Gallery* name, the **gallery button** (which
   gallery is open; click it to switch, add or create one), then one **tab per
-  page**: Library, Import, Stats, Storage, People, Actions, History. The
+  page**: Library, Import / Export, Stats, Storage, People, Actions, History. The
   buttons at the far right minimise, maximise and close the window. Drag the
   top bar to move the window; double-click it to maximise.
 - **Page header.** The open gallery's name in small capitals, the page title,
@@ -280,7 +281,12 @@ them. Hover over one to see which drive keeps it.
 
 ---
 
-## 7. Import: bringing photos in
+## 7. Import and Export: bringing photos in and out
+
+The **Import / Export** page has a switch at the top right: **Import** brings
+photos into a gallery, **Export** copies a selection out of it.
+
+### Import
 
 Import copies photos and videos **from** a source (an SD card, a phone dump,
 any folder) **into** one or more galleries, sorted into dated folders, and adds
@@ -300,7 +306,7 @@ format the card yourself afterwards.
 5. Tick **Dry run** to see what would be copied without copying anything.
 6. Press **Run import**.
 
-### Profiles and rules
+#### Profiles and rules
 
 A profile is a list of **rules**. Each rule picks one file type and some
 extensions, and says where they go:
@@ -322,6 +328,56 @@ copies, not the whole drive, so it is quick even on a large gallery.
 
 If the gallery has a mirror drive, the import also copies each file to the
 mirror ([section 12](#12-two-drives-a-working-copy-and-a-mirror)).
+
+### Export
+
+Export copies a selection of the open gallery **to** a folder: a USB stick, a
+folder to share, a disk for a print shop. It only reads the gallery; nothing
+in it changes, and the copies are not added to the catalog.
+
+![The Export page](images/area-export.png)
+
+1. **Filters (left).** The same filters as the Library: dates, photos or
+   videos, cameras, lenses, extensions, exposure and, once face recognition has
+   run, **People**. They are the Export page's own: changing them doesn't
+   change the Library, and the other way round. **Use the Library's filters**
+   copies in what the Library shows right now. The line under the title says
+   how many files match.
+2. **Destination.** The folder to copy into; **Browse…** picks one and
+   **Open folder** shows it in File Explorer. Each export goes into a new
+   folder inside it, named in **Folder name**. Left empty, it is
+   `Export <date> <time>` (for example `Export 20261028 2217`), dated when you
+   press **Run export**; type any other name instead. The name is not kept
+   for the next export.
+3. **Folders.** Either **Sort into folders by** up to four levels (Year, Month,
+   Camera, Lens, in the order you pick) or **Keep the gallery's own folders**.
+   **Put photos and videos in separate folders** adds `Photos/` and `Videos/`
+   on top. The *For example* line shows where a photo would land. **If a file
+   is already there**, *Keep both* adds `_1`, `_2`… to the new copy and *Skip
+   it* leaves the existing file alone (handy to finish an export that was
+   stopped: type that export's folder name again).
+4. **Format.** **JPEG only** makes every photo in the export a JPEG, for
+   sharing:
+   - JPEG files and videos are copied as they are.
+   - Canon RAW files (`.cr2`, `.cr3`) are converted: each becomes the
+     full-size JPEG stored inside it, with its date, camera, lens and
+     orientation, the same as **convert-raw** makes. The RAW files on the
+     gallery are not touched.
+   - A RAW with a JPEG of the same name in the same folder (a RAW + JPEG pair)
+     is not converted; that JPEG is exported instead.
+   - Other files (PNGs, documents…) are left out. Untick **Videos** in the
+     filters if you don't want the videos either.
+
+   The summary line then says how many files are copied, converted and left
+   out. This option needs ExifTool.
+5. **Extras.** A list of the exported files
+   (`_smart_gallery_manifest.csv`, on by default), and optionally a catalog of
+   the export itself, so the folder can be opened as a gallery.
+6. Tick **Dry run** to plan without copying, then press **Run export**. If
+   something is missing (a destination, say), a line above the button says
+   what. Click **Command** to unfold the exact command that will run.
+
+The page remembers your destination and choices for next time.
 
 ---
 
@@ -611,7 +667,7 @@ from here:
 | Command | Use it to |
 |---|---|
 | **sync** | Update the catalog after changes made outside the app. |
-| **export** | Copy a filtered selection (for example "all 2024 photos with Alice") to another folder, sorted by date or keeping the drive's folders. |
+| **export** | The same as the Export page ([section 7](#export)), for scripting or the command line. |
 | **report** | Write an Excel workbook listing the files (optionally with charts). |
 | **compare** | Compare two catalogs. |
 | **convert-raw** | Extract the full-size JPEG stored inside Canon RAW files. |

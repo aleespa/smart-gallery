@@ -245,7 +245,8 @@ smart-gallery compare E:/.smart_gallery/gallery.db F:/ --format csv --output dif
 smart-gallery export --from <drive> --to <dir>
                 [--structure Year Month Model Lens | --mirror]
                 [--no-by-media-type] [--on-exist rename|skip]
-                [--no-manifest] [--portable-db] [--dry-run] [filter flags]
+                [--no-manifest] [--portable-db] [--jpeg-only] [--dry-run]
+                [filter flags]
 ```
 
 | Option | Default | Meaning |
@@ -258,6 +259,7 @@ smart-gallery export --from <drive> --to <dir>
 | `--on-exist rename\|skip` | `rename` | Clash handling at the destination. |
 | `--no-manifest` | (manifest on) | Skip writing `_smart_gallery_manifest.csv`. |
 | `--portable-db` | off | Also write a self-contained catalog at the destination (browsable/dashboardable on its own). |
+| `--jpeg-only` | off | Photos as JPEG only: JPEGs and videos are copied, CR2/CR3 files are converted to JPEG (their embedded full-size image with the RAW's metadata, as `convert-raw` makes) and everything else is left out. A RAW with a same-named JPEG in its folder is left out too, since that JPEG is exported. Needs ExifTool. |
 | `--dry-run` | off | List what would be copied without copying. |
 
 Reads metadata from the catalog — the drive is **not** re-analyzed. Example —
@@ -269,7 +271,15 @@ smart-gallery export --from E:/ --to D:/Selects \
 
 # Or copy a subset preserving the drive's structure, plus a portable catalog:
 smart-gallery export --from E:/ --to D:/Mirror --file-types image --mirror --portable-db
+
+# Or share 2025's photos of one person as JPEGs, RAWs converted:
+smart-gallery export --from E:/ --to F:/Share --people "Ana" \
+    --date-start 2025-01-01 --date-end 2025-12-31 --jpeg-only
 ```
+
+The desktop app's **Import / Export** page has an **Export** tab that builds
+this command: its own filters (people included), the destination, the folder
+layout and the JPEG-only switch.
 
 ### `convert-raw` — extract JPEG previews from Canon RAW files
 

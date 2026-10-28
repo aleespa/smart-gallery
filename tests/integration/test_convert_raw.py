@@ -55,3 +55,19 @@ def test_unreadable_raw_fails_alone(tmp_path, copy_image):
     assert report.outputs == [good.with_suffix(".jpg")]
     assert len(report.failures) == 1 and "IMG_0004.CR3" in report.failures[0]
     assert not bad.with_suffix(".jpg").exists()
+
+
+def test_jpeg_only_export_of_a_real_raw(tmp_path, copy_image, make_item):
+    from smart_gallery.db import GalleryRepository
+    from smart_gallery.services import export_media
+
+    drive = tmp_path / "drive"
+    raw = copy_image(drive, "test.CR3", "Shots/IMG_0001.CR3")
+    with GalleryRepository.create(drive) as repo:
+        repo.upsert_many([make_item("Shots/IMG_0001.CR3")])
+        report = export_media(repo, tmp_path / "out", mirror=True, jpeg_only=True)
+
+    jpeg = tmp_path / "out" / "Shots" / "IMG_0001.jpg"
+    assert report.converted == 1 and report.excluded == []
+    assert _tags(jpeg)["Orientation"] == _tags(raw)["Orientation"] == 6
+    assert not raw.with_suffix(".jpg").exists()

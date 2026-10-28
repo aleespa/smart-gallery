@@ -225,6 +225,16 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   up, bring back, pair. It acts only on its own dry run, reads that dry run's
   `--plan-out` JSON, and passes it to the real run as `--expect-plan`. No new
   area.
+- **Import / Export area.** `gui/imports/page.py:TransferPage` puts an
+  Import | Export switch (`gui/segment.py`) in the header over `ImportView`
+  and `gui/exports/view.py:ExportView`. The Export page runs `export`; its
+  `FilterPanel(shared=False)` keeps its own filters (emits `changed`, never
+  touches `ctx.filters`), and `gui/exports/model.py:filter_argv` turns them
+  back into CLI filter flags (round-trip tested against `build_filter_query`,
+  so a new `FilterOptions` field needs a line there too). `--jpeg-only`
+  converts CR2/CR3 by copying each into a staging folder under the
+  destination and running `convert_cr3` on the batch; the source drive is
+  never written.
 - **Theme** lives in `gui/theme.py`: Segoe UI Variable Text for controls,
   Georgia (`serif_font`) for headings only, and one accent (`ACCENT`, the
   first Sunset stop) set as the palette's Highlight/Accent so every

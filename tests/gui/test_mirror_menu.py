@@ -587,6 +587,7 @@ def test_free_up_nothing_to_free_does_not_ask(qtbot, tmp_path, monkeypatch):
     _action(button, "Free up space…").trigger()
     (argv,) = ctx.jobs.specs[0].argvs
     plan = {"files": 0, "bytes": 0, "relpaths": [], "skipped": ["a.mp4: x"]}
+    assert argv[-2] == "--plan-out"
     Path(argv[-1]).write_text(json.dumps(plan), encoding="utf-8")
     ctx.jobs.finish()
     qtbot.waitUntil(lambda: bool(told))

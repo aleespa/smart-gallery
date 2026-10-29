@@ -8,10 +8,12 @@ from smart_gallery.cli import _HANDLERS, build_parser
 from smart_gallery.services.file_faces import file_faces
 from smart_gallery.services.label_faces import (
     LabelEntry,
+    describe,
     label_faces,
     read_label_list,
     write_label_list,
 )
+from smart_gallery.services.undo_faces import undo_faces
 from tests.test_file_faces import Catalog, _near, _unit
 
 
@@ -258,3 +260,92 @@ def test_cli_label_faces_requires_exactly_one_action(drive):
         _HANDLERS["label-faces"](args)
     with pytest.raises(SystemExit):
         p.parse_args(["label-faces", str(drive), "--list", "x.json", "--faces", "1"])
+
+
+def test_label_then_undo_restores_everything_refile_moved(cat, repo):
+    # The incident: few confirmed examples, many auto faces; rejecting look-alikes
+    # makes the re-filing strip the auto faces. Undo must bring all of them back.
+    alice = cat.person("Alice")
+    cat.face(_unit(0), "user", alice)
+    autos = [cat.face(_near(_unit(0), 0.8, axis=100), "auto", alice) for _ in range(20)]
+    look = [
+        cat.face(_near(_unit(0), 0.8, axis=100), "suggested", None, suggested=alice)
+        for _ in range(5)
+    ]
+    repo.recompute_person(alice)
+    before = repo.face_snapshot()
+    label_faces(repo, [LabelEntry("reject", tuple(look), person_id=alice)], refile=True)
+    assert any(cat.row(a)["person_id"] is None for a in autos)
+    assert repo.face_snapshot() != before
+    report = undo_faces(repo)
+    assert report.summary == "Marked 5 faces as not Alice"
+    assert repo.face_snapshot() == before
+
+
+def test_describe_phrases():
+    names = {1: "Alice"}
+    e = LabelEntry
+    assert describe([e("confirm", (1,), person_id=1)], names) == (
+        "Confirmed 1 face as Alice"
+    )
+    assert describe([e("reject", (1, 2), person_id=1)], names) == (
+        "Marked 2 faces as not Alice"
+    )
+    assert describe([e("move", (1, 2), person_id=9)], names) == (
+        "Moved 2 faces to a group"
+    )
+    assert describe([e("new_person", (1,), name="Bob")], names) == (
+        "Moved 1 face to Bob"
+    )
+    assert describe([e("ignore", (1, 2, 3))], names) == "Ignored 3 faces"
+    same = [e("move", (1,), person_id=1), e("move", (2, 3), person_id=1)]
+    assert describe(same, names) == "Moved 3 faces to Alice"
+    assert describe([e("ignore", (1,)), e("move", (2,), person_id=1)], names) == (
+        "2 corrections"
+    )
+
+
+def test_label_without_changes_records_nothing(cat, repo):
+    alice = cat.person("Alice")
+    label_faces(repo, [LabelEntry("confirm", (9999,), person_id=alice)])
+    assert repo.last_undo() is None
+
+
+def test_cli_undo_faces(cat, repo, drive):
+    alice = cat.person("Alice")
+    f = cat.face(_unit(0), "suggested", None, suggested=alice)
+    p = build_parser()
+    _HANDLERS["label-faces"](
+        p.parse_args(
+            ["label-faces", str(drive), "--faces", str(f), "--confirm", str(alice)]
+        )
+    )
+    assert cat.row(f)["state"] == "user"
+    _HANDLERS["undo-faces"](p.parse_args(["undo-faces", str(drive)]))
+    row = cat.row(f)
+    assert (row["state"], row["person_id"], row["suggested_person_id"]) == (
+        "suggested",
+        None,
+        alice,
+    )
+
+
+def test_cli_undo_faces_nothing_to_undo_raises(repo, drive):
+    args = build_parser().parse_args(["undo-faces", str(drive)])
+    with pytest.raises(ValueError):
+        _HANDLERS["undo-faces"](args)
+
+
+def test_cli_label_faces_refile_flag_parses(drive):
+    p = build_parser()
+    a = p.parse_args(["label-faces", str(drive), "--list", "x.json", "--refile"])
+    assert a.refile is True
+    assert p.parse_args(["label-faces", str(drive), "--list", "x.json"]).refile is False
+
+
+def test_undo_faces_refuses_on_mirror(repo):
+    from smart_gallery.mirror.types import Peer
+
+    repo.add_peer("mirror", Peer("u" * 32, "x.db"))
+    with pytest.raises(ValueError, match="mirror"):
+        undo_faces(repo)

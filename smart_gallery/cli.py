@@ -39,6 +39,7 @@ from smart_gallery.services import (
     identify_faces,
     init_drive,
     label_faces,
+    undo_faces,
     LabelEntry,
     MirrorChoices,
     MirrorError,
@@ -68,6 +69,8 @@ DETAIL_LOG_COMMANDS = {
     "export",
     "scan-faces",
     "file-faces",
+    "label-faces",
+    "undo-faces",
     "find-faces",
     "recycle",
     "sync-mirror",
@@ -699,6 +702,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Ignore the faces (not a real face, or not worth filing).",
     )
+    p_label.add_argument(
+        "--refile",
+        action="store_true",
+        help="Afterwards re-sort the other faces (as file-faces --no-group), in the same undo step.",
+    )
+
+    p_undo = sub.add_parser(
+        "undo-faces",
+        help="Undo the last face correction made with label-faces, if nothing has changed those faces since.",
+    )
+    p_undo.add_argument("drive", type=Path, help=DRIVE_HELP)
 
     p_cluster = sub.add_parser(
         "cluster-faces", help="Optionally cluster faces without sample photos."
@@ -1266,13 +1280,21 @@ def _label_entries(args) -> list[LabelEntry]:
 def _handle_label_faces(args):
     entries = _label_entries(args)
     with GalleryRepository.open(args.drive) as repo:
-        report = label_faces(repo, entries, skip_missing=args.list is not None)
+        report = label_faces(
+            repo, entries, skip_missing=args.list is not None, refile=args.refile
+        )
     logger.success(
         f"Updated {report.faces_changed:,} face(s); "
         f"{report.people_created} new person(s); "
         f"{report.missing_faces} face id(s) and {report.missing_people} "
         "person id(s) no longer exist."
     )
+
+
+def _handle_undo_faces(args):
+    with GalleryRepository.open(args.drive) as repo:
+        r = undo_faces(repo)
+    logger.success(f"Undid: {r.summary} ({r.faces_restored:,} faces restored).")
 
 
 def _handle_cluster_faces(args):
@@ -1478,6 +1500,7 @@ _HANDLERS = {
     "file-faces": _handle_file_faces,
     "find-faces": _handle_find_faces,
     "label-faces": _handle_label_faces,
+    "undo-faces": _handle_undo_faces,
     "identify-faces": _handle_identify_faces,
     "cluster-faces": _handle_cluster_faces,
     "people": _handle_people,

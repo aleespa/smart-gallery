@@ -19,6 +19,7 @@ from smart_gallery.services.identify_faces import (
 )
 from smart_gallery.services.file_faces import FileFacesReport, file_faces
 from smart_gallery.services.init_db import init_drive
+from smart_gallery.services.undo_faces import UndoReport, undo_faces
 from smart_gallery.services.label_faces import (
     LabelEntry,
     LabelReport,
@@ -87,6 +88,8 @@ __all__ = [
     "IdentifyFacesReport",
     "file_faces",
     "label_faces",
+    "undo_faces",
+    "UndoReport",
     "LabelEntry",
     "LabelReport",
     "read_label_list",

@@ -92,9 +92,14 @@ Give exactly one action with `--faces`; an unknown person id is an error. With
 `--list`, an entry for a person deleted since the list was written is skipped
 and counted. `label-faces` only records the corrections; run
 `file-faces E:/ --no-group` afterwards (the app does this after each batch) to
-sort the remaining faces again without a rescan, so the suggestions improve. Whole-person fixes: `merge-persons E:/ 1 7 9` merges 7 and
+sort the remaining faces again without a rescan, so the suggestions improve.
+Add `--refile` to do that in the same step and the same undo batch. Whole-person fixes: `merge-persons E:/ 1 7 9` merges 7 and
 9 into 1; `delete-person E:/ 12` returns its faces to the pool;
 `split-person E:/ 12` splits a mixed person (see section 4).
+
+`undo-faces E:/` reverts the latest `label-faces` batch, including faces the
+re-sorting (`--refile`) moved. It refuses, changing nothing, if those faces
+changed since (find faces, merge, rescan...).
 
 **4. Filter by person.** In the Library, the people filter selects photos with
 a person; with several people it offers *any* (at least one) or *all* (every

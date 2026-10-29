@@ -17,6 +17,7 @@ from loguru import logger
 
 from smart_gallery.db import GalleryRepository
 from smart_gallery.mirror.faces import ensure_not_mirror
+from smart_gallery.services.file_faces import FileFacesReport, file_faces
 
 Action = Literal["confirm", "reject", "move", "new_person", "ignore"]
 ACTIONS: tuple[str, ...] = get_args(Action)
@@ -37,6 +38,7 @@ class LabelReport:
     people_created: int = 0
     missing_faces: int = 0
     missing_people: int = 0  # list mode: people gone, their entries skipped
+    filed: FileFacesReport | None = None
 
 
 def _is_int(value) -> bool:
@@ -94,11 +96,37 @@ def read_label_list(path: Path) -> list[LabelEntry]:
     return entries
 
 
+def _phrase(e: LabelEntry, n: int, who: str) -> str:
+    noun = "face" if n == 1 else "faces"
+    if e.action == "confirm":
+        return f"Confirmed {n} {noun} as {who}"
+    if e.action == "reject":
+        return f"Marked {n} {noun} as not {who}"
+    if e.action == "ignore":
+        return f"Ignored {n} {noun}"
+    return f"Moved {n} {noun} to {who}"  # move, new_person
+
+
+def describe(entries: Sequence[LabelEntry], names: dict[int, str]) -> str:
+    """A short phrase for the undo list, e.g. "Moved 3 faces to Alice"."""
+
+    def who(e: LabelEntry) -> str:
+        if e.action == "new_person":
+            return e.name
+        return names.get(e.person_id) or "a group"
+
+    first = entries[0]
+    if len({e.action for e in entries}) > 1 or len({who(e) for e in entries}) > 1:
+        return f"{len(entries)} corrections"
+    return _phrase(first, sum(len(e.faces) for e in entries), who(first))
+
+
 def label_faces(
     repo: GalleryRepository,
     entries: Sequence[LabelEntry],
     *,
     skip_missing: bool = False,
+    refile: bool = False,
 ) -> LabelReport:
     """Apply corrections. An entry naming a person that no longer exists is an
     error, or, with ``skip_missing`` (a ``--list`` written by the app, which a
@@ -130,6 +158,23 @@ def label_faces(
     for e in entries:
         if e.action == "new_person":
             repo.person_named(e.name)  # raises if the name is ambiguous
+    names: dict[int, str] = {}
+    if wanted - missing:
+        ids = tuple(wanted - missing)
+        ph = ", ".join("?" for _ in ids)
+        names = {
+            r[0]: r[1]
+            for r in repo.conn.execute(
+                f"SELECT id, name FROM persons WHERE id IN ({ph}) "
+                "AND name IS NOT NULL",
+                ids,
+            )
+        }
+    before = repo.face_snapshot()
     report = repo.apply_labels(entries)
     report.missing_people = len(missing)
+    if refile:
+        report.filed = file_faces(repo, group=False)
+    if entries:
+        repo.record_undo(describe(entries, names), before)
     return report

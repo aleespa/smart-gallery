@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
@@ -64,6 +65,9 @@ UNHIDE_TITLE = "Show group"
 DELETE_TITLE = "Delete person"
 DELETE_ASK = "Delete {name}? Their faces become unassigned."
 FIX_TITLE = "Fix faces"
+UNDO = "Undo"
+UNDO_TITLE = "Undo"
+UNDO_TIP = "Undo: {summary}"
 SEND_DELAY_MS = 400  # a burst of clicks becomes one job
 LABELS_DIR = "face-labels"
 LEAVE_ASK = "Send the face corrections you made before leaving?"
@@ -91,10 +95,13 @@ class PeopleView(QWidget):
         # Shown on the page header's right (MainWindow takes header_controls).
         self.status = QLabel()
         self.find_button = QPushButton(FIND_BUTTON)
+        self.undo_button = QPushButton(UNDO)
+        self.undo_button.setEnabled(False)
         self.header_controls = QWidget()
         header = QHBoxLayout(self.header_controls)
         header.setContentsMargins(0, 0, 0, 0)
         header.addWidget(self.status)
+        header.addWidget(self.undo_button)
         header.addWidget(self.find_button)
 
         self.list = PeopleList(ctx)
@@ -132,6 +139,9 @@ class PeopleView(QWidget):
         QVBoxLayout(self).addWidget(self.splitter)
 
         self.find_button.clicked.connect(self.find_faces)
+        self.undo_button.clicked.connect(self.undo)
+        self._undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
+        self._undo_shortcut.activated.connect(self.undo)
         self.message_action.clicked.connect(self._on_message_action)
         self.list.selection_changed.connect(self._on_selection)
         self.list.merge_requested.connect(self.merge)
@@ -180,6 +190,13 @@ class PeopleView(QWidget):
         self.data = None
         self.status.setText("")
         self.list.set_people(None)
+        self._set_undo(None)
+
+    def _set_undo(self, summary: str | None) -> None:
+        self.undo_button.setEnabled(summary is not None)
+        self.undo_button.setToolTip(
+            UNDO_TIP.format(summary=summary) if summary is not None else ""
+        )
 
     def _on_data(self, result: model.PeopleList) -> None:
         self.data = result
@@ -187,6 +204,7 @@ class PeopleView(QWidget):
         self.list.set_people(result, self._root)
         self.person_page.set_people(result)
         self.hidden_page.set_people(result)
+        self._set_undo(result.last_undo)
         n = result.pending_images
         self.status.setText(PENDING.format(n=n) if n > 0 else "")
         if not result.has_faces:
@@ -305,11 +323,7 @@ class PeopleView(QWidget):
             QMessageBox.warning(self, FIX_TITLE, LIST_ERROR.format(error=exc))
             return False
         spec = JobSpec(
-            FIX_TITLE,
-            (
-                ("label-faces", root, "--list", str(path)),
-                ("file-faces", root, "--no-group"),
-            ),
+            FIX_TITLE, (("label-faces", root, "--list", str(path), "--refile"),)
         )
         if not jobs.start(spec):
             return False  # raced with another job: retry on its finish
@@ -369,6 +383,20 @@ class PeopleView(QWidget):
             if row.id == pid:
                 return row
         return None
+
+    def undo(self) -> None:
+        """Undo the last batch; unsent corrections are dropped instead."""
+        if self._pending:
+            self._pending = []
+            self._pending_roots = []
+            self._send_timer.stop()
+            self.reload()
+            pid = getattr(self.person_page, "person_id", None)
+            if pid is not None:
+                self.person_page.show_person(pid)  # the hidden tiles return
+            return
+        if self.undo_button.isEnabled():
+            self._start(UNDO_TITLE, ("undo-faces", str(self._root)))
 
     def find_faces(self) -> None:
         if self.ctx.current is None:

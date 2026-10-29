@@ -50,6 +50,7 @@ class PeopleList:
     hidden_groups: list[PersonRow]
     has_faces: bool
     pending_images: int
+    last_undo: Optional[str] = None  # summary of the batch Undo would revert
 
 
 @dataclass(frozen=True)
@@ -163,6 +164,7 @@ def people_list(repo: GalleryRepository) -> PeopleList:
         hidden_groups=_by_photos([p for p in rows if p.hidden]),
         has_faces=has_faces,
         pending_images=repo.count_unscanned_images(FACE_DET_VERSION),
+        last_undo=(info.summary if (info := repo.last_undo()) else None),
     )
 
 

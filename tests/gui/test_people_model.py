@@ -55,6 +55,17 @@ def cat(repo, make_item):
     return Cat(repo, make_item)
 
 
+def test_people_list_last_undo(cat, repo):
+    alice = cat.person("Alice")
+    cat.face(cat.media("a.jpg"), alice)
+    assert people_list(repo).last_undo is None
+    snap = repo.face_snapshot()
+    repo.conn.execute("UPDATE faces SET state = 'user'")
+    repo.conn.commit()
+    repo.record_undo("Renamed Alice", snap)
+    assert people_list(repo).last_undo == "Renamed Alice"
+
+
 def test_people_list_sections_and_order(cat, repo):
     m = [cat.media(f"p{i}.jpg") for i in range(4)]
     bob = cat.person("bob")

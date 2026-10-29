@@ -9,7 +9,7 @@ from smart_gallery.config import drive_root_of
 from smart_gallery.gui import paths
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.galleries.store import Gallery
-from smart_gallery.gui.jobspec import JOB_RUNNING
+from smart_gallery.gui.jobspec import JOB_RUNNING, JobSpec
 from smart_gallery.gui.people.list_view import HEADER_ROLE, PERSON_ROLE
 from smart_gallery.services.label_faces import LabelEntry
 from smart_gallery.gui.people.view import (
@@ -470,14 +470,57 @@ def test_burst_of_corrections_becomes_one_job(qtbot, repo, cat):
     qtbot.waitUntil(lambda: len(ctx.jobs.specs) == 1)
     (spec,) = ctx.jobs.specs
     root = _root(repo)
-    label, file = spec.argvs
+    (label,) = spec.argvs
     assert spec.title == "Fix faces"
-    assert label[:3] == ("label-faces", root, "--list")
-    assert file == ("file-faces", root, "--no-group")
+    assert label[:3] == ("label-faces", root, "--list") and label[4] == "--refile"
     data = json.loads(Path(label[3]).read_text(encoding="utf-8"))
     assert [d["action"] for d in data] == ["ignore", "move"]
     assert data[1]["person_id"] == 5
     assert view._pending == []
+
+
+def _record(repo, summary="Confirmed 2 faces as Alice"):
+    snap = repo.face_snapshot()
+    repo.conn.execute("UPDATE faces SET state = 'user'")
+    repo.conn.commit()
+    assert repo.record_undo(summary, snap) is not None
+
+
+def test_undo_button_reflects_last_batch(qtbot, repo, cat):
+    cat.person("Alice")
+    view = _view(qtbot, _ctx(repo, _Jobs()))
+    assert not view.undo_button.isEnabled()
+    assert view.undo_button.toolTip() == ""
+    _record(repo)
+    _reload(qtbot, view, view.reload)
+    assert view.undo_button.isEnabled()
+    assert view.undo_button.toolTip() == "Undo: Confirmed 2 faces as Alice"
+
+
+def test_undo_starts_job(qtbot, repo, cat):
+    cat.person("Alice")
+    _record(repo)
+    ctx = _ctx(repo, _Jobs())
+    view = _view(qtbot, ctx)
+    view.undo()
+    assert ctx.jobs.specs[-1] == JobSpec("Undo", (("undo-faces", _root(repo)),))
+
+
+def test_undo_with_pending_corrections_drops_them(qtbot, repo, cat):
+    cat.person("Alice")
+    _record(repo)
+    ctx = _ctx(repo, _Jobs())
+    view = _view(qtbot, ctx)
+    _grid_with(view, 1, 2)
+    view.send_labels([LabelEntry("ignore", (1,))])
+    reloads = []
+    view._query.run = lambda fn: reloads.append(fn)
+    view.undo()
+    assert ctx.jobs.specs == []
+    assert view._pending == [] and view._pending_roots == []
+    assert reloads
+    qtbot.wait(600)
+    assert ctx.jobs.specs == []
 
 
 def test_corrections_wait_for_running_job(qtbot, repo, cat):
@@ -604,18 +647,21 @@ def test_every_argv_the_page_builds_parses(qtbot, repo, cat, monkeypatch):
     view.hide_person(7)
     view.hide_person(8, hide=False)
     view.delete(7)
+    _record(repo)
+    _reload(qtbot, view, view.reload)
+    view.undo()
 
     argvs = [a for spec in ctx.jobs.specs for a in spec.argvs]
     commands = {a[0] for a in argvs}
     assert commands == {
         "find-faces",
         "label-faces",
-        "file-faces",
         "merge-persons",
         "name-person",
         "split-person",
         "hide-person",
         "delete-person",
+        "undo-faces",
     }
     parser = build_parser()
     names = []

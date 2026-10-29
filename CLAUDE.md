@@ -268,8 +268,11 @@ transfer) and invalidates D's cached face crops when they change.
    is rejected from its person; `hidden` faces stay hidden (only
    `cluster-faces --rebuild` regroups them). Naming a group, or merging it
    into a named person, turns its `cluster` faces into `auto`. `label-faces`
-   only records corrections; the People page follows each batch with
-   `file-faces --no-group`.
+   only records corrections as an undoable batch (`undo-faces` reverses the
+   last); the People page sends each batch as one `label-faces --list PATH
+   --refile` job. The person page's **Find more** runs the Qt-free,
+   read-only `gui/people/model.py:find_more` (unclassified faces ranked by
+   likeness to the person) and reuses the review grid's confirm/reject.
 4. **Carry-over.** Before `invalidate_faces_by_relpath` (or a rescan / a
    `FACE_DET_VERSION` bump) deletes a file's faces, user/ignored decisions,
    rejections, and the `auto`/`cluster` faces of named people go to

@@ -495,6 +495,10 @@ flowchart LR
    **Not this group**. The suggestions strip offers close matches to accept
    or reject. Your corrections are sent as one job when you leave the page,
    and the remaining faces are sorted again so the suggestions improve.
+   **Find more** (beside **Show in Library**) searches the faces nobody has
+   sorted yet for ones that look like this person, best match first; confirm
+   or reject them like suggestions. **Undo** (or Ctrl+Z) reverses the last
+   batch of face corrections.
 4. **Whole groups.** **Merge people** joins several into one, **Split group**
    separates a group that mixes two people, **Delete person** returns its
    faces to the pool.

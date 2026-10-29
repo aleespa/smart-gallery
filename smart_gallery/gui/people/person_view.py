@@ -9,6 +9,7 @@ them into CLI jobs.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from PySide6.QtCore import QEvent, QModelIndex, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap
@@ -59,6 +60,10 @@ SUGGEST_ONE = "Is this {name}? 1 suggestion"
 SOMEONE = "this person"
 REVIEW = "Review"
 REVIEW_TITLE = "Is this {name}?"
+FIND_MORE = "Find more"
+MORE_TITLE = "Could this be {name}?"
+SEARCHING = "Searching…"
+NO_MORE = "No more faces that look like {name}."
 DONE = "Done"
 CONFIRM = "✓"
 REJECT = "✕"
@@ -203,6 +208,9 @@ class PersonPage(QWidget):
         self._cover_id: int | None = None
         self._query = RepoQuery(ctx, self)
         self._faces_query = RepoQuery(ctx, self)
+        self._more_query = RepoQuery(ctx, self)
+        self._suggestions: list[model.FaceTile] = []
+        self.review_mode: Literal["suggestions", "more"] = "suggestions"
 
         # Header.
         self.cover = QLabel()
@@ -214,6 +222,7 @@ class PersonPage(QWidget):
         self.subtitle = QLabel()
         self.rename_button = QPushButton(RENAME)
         self.library_button = QPushButton(SHOW_IN_LIBRARY)
+        self.find_more_button = QPushButton(FIND_MORE)
         switch, self._mode, (self.photos_button, self.faces_button) = _segment(
             PHOTOS, FACES
         )
@@ -228,6 +237,7 @@ class PersonPage(QWidget):
         header.addStretch(1)
         header.addWidget(self.rename_button)
         header.addWidget(self.library_button)
+        header.addWidget(self.find_more_button)
         header.addSpacing(12)
         header.addWidget(switch)
 
@@ -304,6 +314,7 @@ class PersonPage(QWidget):
         self.library_button.clicked.connect(self._show_in_library)
         self.name_edit.returnPressed.connect(self._name_entered)
         self.review_button.clicked.connect(self._review)
+        self.find_more_button.clicked.connect(self.find_more)
         self.done_button.clicked.connect(self._show_mode)
         self.faces_grid.faces_selected.connect(self.action_bar.set_faces)
         self.action_bar.action.connect(lambda e: self.labels.emit([e]))
@@ -313,6 +324,7 @@ class PersonPage(QWidget):
         self.reject_all_button.clicked.connect(lambda: self._decide("reject", True))
         self._query.finished.connect(self._on_data)
         self._faces_query.finished.connect(self._on_faces)
+        self._more_query.finished.connect(self._on_more)
         crops = getattr(ctx, "face_crops", None)
         if crops is not None:
             crops.ready.connect(self._on_crop)
@@ -326,7 +338,9 @@ class PersonPage(QWidget):
         if person_id != self.person_id:
             self.person_id = person_id
             self.summary = None
+            self._suggestions = []
             self._faces_for = None
+            self.review_mode = "suggestions"
             if self.body.currentWidget() is self.review_page:
                 self._show_mode()
         self.loaded = False
@@ -345,12 +359,16 @@ class PersonPage(QWidget):
 
     def _on_data(self, result) -> None:
         root, summary, rows, suggestions = result
+        self._suggestions = suggestions
         self.root = Path(root)
         self.summary = summary
         self.photos.set_rows(self.root, rows)
-        self.review_grid.set_tiles(suggestions, self.root)
+        if self.review_mode == "suggestions":
+            self.review_grid.set_tiles(suggestions, self.root)
         self._show_header()
         self.loaded = True
+        if self.review_mode == "more" and self.body.currentWidget() is self.review_page:
+            self.find_more()
 
     def _load_faces(self, *_args) -> None:
         pid, sort = self.person_id, self.sort.currentData()
@@ -393,7 +411,8 @@ class PersonPage(QWidget):
         text = SUGGEST_ONE if n == 1 else SUGGEST
         self.suggest_label.setText(text.format(name=name, n=n))
         self.suggest_strip.setVisible(n > 0)
-        self.review_title.setText(REVIEW_TITLE.format(name=name))
+        if self.review_mode == "suggestions":
+            self.review_title.setText(REVIEW_TITLE.format(name=name))
         self._ask_cover(row.cover)
 
     def _ask_cover(self, tile: model.FaceTile | None) -> None:
@@ -426,8 +445,40 @@ class PersonPage(QWidget):
         else:
             self.body.setCurrentWidget(self.photos)
 
+    def _name(self) -> str:
+        row = self.summary.row if self.summary is not None else None
+        return (row.name if row is not None else None) or SOMEONE
+
     def _review(self) -> None:
+        self.review_mode = "suggestions"
+        self.review_title.setText(REVIEW_TITLE.format(name=self._name()))
+        if self.root is not None:
+            self.review_grid.set_tiles(self._suggestions, self.root)
         self.body.setCurrentWidget(self.review_page)
+
+    def find_more(self) -> None:
+        """Faces nobody has classified that look like this person."""
+        pid = self.person_id
+        if pid is None:
+            return
+        self.review_mode = "more"
+        self.review_title.setText(SEARCHING)
+        self.body.setCurrentWidget(self.review_page)
+
+        def load(repo):
+            return repo.drive_root, pid, model.find_more(repo, pid)
+
+        self._more_query.run(load)
+
+    def _on_more(self, result) -> None:
+        root, pid, tiles = result
+        if pid != self.person_id or self.review_mode != "more":
+            return
+        self.review_grid.set_tiles(tiles, Path(root))
+        name = self._name()
+        self.review_title.setText(
+            MORE_TITLE.format(name=name) if tiles else NO_MORE.format(name=name)
+        )
 
     def _decide(self, action: str, everything: bool) -> None:
         if self.person_id is None:

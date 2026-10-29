@@ -1,5 +1,6 @@
 """The People page's right side: one person, several people, hidden faces."""
 
+import numpy as np
 import pytest
 from PySide6.QtCore import QItemSelectionModel
 from PySide6.QtWidgets import QInputDialog, QMessageBox
@@ -48,12 +49,21 @@ class Cat:
         self.repo.conn.commit()
         return cur.lastrowid
 
-    def face(self, media, person=None, state="auto", score=None, suggested=None) -> int:
+    def face(
+        self, media, person=None, state="auto", score=None, suggested=None, emb=None
+    ) -> int:
         cur = self.repo.conn.execute(
             "INSERT INTO faces (media_id, bbox_x, bbox_y, bbox_w, bbox_h,"
             " embedding, person_id, state, suggested_person_id, match_score)"
             " VALUES (?,1,2,3,4,?,?,?,?,?)",
-            (media, _BLOB, person, state, suggested, score),
+            (
+                media,
+                _BLOB if emb is None else emb.tobytes(),
+                person,
+                state,
+                suggested,
+                score,
+            ),
         )
         self.repo.conn.commit()
         return cur.lastrowid
@@ -509,3 +519,83 @@ def test_people_list_selected_row_keeps_normal_text(qtbot, repo, cat):
     view = _view(qtbot, _ctx(repo))
     _select(view, alice)
     view.list.list.grab()  # paints the accent wash and bar without errors
+
+
+def _vec(sim):
+    v = np.zeros(512, dtype=np.float32)
+    v[0] = sim
+    v[500] = np.sqrt(1 - sim * sim)
+    return v
+
+
+def _more_cat(cat):
+    alice = cat.person("Alice")
+    cat.face(cat.photo(), alice, "user", emb=_vec(1.0))
+    lo = cat.face(cat.photo(), None, "new", emb=_vec(0.7))
+    hi = cat.face(cat.photo(), None, "new", emb=_vec(0.9))
+    return alice, hi, lo
+
+
+def _find_more(qtbot, repo, cat):
+    alice, hi, lo = _more_cat(cat)
+    view = _view(qtbot, _ctx(repo))
+    page = _open_person(qtbot, view, alice)
+    page.find_more_button.click()
+    qtbot.waitUntil(lambda: len(page.review_grid.tiles()) == 2)
+    return view, page, alice, hi, lo
+
+
+def test_find_more_shows_ranked_faces(qtbot, repo, cat):
+    _view_, page, alice, hi, lo = _find_more(qtbot, repo, cat)
+    assert page.body.currentWidget() is page.review_page
+    assert page.review_mode == "more"
+    assert page.review_title.text() == "Could this be Alice?"
+    assert _grid_ids(page.review_grid) == [hi, lo]
+
+
+def test_find_more_confirm_emits_label(qtbot, repo, cat):
+    view, page, alice, hi, lo = _find_more(qtbot, repo, cat)
+    page.labels.disconnect(view.send_labels)
+    sent = []
+    page.labels.connect(sent.append)
+    _pick(page.review_grid, hi)
+    page.confirm_button.click()
+    assert sent == [[LabelEntry("confirm", (hi,), person_id=alice)]]
+
+
+def test_find_more_survives_reload(qtbot, repo, cat):
+    _view_, page, alice, hi, lo = _find_more(qtbot, repo, cat)
+    cat.face(cat.photo(), None, "suggested", score=0.8, suggested=alice, emb=_vec(0.0))
+    page.loaded = False
+    page.show_person(alice)
+    qtbot.waitUntil(lambda: page.loaded)
+    qtbot.waitUntil(lambda: len(page.review_grid.tiles()) == 2)
+    assert page.review_mode == "more"
+    assert _grid_ids(page.review_grid) == [hi, lo]
+
+
+def test_find_more_empty_message(qtbot, repo, cat):
+    alice = cat.person("Alice")
+    cat.face(cat.photo(), alice, "user", emb=_vec(1.0))
+    view = _view(qtbot, _ctx(repo))
+    page = _open_person(qtbot, view, alice)
+    page.find_more_button.click()
+    qtbot.waitUntil(
+        lambda: page.review_title.text() == "No more faces that look like Alice."
+    )
+    assert page.review_grid.tiles() == []
+
+
+def test_review_button_returns_to_suggestions(qtbot, repo, cat):
+    alice, hi, lo = _more_cat(cat)
+    s1 = cat.face(
+        cat.photo(), None, "suggested", score=0.8, suggested=alice, emb=_vec(0.0)
+    )
+    view = _view(qtbot, _ctx(repo))
+    page = _open_person(qtbot, view, alice)
+    page.find_more_button.click()
+    qtbot.waitUntil(lambda: len(page.review_grid.tiles()) == 2)
+    page.review_button.click()
+    assert page.review_mode == "suggestions"
+    assert page.review_title.text() == "Is this Alice?"
+    assert _grid_ids(page.review_grid) == [s1]

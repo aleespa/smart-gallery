@@ -63,6 +63,7 @@ REVIEW_TITLE = "Is this {name}?"
 FIND_MORE = "Find more"
 MORE_TITLE = "Could this be {name}?"
 SEARCHING = "Searching…"
+MORE_FAILED = "Couldn't search for more faces: {error}"
 NO_MORE = "No more faces that look like {name}."
 DONE = "Done"
 CONFIRM = "✓"
@@ -325,6 +326,7 @@ class PersonPage(QWidget):
         self._query.finished.connect(self._on_data)
         self._faces_query.finished.connect(self._on_faces)
         self._more_query.finished.connect(self._on_more)
+        self._more_query.failed.connect(self._on_more_failed)
         crops = getattr(ctx, "face_crops", None)
         if crops is not None:
             crops.ready.connect(self._on_crop)
@@ -479,6 +481,12 @@ class PersonPage(QWidget):
         self.review_title.setText(
             MORE_TITLE.format(name=name) if tiles else NO_MORE.format(name=name)
         )
+
+    def _on_more_failed(self, error) -> None:
+        if self.review_mode != "more":
+            return
+        self.review_grid.set_tiles([], self.root)
+        self.review_title.setText(MORE_FAILED.format(error=error))
 
     def _decide(self, action: str, everything: bool) -> None:
         if self.person_id is None:

@@ -599,3 +599,20 @@ def test_review_button_returns_to_suggestions(qtbot, repo, cat):
     assert page.review_mode == "suggestions"
     assert page.review_title.text() == "Is this Alice?"
     assert _grid_ids(page.review_grid) == [s1]
+
+
+def test_find_more_failure_shows_message(qtbot, repo, cat, monkeypatch):
+    alice, hi, lo = _more_cat(cat)
+    view = _view(qtbot, _ctx(repo))
+    page = _open_person(qtbot, view, alice)
+    page.review_button.click()
+    assert page.review_grid.tiles() == []  # no suggestions: nothing stale
+
+    def boom(*_a, **_k):
+        raise ValueError("bad blob")
+
+    monkeypatch.setattr("smart_gallery.gui.people.model.find_more", boom)
+    page.find_more_button.click()
+    qtbot.waitUntil(lambda: "bad blob" in page.review_title.text())
+    assert page.review_title.text() == "Couldn't search for more faces: bad blob"
+    assert page.review_grid.tiles() == []

@@ -111,6 +111,30 @@ class FaceLabelsMixin:
             )
         return faces, candidates
 
+    def person_examples(self, person_id: int) -> np.ndarray:
+        """The examples ``load_filing_inputs`` gives this person, as an
+        ``(n, 512)`` float32 array; ``(0, 512)`` when none or no such person."""
+        p = self.conn.execute(
+            "SELECT name, centroid, reference_centroid FROM persons WHERE id = ?",
+            (person_id,),
+        ).fetchone()
+        if p is None:
+            return _stack([])
+        if not p["name"]:
+            return _stack([_vec(p["centroid"])] if p["centroid"] is not None else [])
+        ex = [
+            _vec(r["embedding"])
+            for r in self.conn.execute(
+                "SELECT embedding FROM faces WHERE state='user' AND person_id = ?",
+                (person_id,),
+            )
+        ]
+        if p["reference_centroid"] is not None:
+            ex.append(_vec(p["reference_centroid"]))
+        if not ex and p["centroid"] is not None:
+            ex.append(_vec(p["centroid"]))
+        return _stack(ex)
+
     def stash_decisions(self, media_ids: Iterable[int]) -> int:
         """Save what the faces of these media were filed as into
         ``face_carryover``, so ``apply_carryover`` can give it back after the

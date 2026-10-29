@@ -8,8 +8,11 @@ v5, or with no face tables at all) raises ``NeedsUpgrade`` from
 
 from __future__ import annotations
 
+import heapq
 from dataclasses import dataclass, replace
 from typing import Literal, Optional, Sequence
+
+import numpy as np
 
 from smart_gallery.config import FACE_DET_VERSION
 from smart_gallery.db.repository import GalleryRepository
@@ -238,3 +241,62 @@ def name_owner(rows: PeopleList, name: str, except_id: int) -> Optional[PersonRo
         if p.id != except_id and p.name and p.name.strip().lower() == wanted:
             return p
     return None
+
+
+FIND_MORE_LIMIT = 300
+FIND_MORE_FLOOR = 0.35  # = FilingConfig.suggest_thresh
+
+_POOL_SQL = (
+    "SELECT f.id, f.embedding FROM faces f"
+    " WHERE f.state NOT IN ('user', 'ignored')"
+    " AND (f.person_id IS NULL OR f.person_id IN"
+    "  (SELECT id FROM persons WHERE (name IS NULL OR name = '') AND hidden = 0))"
+    " AND f.person_id IS NOT :pid"
+    " AND NOT EXISTS (SELECT 1 FROM face_rejections r"
+    "  WHERE r.face_id = f.id AND r.person_id = :pid)"
+)
+
+
+def find_more(
+    repo,
+    person_id: int,
+    *,
+    limit: int = FIND_MORE_LIMIT,
+    floor: float = FIND_MORE_FLOOR,
+) -> list[FaceTile]:
+    """Unclassified faces most like this person, best first. Reads the pool
+    in blocks and keeps only the best ``limit``, so memory stays bounded."""
+    from smart_gallery.analysis import filing
+
+    examples = repo.person_examples(person_id)
+    if not len(examples) or limit <= 0:
+        return []
+    cand = [
+        filing.Candidate(
+            person_id, "named", examples, np.empty((0, examples.shape[1]), np.float32)
+        )
+    ]
+    k = filing.FilingConfig().k
+    best: list[tuple[float, int]] = []  # min-heap of (score, -face_id)
+    cur = repo.conn.execute(_POOL_SQL, {"pid": person_id})
+    while True:
+        rows = cur.fetchmany(filing.CHUNK)
+        if not rows:
+            break
+        embs = np.stack([np.frombuffer(r["embedding"], np.float32) for r in rows])
+        scores = filing.score_matrix(embs, cand, k)[:, 0]
+        for r, sc in zip(rows, scores):
+            sc = float(sc)
+            if sc < floor:
+                continue
+            item = (sc, -r["id"])
+            if len(best) < limit:
+                heapq.heappush(best, item)
+            elif item > best[0]:
+                heapq.heapreplace(best, item)
+    ranked = sorted(best, key=lambda t: (-t[0], -t[1]))
+    if not ranked:
+        return []
+    scores_by_id = {-neg: sc for sc, neg in ranked}
+    tiles = _covers(repo, list(scores_by_id))
+    return [replace(tiles[i], score=sc) for i, sc in scores_by_id.items() if i in tiles]

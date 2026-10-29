@@ -179,6 +179,52 @@ CREATE_MIRROR_TABLES = [
 ]
 
 
+# -- face undo (schema v8) ----------------------------------------------------
+# Plain ids, no FK to faces/persons: a batch must outlive the persons it deleted
+# and the faces a later rescan removed (that is reported as a conflict).
+CREATE_UNDO_TABLES = [
+    """
+    CREATE TABLE IF NOT EXISTS face_undo_batches (
+        id         INTEGER PRIMARY KEY,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        summary    TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS face_undo_faces (
+        batch_id         INTEGER NOT NULL REFERENCES face_undo_batches(id) ON DELETE CASCADE,
+        face_id          INTEGER NOT NULL,
+        before_state     TEXT,
+        before_person    INTEGER,
+        before_suggested INTEGER,
+        before_score     REAL,
+        after_state      TEXT,
+        after_person     INTEGER,
+        after_suggested  INTEGER,
+        after_score      REAL,
+        PRIMARY KEY (batch_id, face_id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS face_undo_rejections (
+        batch_id  INTEGER NOT NULL REFERENCES face_undo_batches(id) ON DELETE CASCADE,
+        face_id   INTEGER NOT NULL,
+        person_id INTEGER NOT NULL,
+        added     INTEGER NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS face_undo_persons (
+        batch_id  INTEGER NOT NULL REFERENCES face_undo_batches(id) ON DELETE CASCADE,
+        person_id INTEGER NOT NULL,
+        name      TEXT,
+        hidden    INTEGER NOT NULL,
+        created   INTEGER NOT NULL
+    );
+    """,
+]
+
+
 def init_schema(conn: sqlite3.Connection) -> None:
     """Create tables/indexes if missing and seed the schema version."""
     conn.execute(CREATE_META)
@@ -190,7 +236,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute(CREATE_FACE_CARRYOVER)
     for stmt in CREATE_INDEXES + CREATE_V6_INDEXES:
         conn.execute(stmt)
-    for stmt in CREATE_MIRROR_TABLES:
+    for stmt in CREATE_MIRROR_TABLES + CREATE_UNDO_TABLES:
         conn.execute(stmt)
     conn.execute(
         "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
@@ -274,6 +320,10 @@ def migrate(conn: sqlite3.Connection) -> None:
 
     if current < 7:
         for stmt in CREATE_MIRROR_TABLES:
+            conn.execute(stmt)
+
+    if current < 8:
+        for stmt in CREATE_UNDO_TABLES:
             conn.execute(stmt)
 
     conn.execute(

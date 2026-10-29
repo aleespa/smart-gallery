@@ -22,6 +22,7 @@ from smart_gallery.config import (
     to_abspath,
 )
 from smart_gallery.db.face_labels import FaceLabelsMixin
+from smart_gallery.db.face_undo import FaceUndoMixin
 from smart_gallery.db.mirror_store import MirrorStoreMixin
 from smart_gallery.db.schema import init_schema, migrate
 from smart_gallery.db.where import build_where
@@ -84,7 +85,7 @@ def _read_only_uri(db_path: PurePath) -> str:
     return f"file:{path}?mode=ro"
 
 
-class GalleryRepository(FaceLabelsMixin, MirrorStoreMixin):
+class GalleryRepository(FaceLabelsMixin, FaceUndoMixin, MirrorStoreMixin):
     def __init__(self, conn: sqlite3.Connection, drive_root: Path, db_path: Path):
         self.conn = conn
         self.drive_root = Path(drive_root)

@@ -20,7 +20,7 @@ def test_migrate_v6_catalog_adds_mirror_tables(drive):
         _downgrade(r)
     for _ in range(2):
         with GalleryRepository.open(drive) as r:
-            assert r.schema_version == 7
+            assert r.schema_version == 8
             names = {
                 x["name"] for x in r.conn.execute("SELECT name FROM sqlite_master")
             }

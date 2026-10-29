@@ -19,3 +19,12 @@ def undo_faces(repo: GalleryRepository) -> UndoReport:
     ensure_not_mirror(repo)
     info, restored = repo.undo_last()
     return UndoReport(info.summary, restored)
+
+
+def forget_undo(repo: GalleryRepository) -> str:
+    """Drop the newest undo step (no face changes); returns its summary."""
+    ensure_not_mirror(repo)
+    info = repo.forget_last_undo()
+    if info is None:
+        raise ValueError("Nothing to undo.")
+    return info.summary

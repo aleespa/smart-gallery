@@ -349,3 +349,89 @@ def test_undo_faces_refuses_on_mirror(repo):
     repo.add_peer("mirror", Peer("u" * 32, "x.db"))
     with pytest.raises(ValueError, match="mirror"):
         undo_faces(repo)
+
+
+def _forget_args(drive):
+    return build_parser().parse_args(["undo-faces", str(drive), "--forget"])
+
+
+def test_forget_last_undo_drops_only_newest_batch(cat, repo):
+    alice = cat.person("Alice")
+    f = cat.face(_unit(0), "suggested", None, suggested=alice)
+    s0 = repo.face_snapshot()
+    _set_state_(repo, f, "user")
+    repo.record_undo("first", s0)
+    s1 = repo.face_snapshot()
+    _set_state_(repo, f, "ignored")
+    repo.record_undo("second", s1)
+    now = repo.face_snapshot()
+    info = repo.forget_last_undo()
+    assert info.summary == "second"
+    assert repo.face_snapshot() == now
+    assert repo.last_undo().summary == "first"
+
+
+def _set_state_(repo, face_id, state):
+    repo.conn.execute("UPDATE faces SET state=? WHERE id=?", (state, face_id))
+    repo.conn.commit()
+
+
+def test_forget_last_undo_empty_is_none(repo):
+    assert repo.forget_last_undo() is None
+
+
+def test_forget_undo_service_empty_raises(repo):
+    from smart_gallery.services.undo_faces import forget_undo
+
+    with pytest.raises(ValueError, match="Nothing to undo."):
+        forget_undo(repo)
+
+
+def test_forget_undo_service_refuses_mirror(repo):
+    from smart_gallery.services.undo_faces import forget_undo
+
+    from smart_gallery.mirror.types import Peer
+
+    repo.add_peer("mirror", Peer("u1", "X:/.smart_gallery/gallery.db"))
+    with pytest.raises(ValueError, match="mirror"):
+        forget_undo(repo)
+
+
+def test_cli_undo_faces_forget(cat, repo, drive, caplog):
+    alice = cat.person("Alice")
+    f = cat.face(_unit(0), "suggested", None, suggested=alice)
+    before = repo.face_snapshot()
+    _set_state_(repo, f, "user")
+    repo.record_undo("Did a thing", before)
+    assert _forget_args(drive).forget is True
+    _HANDLERS["undo-faces"](_forget_args(drive))
+    assert repo.last_undo() is None
+    assert cat.row(f)["state"] == "user"
+    with pytest.raises(ValueError, match="Nothing to undo."):
+        _HANDLERS["undo-faces"](_forget_args(drive))
+
+
+def test_cli_label_faces_refile_logs_sorted_line(cat, repo, drive):
+    from loguru import logger
+
+    alice = cat.person("Alice")
+    f = cat.face(_unit(0), "suggested", None, suggested=alice)
+    lines = []
+    sink = logger.add(lambda m: lines.append(str(m)), level="INFO")
+    try:
+        _HANDLERS["label-faces"](
+            build_parser().parse_args(
+                [
+                    "label-faces",
+                    str(drive),
+                    "--faces",
+                    str(f),
+                    "--confirm",
+                    str(alice),
+                    "--refile",
+                ]
+            )
+        )
+    finally:
+        logger.remove(sink)
+    assert any("Sorted faces:" in m and "left." in m for m in lines)

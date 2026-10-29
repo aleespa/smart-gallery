@@ -99,7 +99,8 @@ Add `--refile` to do that in the same step and the same undo batch. Whole-person
 
 `undo-faces E:/` reverts the latest `label-faces` batch, including faces the
 re-sorting (`--refile`) moved. It refuses, changing nothing, if those faces
-changed since (find faces, merge, rescan...).
+changed since (find faces, merge, rescan...). `undo-faces E:/ --forget` then
+drops that last step without changing any faces, so older steps can be undone.
 
 **4. Filter by person.** In the Library, the people filter selects photos with
 a person; with several people it offers *any* (at least one) or *all* (every

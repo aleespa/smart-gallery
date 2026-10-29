@@ -115,6 +115,15 @@ class FaceUndoMixin:
             return None
         return UndoInfo(row[0], row[1], row[2]) if row else None
 
+    def forget_last_undo(self) -> UndoInfo | None:
+        """Drop the newest batch without touching any face; ``None`` if none."""
+        info = self.last_undo()
+        if info is None:
+            return None
+        self.conn.execute("DELETE FROM face_undo_batches WHERE id=?", (info.batch_id,))
+        self.conn.commit()
+        return info
+
     def undo_last(self) -> tuple[UndoInfo, int]:
         """Revert the newest batch; returns it and how many faces were restored."""
         info = self.last_undo()

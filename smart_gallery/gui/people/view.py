@@ -68,6 +68,8 @@ FIX_TITLE = "Fix faces"
 UNDO = "Undo"
 UNDO_TITLE = "Undo"
 UNDO_TIP = "Undo: {summary}"
+UNDO_FAILED = "Could not undo.\n\n{error}"
+FORGET = "Forget this undo step"
 SEND_DELAY_MS = 400  # a burst of clicks becomes one job
 LABELS_DIR = "face-labels"
 LEAVE_ASK = "Send the face corrections you made before leaving?"
@@ -164,6 +166,7 @@ class PeopleView(QWidget):
         finished = getattr(ctx.jobs, "finished", None)
         if finished is not None:
             finished.connect(self._send_pending)
+            finished.connect(self._on_undo_finished)
         ctx.add_leave_guard(self._confirm_leave)
         self.destroyed.connect(lambda *_: ctx.remove_leave_guard(self._confirm_leave))
         self.reload()
@@ -397,6 +400,23 @@ class PeopleView(QWidget):
             return
         if self.undo_button.isEnabled():
             self._start(UNDO_TITLE, ("undo-faces", str(self._root)))
+
+    def _on_undo_finished(self, record) -> None:
+        if getattr(record, "title", None) != UNDO_TITLE or record.status != "failed":
+            return
+        if not any(
+            a and a[0] == "undo-faces" and "--forget" not in a for a in record.argvs
+        ):
+            return
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(UNDO_TITLE)
+        box.setText(UNDO_FAILED.format(error=record.summary or record.status))
+        forget = box.addButton(FORGET, QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Close)
+        box.exec()
+        if box.clickedButton() is forget and self._root is not None:
+            self._start(UNDO_TITLE, ("undo-faces", str(self._root), "--forget"))
 
     def find_faces(self) -> None:
         if self.ctx.current is None:

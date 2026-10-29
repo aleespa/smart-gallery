@@ -498,7 +498,9 @@ flowchart LR
    **Find more** (beside **Show in Library**) searches the faces nobody has
    sorted yet for ones that look like this person, best match first; confirm
    or reject them like suggestions. **Undo** (or Ctrl+Z) reverses the last
-   batch of face corrections.
+   batch of face corrections. Undo refuses, changing nothing, once Find new
+   faces, a merge or a rescan has changed those faces; the message then offers
+   **Forget this undo step**, after which older steps can be undone.
 4. **Whole groups.** **Merge people** joins several into one, **Split group**
    separates a group that mixes two people, **Delete person** returns its
    faces to the pool.

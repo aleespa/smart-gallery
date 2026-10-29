@@ -670,3 +670,98 @@ def test_every_argv_the_page_builds_parses(qtbot, repo, cat, monkeypatch):
         if args.command == "name-person":
             names.append((args.name, args.merge))
     assert names == [("Ally", False), ("-Dash", False), ("Alice", True)]
+
+
+def _undo_record(status="failed", title="Undo", root="X:/"):
+    from smart_gallery.gui.history.store import JobRecord
+
+    return JobRecord(
+        title=title,
+        argvs=[["undo-faces", root]],
+        started_at="t",
+        ended_at="t",
+        status=status,
+        exit_code=1 if status == "failed" else 0,
+        summary='Can\'t undo "x": 2 of its faces changed since.',
+        log_path=None,
+        output_tail=[],
+    )
+
+
+class _Box:
+    """Stands in for QMessageBox: records the call and 'clicks' a chosen button."""
+
+    def __init__(self, forget):
+        self.forget = forget
+        self.shown = []
+
+    def install(self, monkeypatch):
+        box = self
+
+        class Fake:
+            class ButtonRole:
+                ActionRole = 0
+                RejectRole = 1
+
+            class StandardButton:
+                Close = 1
+
+            def __init__(self, *a, **k):
+                box.shown.append(1)
+
+            def setIcon(self, *a): ...
+            def setWindowTitle(self, *a): ...
+            def setText(self, text):
+                box.text = text
+
+            def addButton(self, b, role=None):
+                if isinstance(b, str):
+                    self.fb = b
+                    return b
+                return b
+
+            def exec(self):
+                return 0
+
+            def clickedButton(self):
+                return self.fb if box.forget else None
+
+            Icon = type("Icon", (), {"Warning": 0})
+
+        monkeypatch.setattr("smart_gallery.gui.people.view.QMessageBox", Fake)
+
+
+def test_failed_undo_offers_forget(qtbot, repo, cat, monkeypatch):
+    cat.person("Alice")
+    _record(repo)
+    ctx = _ctx(repo, _Jobs())
+    _view(qtbot, ctx)
+    box = _Box(forget=True)
+    box.install(monkeypatch)
+    ctx.jobs.finished.emit(_undo_record(root=_root(repo)))
+    assert box.shown and "changed since" in box.text
+    assert ctx.jobs.specs[-1] == JobSpec(
+        "Undo", (("undo-faces", _root(repo), "--forget"),)
+    )
+
+
+def test_failed_undo_close_changes_nothing(qtbot, repo, cat, monkeypatch):
+    cat.person("Alice")
+    _record(repo)
+    ctx = _ctx(repo, _Jobs())
+    _view(qtbot, ctx)
+    box = _Box(forget=False)
+    box.install(monkeypatch)
+    ctx.jobs.finished.emit(_undo_record(root=_root(repo)))
+    assert box.shown and ctx.jobs.specs == []
+
+
+def test_ok_undo_and_other_titles_show_no_box(qtbot, repo, cat, monkeypatch):
+    cat.person("Alice")
+    ctx = _ctx(repo, _Jobs())
+    _view(qtbot, ctx)
+    box = _Box(forget=True)
+    box.install(monkeypatch)
+    ctx.jobs.finished.emit(_undo_record(status="ok"))
+    ctx.jobs.finished.emit(_undo_record(title="Find faces"))
+    assert not box.shown and ctx.jobs.specs == []

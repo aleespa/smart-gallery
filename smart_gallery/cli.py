@@ -39,6 +39,7 @@ from smart_gallery.services import (
     identify_faces,
     init_drive,
     label_faces,
+    forget_undo,
     undo_faces,
     LabelEntry,
     MirrorChoices,
@@ -713,6 +714,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Undo the last face correction made with label-faces, if nothing has changed those faces since.",
     )
     p_undo.add_argument("drive", type=Path, help=DRIVE_HELP)
+    p_undo.add_argument(
+        "--forget",
+        action="store_true",
+        help="Drop the last undo step without changing any faces (when it can no longer be undone).",
+    )
 
     p_cluster = sub.add_parser(
         "cluster-faces", help="Optionally cluster faces without sample photos."
@@ -1224,6 +1230,14 @@ def _handle_scan_faces(args):
     )
 
 
+def _sorted_faces_line(report) -> str:
+    return (
+        f"Sorted faces: {report.auto:,} matched, {report.suggested:,} suggested, "
+        f"{report.grouped:,} grouped into {report.groups_created} new group(s), "
+        f"{report.hidden:,} hidden, {report.left:,} left."
+    )
+
+
 def _handle_file_faces(args):
     cb = progress_reporter()
     with GalleryRepository.open(args.drive) as repo:
@@ -1231,11 +1245,7 @@ def _handle_file_faces(args):
             report = file_faces(repo, group=not args.no_group, progress_callback=cb)
         finally:
             cb.close()
-    logger.success(
-        f"Sorted faces: {report.auto:,} matched, {report.suggested:,} suggested, "
-        f"{report.grouped:,} grouped into {report.groups_created} new group(s), "
-        f"{report.hidden:,} hidden, {report.left:,} left."
-    )
+    logger.success(_sorted_faces_line(report))
 
 
 def _handle_find_faces(args):
@@ -1289,10 +1299,16 @@ def _handle_label_faces(args):
         f"{report.missing_faces} face id(s) and {report.missing_people} "
         "person id(s) no longer exist."
     )
+    if report.filed is not None:
+        logger.success(_sorted_faces_line(report.filed))
 
 
 def _handle_undo_faces(args):
     with GalleryRepository.open(args.drive) as repo:
+        if args.forget:
+            summary = forget_undo(repo)
+            logger.success(f"Forgot undo step: {summary}.")
+            return
         r = undo_faces(repo)
     logger.success(f"Undid: {r.summary} ({r.faces_restored:,} faces restored).")
 

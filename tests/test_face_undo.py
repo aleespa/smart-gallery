@@ -180,3 +180,21 @@ def test_migrate_v7_catalog_adds_undo_tables(drive):
         }
         assert set(UNDO_TABLES) <= names
         assert repo.schema_version == 8
+
+
+def test_undo_refuses_when_restored_person_was_deleted(cat, repo):
+    p = cat.person("Pat")
+    q = cat.person("Quinn")
+    f = cat.face(_unit(0), "user", p)
+    before = repo.face_snapshot()
+    repo.conn.execute("UPDATE faces SET person_id=? WHERE id=?", (q, f))
+    repo.conn.commit()
+    repo.record_undo("Moved a face", before)
+    # Deleted outside any batch; the face is moved off P first, as delete-person does.
+    repo.conn.execute("DELETE FROM persons WHERE id=?", (p,))
+    repo.conn.commit()
+    current = repo.face_snapshot()
+    with pytest.raises(UndoConflict):
+        repo.undo_last()
+    assert repo.face_snapshot() == current
+    assert repo.last_undo() is not None

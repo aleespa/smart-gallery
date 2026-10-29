@@ -148,6 +148,18 @@ class FaceUndoMixin:
             bad += sum(
                 1 for p, _n, _h, created in persons if not created and p in now.persons
             )
+            # Restored values must point at people that will exist, and
+            # restored rejections at faces that still do.
+            revived = {p for p, _n, _h, created in persons if not created}
+            alive = now.persons.keys() | revived
+            for r in faces:
+                if r[0] in now.faces:
+                    bad += sum(
+                        1 for v in (r[2], r[3]) if v is not None and v not in alive
+                    )
+            for f, p, added in rejs:
+                if not added and (p not in alive or f not in now.faces):
+                    bad += 1
             if bad:
                 raise UndoConflict(
                     f'Can\'t undo "{info.summary}": {bad:,} of its faces '

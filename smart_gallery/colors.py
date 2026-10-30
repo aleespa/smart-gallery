@@ -37,6 +37,7 @@ BRAND_CAPS = "#FFFFFF"
 WARNING = "#F0C040"  # banners: "the ExifTool binary was not found", ...
 ON_WARNING = "#1A1A1A"
 ERROR = "#D64545"  # error text and the border of an invalid field
+KEEP = "#2E8B57"  # a shot kept in a burst
 CLOSE_HOVER = "#C42B1C"  # the window close button, as the system draws it
 
 # ── neutrals ────────────────────────────────────────────────────────────────

@@ -1,0 +1,88 @@
+<style>
+  .app { display:flex; border:1px solid #ccc; border-radius:6px; overflow:hidden; font-size:13px; background:#fafafa; color:#222; }
+  .tree { width:190px; border-right:1px solid #ddd; padding:8px; background:#f2f2f2; }
+  .tree div { padding:3px 4px; border-radius:3px; }
+  .tree .sel { background:#e8734a; color:#fff; }
+  .main { flex:1; padding:10px; min-width:0; }
+  .bar { display:flex; gap:10px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+  .bar .pill { border:1px solid #bbb; border-radius:12px; padding:2px 10px; background:#fff; }
+  .row { display:flex; align-items:center; gap:10px; padding:6px; border-bottom:1px solid #e4e4e4; background:#fff; }
+  .row.open { background:#fff4ef; }
+  .meta { width:150px; flex:none; }
+  .meta b { display:block; }
+  .strip { display:flex; gap:3px; overflow:hidden; flex:1; }
+  .strip img { height:46px; border-radius:2px; }
+  .expanded { display:flex; flex-wrap:wrap; gap:8px; padding:10px; background:#fff4ef; border-bottom:1px solid #e4e4e4; }
+  .shot { position:relative; width:150px; }
+  .shot img { width:150px; border-radius:3px; display:block; }
+  .shot .tag { position:absolute; top:4px; left:4px; font-size:11px; padding:1px 6px; border-radius:8px; color:#fff; }
+  .keep .tag { background:#2e8b57; } .drop img { opacity:.35; } .drop .tag { background:#b33; }
+  .shot small { display:block; color:#666; }
+  .go { margin-left:auto; background:#e8734a; color:#fff; border:none; border-radius:4px; padding:5px 12px; }
+  .viewer { display:flex; flex-direction:column; gap:8px; }
+  .big { width:100%; max-height:330px; object-fit:contain; background:#111; border-radius:4px; }
+  .film { display:flex; gap:4px; }
+  .film .f { position:relative; }
+  .film img { height:60px; border-radius:2px; display:block; border:3px solid transparent; }
+  .film .cur img { border-color:#e8734a; }
+  .film .drop img { opacity:.35; }
+  .film .dot { position:absolute; bottom:4px; right:4px; width:10px; height:10px; border-radius:50%; background:#2e8b57; }
+  .film .drop .dot { background:#b33; }
+  .keys { color:#666; font-size:12px; }
+</style>
+
+<h2>How do you want to review a burst?</h2>
+<p class="subtitle">Both live in the Storage tab: folder tree on the left, bursts in that folder on the right, largest first. They differ in how you look closely and pick the keepers. Click the one that feels right (real photos from E:).</p>
+
+<div class="options">
+<div class="option" data-choice="inline" onclick="toggleSelect(this)">
+<div class="letter">A</div>
+<div class="content" style="width:100%">
+<h3>Open the group in the list</h3>
+<p>Click a burst and it expands into a grid of medium-sized shots. Click a shot to toggle keep / remove. Good for scanning many groups fast; less detail per shot.</p>
+<div class="app">
+  <div class="tree"><div>E:/</div><div>&nbsp;Photos</div><div>&nbsp;&nbsp;Canon</div><div class="sel">&nbsp;&nbsp;&nbsp;2025</div><div>&nbsp;&nbsp;&nbsp;2026</div><div>&nbsp;&nbsp;Other cameras</div></div>
+  <div class="main">
+    <div class="bar"><b>Bursts in Canon/2025</b> <span class="pill">Gap: 2 s</span> <span>412 groups · 1,180 photos · 9.6 GB</span> <button class="go">Move 16 to Recycle Bin</button></div>
+    <div class="row open"><div class="meta"><b>19 shots · 1 s</b>2025/05 · 141 MB<br><span style="color:#2e8b57">keeping 3</span></div>
+      <div class="strip"><img src="/files/plant0.jpg"><img src="/files/plant1.jpg"><img src="/files/plant2.jpg"><img src="/files/plant3.jpg"><img src="/files/plant4.jpg"><img src="/files/plant5.jpg"><img src="/files/plant6.jpg"></div></div>
+    <div class="expanded">
+      <div class="shot keep"><img src="/files/plant0.jpg"><span class="tag">keep</span><small>IMG_1464 · +0s</small></div>
+      <div class="shot drop"><img src="/files/plant1.jpg"><span class="tag">remove</span><small>IMG_1465 · +1s</small></div>
+      <div class="shot drop"><img src="/files/plant2.jpg"><span class="tag">remove</span><small>IMG_1466 · +1s</small></div>
+      <div class="shot keep"><img src="/files/plant3.jpg"><span class="tag">keep</span><small>IMG_1467 · +1s</small></div>
+      <div class="shot drop"><img src="/files/plant4.jpg"><span class="tag">remove</span><small>IMG_1468 · +1s</small></div>
+      <div class="shot keep"><img src="/files/plant5.jpg"><span class="tag">keep</span><small>IMG_1469 · +1s</small></div>
+      <div class="shot drop"><img src="/files/plant6.jpg"><span class="tag">remove</span><small>IMG_1470 · +1s</small></div>
+      <div style="align-self:center;color:#666">… 12 more</div>
+    </div>
+    <div class="row"><div class="meta"><b>3 shots · 2 s</b>2025/12 · 27 MB<br><span style="color:#999">not decided</span></div>
+      <div class="strip"><img src="/files/gran0.jpg"><img src="/files/gran1.jpg"><img src="/files/gran2.jpg"></div></div>
+  </div>
+</div>
+</div></div>
+
+<div class="option" data-choice="viewer" onclick="toggleSelect(this)">
+<div class="letter">B</div>
+<div class="content" style="width:100%">
+<h3>Open the group in a review window</h3>
+<p>Double-click a burst to open one shot large with the burst as a filmstrip underneath. Arrow keys step through shots, K / X mark keep / remove, Next group jumps on. Closer to how you check shots in Windows Photos today.</p>
+<div class="app">
+  <div class="main viewer">
+    <div class="bar"><b>Burst 1 of 412 · 5 shots · 2 s · 2026/02</b> <span style="color:#2e8b57">keeping 2</span> <span style="margin-left:auto" class="pill">◀ Previous group</span><span class="pill">Next group ▶</span></div>
+    <img class="big" src="/files/dune3.jpg">
+    <div style="display:flex;justify-content:space-between"><span><b>IMG_9003.CR3</b> · +1 s · 1/1000 · f/5.6 · ISO 100</span><span><span class="pill" style="background:#2e8b57;color:#fff">K Keep</span> <span class="pill">X Remove</span></span></div>
+    <div class="film">
+      <div class="f drop"><img src="/files/dune0.jpg"><span class="dot"></span></div>
+      <div class="f drop"><img src="/files/dune1.jpg"><span class="dot"></span></div>
+      <div class="f"><img src="/files/dune2.jpg"><span class="dot"></span></div>
+      <div class="f cur"><img src="/files/dune3.jpg"><span class="dot"></span></div>
+      <div class="f drop"><img src="/files/dune4.jpg"><span class="dot"></span></div>
+    </div>
+    <div class="keys">← → step · K keep · X remove · Space zoom 100% · Enter next group · Esc back to list</div>
+  </div>
+</div>
+</div></div>
+</div>
+
+<p class="subtitle" style="margin-top:14px">Either way: nothing moves until you press the one "Move N to Recycle Bin" button for the folder, same as the RAW+JPEG pairs.</p>

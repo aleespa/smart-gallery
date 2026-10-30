@@ -149,7 +149,7 @@ def test_confirm_leave(view, monkeypatch):
 
 
 # ── Task 4: expanding a burst ────────────────────────────────────────────────
-from PySide6.QtCore import QPoint, QRect  # noqa: E402
+from PySide6.QtCore import QPoint  # noqa: E402
 
 from smart_gallery.gui.storage import bursts_view as bv  # noqa: E402
 
@@ -169,7 +169,10 @@ def _rect(view, row):
 def _click(qtbot, view, pos, double=False):
     vp = view.list.viewport()
     if double:
+        # what a real double-click delivers: press, release, double-click, release
+        qtbot.mouseClick(vp, Qt.MouseButton.LeftButton, pos=pos)
         qtbot.mouseDClick(vp, Qt.MouseButton.LeftButton, pos=pos)
+        qtbot.mouseRelease(vp, Qt.MouseButton.LeftButton, pos=pos)
     else:
         qtbot.mouseClick(vp, Qt.MouseButton.LeftButton, pos=pos)
 
@@ -181,8 +184,6 @@ def _row_pos(view, row):
 
 def _cell_pos(view, row, n):
     burst = view.model.rows[row]
-    cell = view.list.itemDelegate().shot_at(_rect(view, row), burst, QPoint(0, 0))
-    assert cell is None
     d = view.list.itemDelegate()
     r = _rect(view, row)
     for y in range(r.top(), r.bottom(), 4):
@@ -265,7 +266,7 @@ def test_clear_marks_clears_dropped_notice(view, tmp_path):
     view.set_shots(shots, tmp_path)
     assert DROPPED.format(n=1) in view.scope_label.text()
     view.clear_marks()
-    assert "cleared" not in view.scope_label.text()
+    assert DROPPED.format(n=1) not in view.scope_label.text()
 
 
 def test_constants():
@@ -275,4 +276,36 @@ def test_constants():
         "keep",
         "remove",
     )
-    assert isinstance(QRect(), QRect)
+
+
+def test_double_click_leaves_marks_unchanged(shown, qtbot):
+    burst = shown.model.rows[0]
+    shown.set_expanded(burst.key)
+    with qtbot.waitSignal(shown.review_requested):
+        _click(qtbot, shown, _cell_pos(shown, 0, 1), double=True)
+    assert shown.marks() == set()
+    # a click that would be refused leaves no notice behind either
+    other = shown.model.rows[1]
+    shown.set_expanded(other.key)
+    shown.toggle(other.shots[0].key)
+    with qtbot.waitSignal(shown.review_requested):
+        _click(qtbot, shown, _cell_pos(shown, 1, 1), double=True)
+    assert shown.marks() == {other.shots[0].key}
+    assert shown.refused() is None
+
+
+def test_expanded_height_follows_width(shown, qtbot):
+    shown.set_expanded(shown.model.rows[0].key)
+    wide = _rect(shown, 0).height()
+    shown.resize(200, 700)
+    qtbot.waitUntil(lambda: _rect(shown, 0).height() > wide)
+
+
+def test_review_only_on_expanded_row(shown, qtbot):
+    burst = shown.model.rows[0]
+    centre = shown.list.itemDelegate().review_rect(_rect(shown, 0)).center()
+    seen = []
+    shown.review_requested.connect(lambda *a: seen.append(a))
+    _click(qtbot, shown, centre)
+    assert seen == []
+    assert shown.expanded() == burst.key  # it was a plain row click

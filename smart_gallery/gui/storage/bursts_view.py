@@ -8,6 +8,7 @@ Bin. Nothing here touches the disk or the catalog.
 from __future__ import annotations
 
 from collections import OrderedDict
+from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -136,6 +137,10 @@ class _List(QListView):
         super().__init__()
         self._view = view
 
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt API)
+        super().resizeEvent(event)
+        self.doItemsLayout()  # the expanded row's height depends on the width
+
     def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt API)
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             burst = self.currentIndex().data(BURST_ROLE)
@@ -150,6 +155,7 @@ class BurstsDelegate(QStyledItemDelegate):
         super().__init__(view.list)
         self._view = view
         self._swallow = False  # the release that ends a double-click
+        self._last: tuple[ShotKey, bool] | None = None  # last shot click, toggled
 
     # -- geometry ------------------------------------------------------------
     @staticmethod
@@ -203,7 +209,9 @@ class BurstsDelegate(QStyledItemDelegate):
         if pixmap is None:
             painter.fillRect(box, QColor(*colors.TILE_BACK))
             return
-        size = pixmap.size().scaled(box.size(), Qt.AspectRatioMode.KeepAspectRatio)
+        size = pixmap.size()
+        if size.width() > box.width() or size.height() > box.height():
+            size = size.scaled(box.size(), Qt.AspectRatioMode.KeepAspectRatio)
         target = QRect(0, 0, size.width(), size.height())
         target.moveCenter(box.center())
         painter.drawPixmap(target, pixmap)
@@ -212,6 +220,7 @@ class BurstsDelegate(QStyledItemDelegate):
         burst: Burst = index.data(BURST_ROLE)
         painter.save()
         try:
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
             style = option.widget.style() if option.widget else QApplication.style()
             style.drawPrimitive(
                 QStyle.PrimitiveElement.PE_PanelItemViewItem,
@@ -253,7 +262,8 @@ class BurstsDelegate(QStyledItemDelegate):
             else:
                 painter.setPen(palette.placeholderText().color())
             painter.drawText(first, right, keep)
-            self._paint_review(painter, r, palette)
+            if burst.key == self._view.expanded():
+                self._paint_review(painter, r, palette)
             if burst.key == self._view.expanded():
                 for i, shot in enumerate(burst.shots):
                     self._paint_cell(painter, option, burst, i, shot)
@@ -314,12 +324,16 @@ class BurstsDelegate(QStyledItemDelegate):
         pos = event.position().toPoint()
         expanded = burst.key == self._view.expanded()
         shot = self.shot_at(option.rect, burst, pos) if expanded else None
-        on_review = self.review_rect(option.rect).contains(pos)
+        on_review = expanded and self.review_rect(option.rect).contains(pos)
         if kind == QEvent.Type.MouseButtonPress:
+            self._swallow = False
             return on_review or shot is not None  # these do not select the row
         if kind == QEvent.Type.MouseButtonDblClick:
             self._swallow = True
             if shot is not None:
+                if self._last is not None and self._last[0] == shot:
+                    self._view.undo_click(shot, self._last[1])
+                self._last = None
                 self._view.review_requested.emit(burst.key, shot)
             return True
         if self._swallow:
@@ -328,7 +342,7 @@ class BurstsDelegate(QStyledItemDelegate):
         if on_review:
             self._view.review_requested.emit(burst.key, burst.shots[0].key)
         elif shot is not None:
-            self._view.click_shot(shot)
+            self._last = (shot, self._view.click_shot(shot))
         elif pos.y() < option.rect.top() + ROW_HEIGHT:
             self._view.set_expanded(None if expanded else burst.key)
         return True
@@ -351,6 +365,7 @@ class BurstsView(QWidget):
         self._scope: str | None = None
         self._dropped = 0
         self._refused: ShotKey | None = None
+        self._refusals = 0
         self._expanded: ShotKey | None = None
         self._root = Path()
         self._pixmaps: OrderedDict[tuple[int, int | None], QPixmap] = OrderedDict()
@@ -539,16 +554,29 @@ class BurstsView(QWidget):
         """The shot whose tag reads "keep at least one" for a moment."""
         return self._refused
 
-    def click_shot(self, shot: ShotKey) -> None:
+    def click_shot(self, shot: ShotKey) -> bool:
+        """Toggle a shot; False (with a brief notice) when it was refused."""
         if self.toggle(shot):
-            return
+            return True
         self._refused = shot
-        QTimer.singleShot(REFUSED_MS, self._clear_refused)
+        self._refusals += 1
+        QTimer.singleShot(REFUSED_MS, partial(self._clear_refused, self._refusals))
         self.list.viewport().update()
+        return False
 
-    def _clear_refused(self) -> None:
-        self._refused = None
-        self.list.viewport().update()
+    def undo_click(self, shot: ShotKey, toggled: bool) -> None:
+        """Take back a click that turned out to be half of a double-click."""
+        if toggled:
+            self.toggle(shot)
+        elif self._refused == shot:
+            self._refusals += 1  # retire the pending timer
+            self._refused = None
+            self.list.viewport().update()
+
+    def _clear_refused(self, token: int) -> None:
+        if token == self._refusals:
+            self._refused = None
+            self.list.viewport().update()
 
     def state_parts(self, burst: Burst) -> tuple[str, str]:
         """The state text split into its keeping part and the rest."""

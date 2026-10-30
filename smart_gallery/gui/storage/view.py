@@ -305,14 +305,14 @@ class StorageView(QWidget):
             self.pairs_view.set_pairs([], root)
             self.bursts_view.set_shots([], root)
             self._root = root
-            self.review._root = root
+            self.review.set_root(root)
             self._show_message(EMPTY)
             return
         # Keep the folder only when the same gallery reloaded and it is still there.
         previous = None if self._fresh else self._scope_folder()
         self._fresh = False
         self._root = root
-        self.review._root = root
+        self.review.set_root(root)
         self.checker.cancel()  # its pairs are gone; the new scope decides
         # Remembered verdicts for every pair, read on the worker: cheap.
         self.checker.load_cached(result.pairs, self._cache_path())

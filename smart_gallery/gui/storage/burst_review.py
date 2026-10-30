@@ -43,7 +43,6 @@ NEXT = "Next group ▶"
 BACK = "Back to list"
 KEEP_BUTTON = "K Keep"
 REMOVE_BUTTON = "X Remove"
-DETAILS = "{name} · +{offset} s · {shutter} · f/{aperture:g} · ISO {iso}"
 KEYS = (
     "← → step · K keep · X remove · Space zoom 100% · "
     "Enter next group · Esc back to list"
@@ -56,20 +55,25 @@ CACHE_SIZE = 8
 NOTICE_MS = 1500
 
 
+PreviewKey = tuple[int, int | None]  # first file's (id, mtime_ns)
+
+
 class _Signals(QObject):
-    loaded = Signal(object, object)  # shot key, QImage or None
+    loaded = Signal(object, object, object)  # generation, preview key, QImage|None
 
 
 class _Load(QRunnable):
-    def __init__(self, key: ShotKey, abspath: Path, ext: str, signals: _Signals):
+    def __init__(
+        self, generation: int, key: PreviewKey, abspath: Path, ext: str, signals
+    ):
         super().__init__()
-        self._args = (key, abspath, ext)
+        self._args = (generation, key, abspath, ext)
         self._signals = signals
 
     def run(self) -> None:
-        key, abspath, ext = self._args
+        generation, key, abspath, ext = self._args
         image = load_preview(abspath, ext)
-        self._signals.loaded.emit(key, _to_qimage(image) if image else None)
+        self._signals.loaded.emit(generation, key, _to_qimage(image) if image else None)
 
 
 class _Film(QWidget):
@@ -129,8 +133,9 @@ class BurstReview(QWidget):
         self._burst: Burst | None = None
         self._index = 0
         self.fit = True
-        self._cache: OrderedDict[ShotKey, QImage | None] = OrderedDict()
-        self._pending: set[ShotKey] = set()
+        self._cache: OrderedDict[PreviewKey, QImage | None] = OrderedDict()
+        self._pending: set[PreviewKey] = set()
+        self._generation = 0  # bumped by a root change: older loads are stale
         self._drag: QPoint | None = None
         # A child timer dies with the widget; a QTimer.singleShot would not.
         self._notice_timer = QTimer(self)
@@ -198,6 +203,15 @@ class BurstReview(QWidget):
     # -- API ---------------------------------------------------------------
     def wait(self, msecs: int = 5000) -> bool:
         return self._pool.waitForDone(msecs)
+
+    def set_root(self, root: Path) -> None:
+        """Read previews under ``root``; a new root forgets the old previews."""
+        root = Path(root)
+        if root != self._root:
+            self._root = root
+            self._cache.clear()
+            self._pending.clear()
+            self._generation += 1
 
     def shots(self) -> list[Shot]:
         return list(self._burst.shots) if self._burst else []
@@ -333,8 +347,12 @@ class BurstReview(QWidget):
             parts.append(f"ISO {shot.iso}")
         self.details.setText(" · ".join(parts))
 
+    @staticmethod
+    def _preview_key(shot: Shot) -> PreviewKey:
+        return shot.files[0].id, shot.files[0].mtime_ns
+
     def _load(self, shot: Shot) -> None:
-        key = shot.key
+        key = self._preview_key(shot)
         if key in self._cache:
             self._cache.move_to_end(key)
             return
@@ -343,18 +361,22 @@ class BurstReview(QWidget):
         self._pending.add(key)
         ref = shot.files[0]
         abspath = to_abspath(ref.relpath, self._root)
-        self._pool.start(_Load(key, abspath, ref.ext, self._signals))
+        self._pool.start(_Load(self._generation, key, abspath, ref.ext, self._signals))
 
-    def _on_loaded(self, key: ShotKey, image: QImage | None) -> None:
+    def _on_loaded(
+        self, generation: int, key: PreviewKey, image: QImage | None
+    ) -> None:
+        if generation != self._generation:
+            return  # read under a root that is no longer the gallery's
         self._pending.discard(key)
         self._cache[key] = image
         while len(self._cache) > CACHE_SIZE:
             self._cache.popitem(last=False)
-        if self._burst is not None and self._shot().key == key:
+        if self._burst is not None and self._preview_key(self._shot()) == key:
             self._draw_image()
 
     def _draw_image(self) -> None:
-        image = self._cache.get(self._shot().key, False)
+        image = self._cache.get(self._preview_key(self._shot()), False)
         if image is False or image is None or image.isNull():
             self.image_label.setPixmap(QPixmap())
             self.image_label.setText(LOADING if image is False else NO_PREVIEW)

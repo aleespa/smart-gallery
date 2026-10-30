@@ -128,3 +128,148 @@ def test_deleted_review_leaves_no_callbacks(review, qtbot, tmp_path):
     view.toggle(shots[0][0])
     view.click_shot(shots[1][1])
     qtbot.wait(mod.NOTICE_MS + 300)
+
+
+def _recording(monkeypatch, sizes=None):
+    """load_preview that records its paths; ``sizes`` pops one size per call."""
+    calls = []
+
+    def load(path, ext):
+        calls.append(path)
+        size = sizes.pop(0) if sizes else (40, 30)
+        if callable(size):
+            size = size()
+        return Image.new("RGB", size)
+
+    monkeypatch.setattr(mod, "load_preview", load)
+    return calls
+
+
+def _aspect(review):
+    pixmap = review.image_label.pixmap()
+    return round(pixmap.width() / pixmap.height(), 1)
+
+
+def _shown(review):
+    pixmap = review.image_label.pixmap()
+    return pixmap is not None and not pixmap.isNull()
+
+
+def test_root_change_clears_the_preview_cache(review, qtbot, tmp_path, monkeypatch):
+    calls = _recording(monkeypatch)
+    bursts, shots = _keys(review)
+    review.open_at(bursts[0].key, shots[0][0])
+    qtbot.waitUntil(lambda: _shown(review))
+    review.set_root(tmp_path)  # the same root: the cache stays
+    review.open_at(bursts[0].key, shots[0][0])
+    review.wait()
+    assert len(calls) == 1
+    other = tmp_path / "other"
+    review.set_root(other)
+    review.open_at(bursts[0].key, shots[0][0])
+    review.wait()
+    qtbot.waitUntil(lambda: _shown(review))
+    assert len(calls) == 2
+    assert calls[1].is_relative_to(other)
+
+
+def test_changed_file_is_loaded_again(review, qtbot, tmp_path, monkeypatch):
+    calls = _recording(monkeypatch)
+    bursts, shots = _keys(review)
+    review.open_at(bursts[0].key, shots[0][0])
+    qtbot.waitUntil(lambda: _shown(review))
+    first = review.shots()[0]
+    ref = first.files[0]
+    changed = Shot(
+        first.folder,
+        first.stem,
+        first.taken_ts,
+        first.camera,
+        (FileRef(ref.id, ref.relpath, ref.ext, ref.size_bytes, 9999, ref.media_type),),
+        None,
+        first.shutter,
+        first.aperture,
+        first.iso,
+    )
+    review.bursts_view.set_shots(
+        [
+            changed,
+            _shot(2, "a", 1),
+            _shot(3, "a", 2),
+            _shot(4, "b", 0),
+            _shot(5, "b", 1),
+        ],
+        tmp_path,
+    )
+    review.refresh()
+    review.wait()
+    assert len(calls) == 2
+
+
+def test_late_preview_for_an_old_file_is_not_shown(
+    review, qtbot, tmp_path, monkeypatch
+):
+    import threading
+
+    release = threading.Event()
+
+    def slow():
+        release.wait(5)
+        return (90, 30)  # aspect 3.0: the stale picture
+
+    _recording(monkeypatch, sizes=[slow, (20, 20)])  # then the new one, aspect 1.0
+    bursts, shots = _keys(review)
+    review.open_at(bursts[0].key, shots[0][0])  # the slow load starts
+    first = review.shots()[0]
+    ref = first.files[0]
+    changed = Shot(
+        first.folder,
+        first.stem,
+        first.taken_ts,
+        first.camera,
+        (FileRef(ref.id, ref.relpath, ref.ext, ref.size_bytes, 9999, ref.media_type),),
+        None,
+        first.shutter,
+        first.aperture,
+        first.iso,
+    )
+    review.bursts_view.set_shots(
+        [
+            changed,
+            _shot(2, "a", 1),
+            _shot(3, "a", 2),
+            _shot(4, "b", 0),
+            _shot(5, "b", 1),
+        ],
+        tmp_path,
+    )
+    review.refresh()
+    qtbot.waitUntil(lambda: _shown(review))
+    assert _aspect(review) == 1.0
+    release.set()
+    review.wait()
+    qtbot.wait(50)  # the late signal is delivered
+    assert _aspect(review) == 1.0
+
+
+def test_late_preview_from_an_old_root_is_not_shown(
+    review, qtbot, tmp_path, monkeypatch
+):
+    import threading
+
+    release = threading.Event()
+
+    def slow():
+        release.wait(5)
+        return (90, 30)
+
+    _recording(monkeypatch, sizes=[slow, (20, 20)])
+    bursts, shots = _keys(review)
+    review.open_at(bursts[0].key, shots[0][0])
+    review.set_root(tmp_path / "other")
+    review.refresh()
+    qtbot.waitUntil(lambda: _shown(review))
+    release.set()
+    review.wait()
+    qtbot.wait(50)
+    assert _aspect(review) == 1.0

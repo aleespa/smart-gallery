@@ -319,12 +319,14 @@ class StorageView(QWidget):
             self.tree_view.set_tree(result.tree, root)
             self.pairs_view.set_pairs(result.pairs, root, folder_sizes(result.tree))
             self.pairs_view.set_scope(None)
-            self.bursts_view.set_shots(result.shots, root)
             self.bursts_view.set_scope(None)
             if previous is not None:
                 index = self._find_folder(previous)
                 if index is not None:
                     self.tree_view.tree.setCurrentIndex(index)  # scopes the pairs
+            # After the scope is restored: a scope change clears the notice of
+            # marks the new data dropped.
+            self.bursts_view.set_shots(result.shots, root)
         finally:
             self._loading = False
         self._check_scope()

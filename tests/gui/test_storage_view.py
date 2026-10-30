@@ -718,3 +718,44 @@ def test_gallery_change_clears_marks_same_gallery_keeps(
         db_path = other.db_path
     _reload(qtbot, view, lambda: ctx.set_gallery(Gallery("u2", str(db_path), "o")))
     assert view.bursts_view.marks() == set()
+
+
+def _fill_three(repo, make_item, **first):
+    repo.upsert_many(
+        [
+            make_item("a/IMG_1.JPG", taken_ts=1_700_000_000, **first),
+            make_item("a/IMG_2.JPG", taken_ts=1_700_000_001),
+            make_item("a/IMG_3.JPG", taken_ts=1_700_000_002),
+        ]
+    )
+
+
+def test_reload_notice_shows_marks_dropped_by_a_change(qtbot, repo, make_item):
+    from smart_gallery.gui.storage.bursts_view import DROPPED
+
+    _fill_three(repo, make_item)
+    ctx = _ctx(repo)
+    view = _view(qtbot, ctx)
+    view.tree_view.tree.setCurrentIndex(_child(view, "a"))  # kept over the reload
+    key = _first_burst(view).shots[0].key
+    assert view.bursts_view.toggle(key)
+    _fill_three(repo, make_item, mtime_ns=1_800_000_000_000_000_000)
+    _reload(qtbot, view, ctx.catalog_updated.emit)
+    assert view.bursts_view.marks() == set()
+    assert view.bursts_view.scope() == "a"
+    assert DROPPED.format(n=1) in view.bursts_view.scope_label.text()
+
+
+def test_reload_notice_skips_marks_whose_files_went(qtbot, repo, make_item):
+    from smart_gallery.gui.storage.bursts_view import DROPPED
+
+    _fill_three(repo, make_item)
+    ctx = _ctx(repo)
+    view = _view(qtbot, ctx)
+    key = _first_burst(view).shots[0].key
+    assert view.bursts_view.toggle(key)
+    repo.delete_by_relpaths(["a/IMG_1.JPG"])  # the move went through
+    _reload(qtbot, view, ctx.catalog_updated.emit)
+    assert view.bursts_view.marks() == set()
+    assert DROPPED.format(n=1) not in view.bursts_view.scope_label.text()
+    assert "cleared" not in view.bursts_view.scope_label.text()

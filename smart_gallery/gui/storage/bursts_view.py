@@ -450,7 +450,10 @@ class BurstsView(QWidget):
         old = self._shots
         self._shots = {s.key: s for s in shots}
         self._regroup()
-        self._marks, self._dropped = reconcile_marks(old, self._marks, self._bursts)
+        before = self._marks
+        self._marks, _ = reconcile_marks(old, before, self._bursts)
+        # A shot gone from the catalog was moved away, not cleared: not counted.
+        self._dropped = sum(1 for k in before - self._marks if k in self._shots)
         if self._expanded not in {b.key for b in self._bursts}:
             self._expanded = None
         self._refresh()

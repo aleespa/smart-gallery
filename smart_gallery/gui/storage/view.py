@@ -259,6 +259,7 @@ class StorageView(QWidget):
     def showEvent(self, event) -> None:  # noqa: N802 (Qt API)
         super().showEvent(event)
         self.pairs_view.forget_thumb_requests()
+        self.bursts_view.forget_thumb_requests()
         if self._split_applied:
             return
         self._split_applied = True
@@ -284,6 +285,7 @@ class StorageView(QWidget):
         if uuid is not None and uuid == self._gallery_uuid:
             # The same gallery again (its drive came back or moved): reload it
             # like a catalog update and keep the choices and the scope.
+            self.bursts_view.forget_thumb_requests()
             self.reload()
             return
         self._gallery_uuid = uuid

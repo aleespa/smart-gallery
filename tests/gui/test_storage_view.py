@@ -759,3 +759,33 @@ def test_reload_notice_skips_marks_whose_files_went(qtbot, repo, make_item):
     assert view.bursts_view.marks() == set()
     assert DROPPED.format(n=1) not in view.bursts_view.scope_label.text()
     assert "cleared" not in view.bursts_view.scope_label.text()
+
+
+def test_burst_thumbnails_asked_again_when_page_is_shown(qtbot, repo, make_item):
+    from PySide6.QtCore import QObject, Signal
+
+    class Thumbs(QObject):
+        ready = Signal(str, int, str)
+
+        def __init__(self):
+            super().__init__()
+            self.ids = []
+
+        def request(self, root, media_id, *_args):
+            self.ids.append(media_id)
+
+    _fill_shots(repo, make_item)
+    ctx = _ctx(repo)
+    ctx.thumbs = Thumbs()
+    view = _view(qtbot, ctx)
+    view.right_switch[1].click()
+    view.resize(1000, 600)
+    view.show()
+    qtbot.waitExposed(view)
+    qtbot.waitUntil(lambda: bool(ctx.thumbs.ids))
+    first = list(ctx.thumbs.ids)
+    # The shared loader dropped its queue (cancel_pending) while away.
+    view.hide()
+    ctx.thumbs.ids.clear()
+    view.show()
+    qtbot.waitUntil(lambda: sorted(ctx.thumbs.ids) == sorted(first), timeout=2000)

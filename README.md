@@ -345,6 +345,21 @@ time.
 smart-gallery recycle E:/ --list recycle.txt
 ```
 
+### Storage page: pairs and bursts
+
+The desktop app's **Storage** page shows where the space goes (the size tree on
+the left) and, on the right, two lists you switch between: **RAW + JPEG pairs**
+and **Bursts**. Picking a folder in the tree scopes both lists.
+
+**Bursts.** A burst is a run of shots from the same folder and camera, each at
+most the *gap* after the one before (2 s by default, capped at 10 s).
+Expand a burst to see its shots, and mark the ones to remove; at least one shot
+of each burst always stays. **Review** opens a burst full size so you can step
+through it and mark or keep each shot (Esc goes back). Nothing happens until you
+confirm: marked shots (with their RAW, JPEG and sidecar files) go to the
+Recycle Bin through `recycle`, and can be restored from there. Marks you have
+not applied are lost if you leave the page, after one question.
+
 ### `rename` — name a gallery
 
 ```bash

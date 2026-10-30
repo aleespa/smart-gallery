@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMessageBox
 
 from smart_gallery.db import GalleryRepository
@@ -529,3 +530,191 @@ def test_thumbnails_asked_again_when_page_is_shown(qtbot, repo, make_item):
     ctx.thumbs.ids.clear()
     view.show()
     qtbot.waitUntil(lambda: sorted(ctx.thumbs.ids) == sorted(first))
+
+
+# -- bursts ------------------------------------------------------------------
+def _fill_shots(repo, make_item):
+    repo.upsert_many(
+        [
+            make_item("a/IMG_1.JPG", taken_ts=1_700_000_000),
+            make_item("a/IMG_2.JPG", taken_ts=1_700_000_001),
+            make_item("b/IMG_3.JPG", taken_ts=1_700_000_500),
+            make_item("b/IMG_4.JPG", taken_ts=1_700_000_501),
+        ]
+    )
+
+
+def _first_burst(view, folder=None):
+    return next(
+        b for b in view.bursts_view.bursts_in_scope() if folder in (None, b.folder)
+    )
+
+
+def _bursts_state(**state):
+    import json
+
+    path = app_data_dir() / STATE_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state), encoding="utf-8")
+
+
+def test_switch_shows_bursts_and_is_remembered(qtbot, repo, make_item):
+    _fill_shots(repo, make_item)
+    view = _view(qtbot, _ctx(repo))
+    pairs_button, bursts_button = view.right_switch
+    assert view.right_stack.currentWidget() is view.pairs_view
+    bursts_button.click()
+    assert view.right_stack.currentWidget() is view.bursts_view
+    assert load_json(view.state_path)["right"] == "bursts"
+    again = _view(qtbot, _ctx(repo, "u2"))
+    assert again.right_stack.currentWidget() is again.bursts_view
+    assert again.right_switch[1].isChecked()
+
+
+def test_tree_folder_scopes_bursts(qtbot, repo, make_item):
+    _fill_shots(repo, make_item)
+    view = _view(qtbot, _ctx(repo))
+    view.tree_view.tree.setCurrentIndex(_child(view, "a"))
+    assert view.bursts_view.scope() == "a"
+    view.right_switch[1].click()
+    assert view.bursts_view.scope() == "a"
+    view.bursts_view.show_all.click()
+    assert view.bursts_view.scope() is None
+    assert not view.tree_view.tree.currentIndex().isValid()
+
+
+def test_burst_move_starts_recycle_job(qtbot, repo, make_item, drive, monkeypatch):
+    _fill_shots(repo, make_item)
+    ctx = _ctx(repo)
+    ctx.jobs = _Jobs()
+    view = _view(qtbot, ctx)
+    view.right_switch[1].click()
+    burst = _first_burst(view)
+    shot = burst.shots[0]
+    assert view.bursts_view.toggle(shot.key)
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Yes
+    )
+    view.bursts_view.move_button.click()
+    (spec,) = ctx.jobs.specs
+    argv = spec.argvs[0]
+    assert argv[:3] == ("recycle", str(drive.resolve()), "--list")
+    wanted = [(f.relpath, f.size_bytes, f.mtime_ns) for f in shot.files]
+    got = [(e.relpath, e.size_bytes, e.mtime_ns) for e in read_list(Path(argv[3]))]
+    assert set(wanted) <= set(got)
+
+
+def test_gap_is_remembered(qtbot, repo, make_item):
+    from smart_gallery.storage.bursts import DEFAULT_GAP
+
+    _fill_shots(repo, make_item)
+    view = _view(qtbot, _ctx(repo))
+    assert view.bursts_view.gap() == DEFAULT_GAP
+    other = 4 if DEFAULT_GAP != 4 else 5
+    view.bursts_view.set_gap(other)
+    assert load_json(view.state_path)["burst_gap"] == other
+    again = _view(qtbot, _ctx(repo, "u2"))
+    assert again.bursts_view.gap() == other
+
+
+@pytest.mark.parametrize("bad", [0, 99, "x", 2.5, True, None, [3]])
+def test_bad_gap_and_right_fall_back(qtbot, repo, make_item, bad):
+    from smart_gallery.storage.bursts import DEFAULT_GAP
+
+    _bursts_state(burst_gap=bad, right=bad)
+    _fill_shots(repo, make_item)
+    view = _view(qtbot, _ctx(repo))
+    assert view.bursts_view.gap() == DEFAULT_GAP
+    assert view.right_stack.currentWidget() is view.pairs_view
+
+
+def test_leave_guard_counts_pair_choices_and_burst_marks(
+    qtbot, repo, make_item, monkeypatch
+):
+    _fill(repo, make_item)
+    repo.upsert_many(
+        [
+            make_item("a/S1.JPG", taken_ts=1_700_000_000),
+            make_item("a/S2.JPG", taken_ts=1_700_000_001),
+        ]
+    )
+    ctx = _ctx(repo)
+    view = _view(qtbot, ctx)
+    assert ctx.can_leave()  # nothing pending: no question
+    view.pairs_view.choose(view.data.pairs[0].key, KEEP_RAW)
+    assert view.bursts_view.toggle(_first_burst(view).shots[0].key)
+    asked = []
+
+    def answer(parent, title, text, *rest):
+        asked.append(text)
+        return (
+            QMessageBox.StandardButton.No
+            if len(asked) == 1
+            else (QMessageBox.StandardButton.Yes)
+        )
+
+    monkeypatch.setattr(QMessageBox, "question", answer)
+    assert not ctx.can_leave()
+    assert ctx.can_leave()
+    assert asked == ["You have 2 unapplied choices. Discard them?"] * 2
+    assert view.pairs_view.choices() == {} and view.bursts_view.marks() == set()
+
+
+def test_review_swaps_in_and_back(qtbot, repo, make_item):
+    _fill_shots(repo, make_item)
+    view = _view(qtbot, _ctx(repo))
+    view.right_switch[1].click()
+    burst = _first_burst(view)
+    view.bursts_view.review_requested.emit(burst.key, burst.shots[0].key)
+    assert view.stack.currentWidget() is view.review
+    qtbot.keyClick(view.review, Qt.Key.Key_Escape)
+    assert view.stack.currentWidget() is view.splitter
+    assert view.bursts_view.expanded() == burst.key
+    view.review.wait()
+
+
+def test_review_refreshes_on_data_and_leaves_with_the_drive(
+    qtbot, repo, make_item, tmp_path
+):
+    _fill_shots(repo, make_item)
+    ctx = _ctx(repo)
+    view = _view(qtbot, ctx)
+    burst = _first_burst(view)
+    view.bursts_view.review_requested.emit(burst.key, burst.shots[0].key)
+    _reload(qtbot, view, ctx.catalog_updated.emit)
+    assert view.stack.currentWidget() is view.review
+    gone = Gallery("uuid", str(tmp_path / "missing" / "gallery.db"), "test")
+    ctx.set_gallery(gone)
+    qtbot.waitUntil(lambda: view.stack.currentWidget() is view.message)
+    view.review.wait()
+
+
+def test_switching_lists_keeps_marks(qtbot, repo, make_item):
+    _fill_shots(repo, make_item)
+    view = _view(qtbot, _ctx(repo))
+    view.right_switch[1].click()
+    key = _first_burst(view).shots[0].key
+    view.bursts_view.toggle(key)
+    view.right_switch[0].click()
+    view.right_switch[1].click()
+    assert view.bursts_view.marks() == {key}
+
+
+def test_gallery_change_clears_marks_same_gallery_keeps(
+    qtbot, repo, make_item, tmp_path
+):
+    _fill_shots(repo, make_item)
+    ctx = _ctx(repo)
+    view = _view(qtbot, ctx)
+    key = _first_burst(view).shots[0].key
+    view.bursts_view.toggle(key)
+    again = Gallery("uuid", str(repo.db_path), "test")
+    _reload(qtbot, view, lambda: ctx.set_gallery(again))
+    assert view.bursts_view.marks() == {key}
+    other_root = tmp_path / "other"
+    other_root.mkdir()
+    with GalleryRepository.create(other_root, label="other") as other:
+        other.upsert_many([make_item("a/IMG_1.JPG", taken_ts=1_700_000_000)])
+        db_path = other.db_path
+    _reload(qtbot, view, lambda: ctx.set_gallery(Gallery("u2", str(db_path), "o")))
+    assert view.bursts_view.marks() == set()

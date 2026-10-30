@@ -1,8 +1,10 @@
-"""Storage area: where the space goes, and RAW + JPEG pairs stored twice.
+"""Storage area: where the space goes, RAW + JPEG pairs stored twice, bursts.
 
-The left column is the size tree (``StorageTreeView``), the right the pairs and
-their keep choices (``PairsView``). Clicking a folder on the left scopes the
-pairs on the right. The catalog is read off the GUI thread (``load_storage``);
+The left column is the size tree (``StorageTreeView``). The right shows one of
+two lists, switched at its top: the pairs and their keep choices
+(``PairsView``) or the bursts and their marks (``BurstsView``); a burst opens
+in ``BurstReview``, which takes over the page. Clicking a folder on the left
+scopes both lists. The catalog is read off the GUI thread (``load_storage``);
 the picture check runs on its own worker (``PairChecker``), only for the pairs
 in the selected folder; remembered verdicts show everywhere. Confirmed choices
 become a ``recycle`` job; nothing here writes the catalog or touches a file.
@@ -17,6 +19,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QModelIndex, Qt, QTimer
 from PySide6.QtWidgets import (
+    QHBoxLayout,
     QLabel,
     QMessageBox,
     QSplitter,
@@ -31,16 +34,25 @@ from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.jobspec import JOB_RUNNING, JobSpec
 from smart_gallery.gui.paths import app_data_dir
 from smart_gallery.gui.repo_query import RepoQuery
+from smart_gallery.gui.segment import segment
 from smart_gallery.gui.state_store import load_json, save_json
+from smart_gallery.gui.storage.burst_review import BurstReview
+from smart_gallery.gui.storage.bursts_view import BurstsView
 from smart_gallery.gui.storage.checker import PairChecker
-from smart_gallery.gui.storage.pairs_view import PairsView
+from smart_gallery.gui.storage.pairs_view import LEAVE, LEAVE_TITLE, PairsView
 from smart_gallery.gui.storage.tree_view import (
     GROUPING_LABELS,
     NODE_ROLE,
     StorageTreeView,
 )
 from smart_gallery.services.recycle import RecycleEntry, write_list
-from smart_gallery.storage.bursts import Shot, load_shots
+from smart_gallery.storage.bursts import (
+    DEFAULT_GAP,
+    MAX_GAP,
+    MIN_GAP,
+    Shot,
+    load_shots,
+)
 from smart_gallery.storage.pairs import FileRef, Pair, find_pairs
 from smart_gallery.storage.tree import (
     StorageTree,
@@ -49,7 +61,10 @@ from smart_gallery.storage.tree import (
     format_bytes,
 )
 
-STATE_FILE = "storage.json"  # {"grouping": "folder"|"type", "split": [int, int]}
+# {"grouping": "folder"|"type", "split": [int, int],
+#  "right": "pairs"|"bursts", "burst_gap": int}
+STATE_FILE = "storage.json"
+RIGHT_LABELS = {"pairs": "RAW + JPEG pairs", "bursts": "Bursts"}
 SAVE_DELAY_MS = 300  # a splitter drag is saved once it settles
 CHECKS_DIR = "pair_checks"  # app_data_dir() / CHECKS_DIR / f"{db_uuid}.json"
 LISTS_DIR = "recycle_lists"  # app_data_dir() / LISTS_DIR / f"{timestamp}.tsv"
@@ -90,6 +105,14 @@ def _valid_split(value) -> bool:
     )
 
 
+def _valid_gap(value) -> bool:
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and MIN_GAP <= value <= MAX_GAP
+    )
+
+
 class StorageView(QWidget):
     def __init__(self, ctx: AppContext, parent: QWidget | None = None):
         super().__init__(parent)
@@ -108,12 +131,28 @@ class StorageView(QWidget):
 
         self.tree_view = StorageTreeView()
         self.pairs_view = PairsView(ctx)
+        self.bursts_view = BurstsView(ctx)
+        self.review = BurstReview(self.bursts_view, Path())
         self.checker = PairChecker(self)
+
+        # The right column: the list switch above the list it shows.
+        self.right_box = QWidget()
+        switch, _group, self.right_switch = segment(*RIGHT_LABELS.values())
+        self.right_stack = QStackedWidget()
+        self.right_stack.addWidget(self.pairs_view)
+        self.right_stack.addWidget(self.bursts_view)
+        top = QHBoxLayout()
+        top.addWidget(switch)
+        top.addStretch(1)
+        column = QVBoxLayout(self.right_box)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.addLayout(top)
+        column.addWidget(self.right_stack, 1)
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.setChildrenCollapsible(False)
         self.splitter.addWidget(self.tree_view)
-        self.splitter.addWidget(self.pairs_view)
+        self.splitter.addWidget(self.right_box)
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 1)
 
@@ -122,6 +161,12 @@ class StorageView(QWidget):
         grouping = state.get("grouping")
         if isinstance(grouping, str) and grouping in GROUPING_LABELS:
             self.tree_view.set_grouping(grouping)
+        gap = state.get("burst_gap")
+        if _valid_gap(gap) and gap != DEFAULT_GAP:
+            self.bursts_view.set_gap(gap)  # no marks yet: no question
+        if state.get("right") == "bursts":
+            self.right_switch[1].setChecked(True)
+            self.right_stack.setCurrentWidget(self.bursts_view)
         split = state.get("split")
         # Applied on the first show, once the splitter has its width.
         self._split: list[int] | None = split if _valid_split(split) else None
@@ -133,9 +178,20 @@ class StorageView(QWidget):
         self.stack = QStackedWidget()
         self.stack.addWidget(self.splitter)
         self.stack.addWidget(self.message)
+        self.stack.addWidget(self.review)
         QVBoxLayout(self).addWidget(self.stack)
 
         self.tree_view.folder_selected.connect(self.pairs_view.set_scope)
+        self.tree_view.folder_selected.connect(self.bursts_view.set_scope)
+        for i, name in enumerate(RIGHT_LABELS):
+            self.right_switch[i].clicked.connect(
+                lambda _checked=False, n=name: self._show_right(n)
+            )
+        self.bursts_view.show_all.clicked.connect(self._clear_tree_selection)
+        self.bursts_view.move_requested.connect(self._on_move)
+        self.bursts_view.gap_changed.connect(self._save_state)
+        self.bursts_view.review_requested.connect(self._open_review)
+        self.review.closed.connect(self._close_review)
         self.tree_view.message.connect(self.caption.setText)
         self.tree_view.grouping_changed.connect(self._on_grouping)
         self.pairs_view.show_all.clicked.connect(self._clear_tree_selection)
@@ -158,7 +214,7 @@ class StorageView(QWidget):
         ctx.gallery_changed.connect(self._on_gallery_changed)
         ctx.catalog_updated.connect(self.reload)
 
-        guard = self.pairs_view.confirm_leave
+        guard = self._confirm_leave
         ctx.add_leave_guard(guard)
         checker = self.checker
 
@@ -169,6 +225,36 @@ class StorageView(QWidget):
 
         self.destroyed.connect(teardown)
         self.reload()
+
+    def _confirm_leave(self) -> bool:
+        """One question for the unapplied pair choices and burst marks."""
+        n = len(self.pairs_view.choices()) + len(self.bursts_view.marks())
+        if n == 0:
+            return True
+        yes, no = QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.No
+        answer = QMessageBox.question(
+            self, LEAVE_TITLE, LEAVE.format(n=n), yes | no, no
+        )
+        if answer != yes:
+            return False
+        self.pairs_view.clear_choices()
+        self.bursts_view.clear_marks()
+        return True
+
+    def _show_right(self, name: str) -> None:
+        view = self.bursts_view if name == "bursts" else self.pairs_view
+        self.right_stack.setCurrentWidget(view)
+        self._save_state()
+
+    def _open_review(self, burst, shot) -> None:
+        self.review.open_at(burst, shot)
+        if self.review.current() is not None:
+            self.stack.setCurrentWidget(self.review)
+
+    def _close_review(self, burst) -> None:
+        self.stack.setCurrentWidget(self.splitter)
+        if burst is not None:
+            self.bursts_view.set_expanded(burst)
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt API)
         super().showEvent(event)
@@ -203,8 +289,10 @@ class StorageView(QWidget):
         self._gallery_uuid = uuid
         self.checker.cancel_all()
         self.pairs_view.clear_choices()
+        self.bursts_view.clear_marks()
         self._fresh = True  # a new gallery starts on all folders
         self.pairs_view.set_scope(None)
+        self.bursts_view.set_scope(None)
         self.reload()
 
     def _on_data(self, result: StorageData) -> None:
@@ -213,13 +301,16 @@ class StorageView(QWidget):
         if result.tree is None:
             self.checker.cancel_all()
             self.pairs_view.set_pairs([], root)
+            self.bursts_view.set_shots([], root)
             self._root = root
+            self.review._root = root
             self._show_message(EMPTY)
             return
         # Keep the folder only when the same gallery reloaded and it is still there.
         previous = None if self._fresh else self._scope_folder()
         self._fresh = False
         self._root = root
+        self.review._root = root
         self.checker.cancel()  # its pairs are gone; the new scope decides
         # Remembered verdicts for every pair, read on the worker: cheap.
         self.checker.load_cached(result.pairs, self._cache_path())
@@ -228,6 +319,8 @@ class StorageView(QWidget):
             self.tree_view.set_tree(result.tree, root)
             self.pairs_view.set_pairs(result.pairs, root, folder_sizes(result.tree))
             self.pairs_view.set_scope(None)
+            self.bursts_view.set_shots(result.shots, root)
+            self.bursts_view.set_scope(None)
             if previous is not None:
                 index = self._find_folder(previous)
                 if index is not None:
@@ -235,6 +328,8 @@ class StorageView(QWidget):
         finally:
             self._loading = False
         self._check_scope()
+        if self.stack.currentWidget() is self.review:
+            self.review.refresh()
         self.caption.setText(
             CAPTION.format(
                 root=result.root_name,
@@ -242,7 +337,8 @@ class StorageView(QWidget):
                 files=result.tree.total_files,
             )
         )
-        self.stack.setCurrentWidget(self.splitter)
+        if self.stack.currentWidget() is not self.review:
+            self.stack.setCurrentWidget(self.splitter)
 
     def _check_scope(self, *_args) -> None:
         """Check the pictures of the folder in scope, and nothing else."""
@@ -304,6 +400,7 @@ class StorageView(QWidget):
         if selection is not None:
             selection.clear()  # emits folder_selected(None)
         self.pairs_view.set_scope(None)
+        self.bursts_view.set_scope(None)
 
     def _on_grouping(self, *_args) -> None:
         self._clear_tree_selection()
@@ -311,7 +408,17 @@ class StorageView(QWidget):
 
     def _save_state(self, *_args) -> None:
         self._save_timer.stop()  # this save covers a pending one
-        state = {"grouping": self.tree_view.grouping(), "split": self.splitter.sizes()}
+        right = (
+            "bursts"
+            if self.right_stack.currentWidget() is self.bursts_view
+            else "pairs"
+        )
+        state = {
+            "grouping": self.tree_view.grouping(),
+            "split": self.splitter.sizes(),
+            "right": right,
+            "burst_gap": self.bursts_view.gap(),
+        }
         try:
             save_json(self.state_path, state)
         except OSError as exc:  # e.g. the file is locked; the next save retries

@@ -110,3 +110,21 @@ def test_space_toggles_zoom(review, qtbot):
     assert review.fit is False
     qtbot.keyClick(review, Qt.Key.Key_Space)
     assert review.fit is True
+
+
+def test_deleted_review_leaves_no_callbacks(review, qtbot, tmp_path):
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    view = review.bursts_view
+    mine = BurstReview(view, tmp_path)  # not given to qtbot: deleted below
+    bursts, shots = _keys(review)
+    mine.open_at(bursts[1].key, shots[1][0])
+    qtbot.keyClick(mine, Qt.Key.Key_X)
+    qtbot.keyClick(mine, Qt.Key.Key_Right)
+    qtbot.keyClick(mine, Qt.Key.Key_X)  # refused: starts the notice timer
+    mine.wait()
+    mine.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    view.toggle(shots[0][0])
+    view.click_shot(shots[1][1])
+    qtbot.wait(mod.NOTICE_MS + 300)

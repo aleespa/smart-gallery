@@ -132,7 +132,11 @@ class BurstReview(QWidget):
         self._cache: OrderedDict[ShotKey, QImage | None] = OrderedDict()
         self._pending: set[ShotKey] = set()
         self._drag: QPoint | None = None
-        self._notice = 0
+        # A child timer dies with the widget; a QTimer.singleShot would not.
+        self._notice_timer = QTimer(self)
+        self._notice_timer.setSingleShot(True)
+        self._notice_timer.setInterval(NOTICE_MS)
+        self._notice_timer.timeout.connect(self._end_notice)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self.header = QLabel("")
@@ -277,15 +281,13 @@ class BurstReview(QWidget):
         if (shot in self.bursts_view.marks()) != marked:
             if not self.bursts_view.toggle(shot):
                 self._update_state()
-                self._notice += 1
                 self.details.setText(KEEP_ONE)
-                token = self._notice
-                QTimer.singleShot(NOTICE_MS, lambda: self._end_notice(token))
+                self._notice_timer.start()  # restarts a pending one
                 return
         self._update_state()
 
-    def _end_notice(self, token: int) -> None:
-        if token == self._notice and self._burst is not None:
+    def _end_notice(self) -> None:
+        if self._burst is not None:
             self._update_details()
 
     def _show(self) -> None:

@@ -185,3 +185,36 @@ def test_grouping_100k_rows_is_fast():
     start = time.perf_counter()
     group_bursts(shots)
     assert time.perf_counter() - start < 1.0
+
+
+def test_sidecar_stays_while_a_same_stem_file_is_outside_the_shot(repo, make_item):
+    _add(
+        repo,
+        make_item,
+        ("a/IMG_1.CR3", None),  # no capture time: not in the shot
+        ("a/IMG_1.JPG", 10),
+        ("a/IMG_2.JPG", 11),
+    )
+    repo.upsert_many([make_item("a/IMG_1.xmp", media_type="other")])
+    shot = next(s for s in load_shots(repo) if s.stem == "IMG_1")
+    assert [f.relpath for f in shot.files] == ["a/IMG_1.JPG"]
+    assert shot.sidecar is None
+    assert [f.relpath for f in burst_removals([shot])] == ["a/IMG_1.JPG"]
+
+
+def test_sidecar_stays_while_an_offloaded_file_shares_its_stem(repo, make_item):
+    _add(repo, make_item, ("a/IMG_1.CR3", 10), ("a/IMG_1.JPG", 10))
+    repo.upsert_many([make_item("a/IMG_1.xmp", media_type="other")])
+    repo.add_peer("working", Peer("peer", "D:/g.db"))
+    repo.add_offloaded(["a/IMG_1.CR3"], "peer")
+    (shot,) = load_shots(repo)
+    assert [f.relpath for f in shot.files] == ["a/IMG_1.JPG"]
+    assert shot.sidecar is None
+    assert [f.relpath for f in burst_removals([shot])] == ["a/IMG_1.JPG"]
+
+
+def test_sidecar_stays_while_another_kind_of_file_shares_its_stem(repo, make_item):
+    _add(repo, make_item, ("a/IMG_1.JPG", 10), ("a/IMG_1.MOV", 10))
+    repo.upsert_many([make_item("a/IMG_1.XMP", media_type="other")])
+    (shot,) = load_shots(repo)
+    assert shot.sidecar is None

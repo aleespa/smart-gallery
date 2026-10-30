@@ -6,7 +6,8 @@ into the exact list of files to send to the Recycle Bin. Nothing here touches
 the disk.
 
 One shot is one stem in one folder (case-insensitive): every image file with
-that stem (CR3 + JPG, JPG + HEIC...) plus its ``.xmp`` sidecar.
+that stem (CR3 + JPG, JPG + HEIC...) plus its ``.xmp`` sidecar, which only
+comes along when no other file of that stem stays behind.
 """
 
 from __future__ import annotations
@@ -78,7 +79,7 @@ _IMAGES = (
     f"SELECT {_COLUMNS}, taken_ts, camera, shutter_speed_text, aperture, iso "
     "FROM media_items WHERE media_type = 'image' AND taken_ts IS NOT NULL"
 )
-_SIDECARS = f"SELECT {_COLUMNS} FROM media_items WHERE lower(ext) = ?"
+_ALL = f"SELECT {_COLUMNS} FROM media_items"
 
 
 def _ref(row: sqlite3.Row) -> FileRef:
@@ -115,17 +116,28 @@ def load_shots(repo: GalleryRepository) -> list[Shot]:
             (folder, stem, row)
         )
 
+    # A sidecar belongs to the shot only when every other file of its stem
+    # (any kind, offloaded or without a capture time) is in the shot, as in
+    # pairs.resolve_removals: it goes only with the last file it describes.
     sidecars: dict[ShotKey, FileRef] = {}
-    for row in repo.conn.execute(_SIDECARS, (SIDECAR_EXT,)):
+    stem_ids: dict[ShotKey, set[int]] = {}
+    for row in repo.conn.execute(_ALL):
         folder, stem = _split(row["relpath"])
         key = (folder.casefold(), stem.casefold())
-        if key in groups and key not in sidecars:
-            sidecars[key] = _ref(row)
+        if key not in groups:
+            continue
+        if (row["ext"] or "").lower() == SIDECAR_EXT:
+            sidecars.setdefault(key, _ref(row))
+        else:
+            stem_ids.setdefault(key, set()).add(row["id"])
 
     shots: list[Shot] = []
     for key, members in groups.items():
         members.sort(key=lambda m: m[2]["relpath"].casefold())
         folder, stem, first = members[0]
+        sidecar = sidecars.get(key)
+        if sidecar is not None and not stem_ids[key] <= {m[2]["id"] for m in members}:
+            sidecar = None
         shots.append(
             Shot(
                 folder=folder,
@@ -133,7 +145,7 @@ def load_shots(repo: GalleryRepository) -> list[Shot]:
                 taken_ts=min(m[2]["taken_ts"] for m in members),
                 camera=next((m[2]["camera"] for m in members if m[2]["camera"]), None),
                 files=tuple(_ref(m[2]) for m in members),
-                sidecar=sidecars.get(key),
+                sidecar=sidecar,
                 shutter=first["shutter_speed_text"],
                 aperture=first["aperture"],
                 iso=first["iso"],

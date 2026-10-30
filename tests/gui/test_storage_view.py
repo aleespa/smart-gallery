@@ -91,6 +91,16 @@ def test_load_storage(repo, make_item, drive):
     assert [(p.folder, p.stem) for p in data.pairs] == [("a", "IMG_1"), ("b", "IMG_2")]
 
 
+def test_load_storage_includes_shots(repo, make_item):
+    repo.upsert_many(
+        [
+            make_item("a/IMG_1.JPG", taken_ts=1_700_000_000),
+            make_item("a/IMG_2.JPG", taken_ts=1_700_000_001),
+        ]
+    )
+    assert len(load_storage(repo).shots) == 2
+
+
 def test_page_shows_both_columns(qtbot, repo, make_item, drive):
     _fill(repo, make_item)
     view = _view(qtbot, _ctx(repo))

@@ -40,6 +40,7 @@ from smart_gallery.gui.storage.tree_view import (
     StorageTreeView,
 )
 from smart_gallery.services.recycle import RecycleEntry, write_list
+from smart_gallery.storage.bursts import Shot, load_shots
 from smart_gallery.storage.pairs import FileRef, Pair, find_pairs
 from smart_gallery.storage.tree import (
     StorageTree,
@@ -68,15 +69,16 @@ class StorageData:
     tree: StorageTree | None
     pairs: list[Pair]
     root_name: str
+    shots: list[Shot]
 
 
 def load_storage(repo: GalleryRepository) -> StorageData:
-    """Both size trees and the pairs, from the catalog alone. No Qt."""
+    """Size trees, pairs and shots, from the catalog alone. No Qt."""
     root = drive_root_of(repo.db_path)
     root_name = root.name or root.as_posix()
     df = repo.query_df()
     tree = build_storage(df[["relpath", "ext", "size_bytes"]], root_name)
-    return StorageData(tree, find_pairs(repo), root_name)
+    return StorageData(tree, find_pairs(repo), root_name, load_shots(repo))
 
 
 def _valid_split(value) -> bool:

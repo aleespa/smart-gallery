@@ -292,6 +292,9 @@ class StorageView(QWidget):
         self.checker.cancel_all()
         self.pairs_view.clear_choices()
         self.bursts_view.clear_marks()
+        self.review.reset()  # its burst belongs to the old gallery
+        if self.stack.currentWidget() is self.review:
+            self.stack.setCurrentWidget(self.splitter)
         self._fresh = True  # a new gallery starts on all folders
         self.pairs_view.set_scope(None)
         self.bursts_view.set_scope(None)
@@ -306,6 +309,7 @@ class StorageView(QWidget):
             self.bursts_view.set_shots([], root)
             self._root = root
             self.review.set_root(root)
+            self.review.reset()
             self._show_message(EMPTY)
             return
         # Keep the folder only when the same gallery reloaded and it is still there.

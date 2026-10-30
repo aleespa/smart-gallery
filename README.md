@@ -352,7 +352,9 @@ the left) and, on the right, two lists you switch between: **RAW + JPEG pairs**
 and **Bursts**. Picking a folder in the tree scopes both lists.
 
 **Bursts.** A burst is a run of shots from the same folder and camera, each at
-most the *gap* after the one before (2 s by default, capped at 10 s).
+most the *gap* after the one before. The gap is set at the top of the list,
+from 1 to 10 s (2 s by default). Whatever the gap, one burst spans at most
+10 s from its first shot to its last; a longer run is split into several bursts.
 Expand a burst to see its shots, and mark the ones to remove; at least one shot
 of each burst always stays. **Review** opens a burst full size so you can step
 through it and mark or keep each shot (Esc goes back). Nothing happens until you

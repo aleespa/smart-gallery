@@ -156,6 +156,8 @@ class BurstsDelegate(QStyledItemDelegate):
         self._view = view
         self._swallow = False  # the release that ends a double-click
         self._last: tuple[ShotKey, bool] | None = None  # last shot click, toggled
+        # What the press hit; a release acts only on that same target.
+        self._pressed: tuple | None = None
 
     # -- geometry ------------------------------------------------------------
     @staticmethod
@@ -205,7 +207,7 @@ class BurstsDelegate(QStyledItemDelegate):
 
     # -- painting ------------------------------------------------------------
     def _draw_thumb(self, painter, ref, box: QRect) -> None:
-        pixmap = self._view._thumb(ref)
+        pixmap = self._view.thumbnail(ref)
         if pixmap is None:
             painter.fillRect(box, QColor(*colors.TILE_BACK))
             return
@@ -325,11 +327,22 @@ class BurstsDelegate(QStyledItemDelegate):
         expanded = burst.key == self._view.expanded()
         shot = self.shot_at(option.rect, burst, pos) if expanded else None
         on_review = expanded and self.review_rect(option.rect).contains(pos)
+        on_header = not on_review and pos.y() < option.rect.top() + ROW_HEIGHT
+        if on_review:
+            target = (burst.key, "review")
+        elif shot is not None:
+            target = (burst.key, "shot", shot)
+        elif on_header:
+            target = (burst.key, "header")
+        else:
+            target = None
         if kind == QEvent.Type.MouseButtonPress:
             self._swallow = False
+            self._pressed = target
             return on_review or shot is not None  # these do not select the row
         if kind == QEvent.Type.MouseButtonDblClick:
             self._swallow = True
+            self._pressed = None
             if shot is not None:
                 if self._last is not None and self._last[0] == shot:
                     self._view.undo_click(shot, self._last[1])
@@ -339,11 +352,14 @@ class BurstsDelegate(QStyledItemDelegate):
         if self._swallow:
             self._swallow = False
             return True
+        pressed, self._pressed = self._pressed, None
+        if target is None or target != pressed:
+            return True  # pressed on one thing, released on another
         if on_review:
             self._view.review_requested.emit(burst.key, burst.shots[0].key)
         elif shot is not None:
             self._last = (shot, self._view.click_shot(shot))
-        elif pos.y() < option.rect.top() + ROW_HEIGHT:
+        elif on_header:
             self._view.set_expanded(None if expanded else burst.key)
         return True
 
@@ -353,6 +369,7 @@ class BurstsView(QWidget):
     review_requested = Signal(object, object)  # burst key, shot key
     scope_changed = Signal(object)  # str | None
     gap_changed = Signal(int)  # after it is applied
+    thumbs_changed = Signal()  # a thumbnail arrived
 
     def __init__(self, ctx, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -380,6 +397,7 @@ class BurstsView(QWidget):
         self.gap_box.setRange(MIN_GAP, MAX_GAP)
         self.gap_box.setSuffix(" s")
         self.gap_box.setValue(self._gap)
+        self.gap_box.setKeyboardTracking(False)  # typing "10" never applies 1
         self.gap_box.valueChanged.connect(self.set_gap)
         head = QHBoxLayout()
         head.addWidget(title)
@@ -659,7 +677,7 @@ class BurstsView(QWidget):
         self._requested.clear()
         self.list.viewport().update()
 
-    def _thumb(self, ref: FileRef) -> QPixmap | None:
+    def thumbnail(self, ref: FileRef) -> QPixmap | None:
         """The cached thumbnail, or None after asking for it."""
         key = (ref.id, ref.mtime_ns)
         pixmap = self._pixmaps.get(key)
@@ -692,3 +710,4 @@ class BurstsView(QWidget):
             while len(self._pixmaps) > PIXMAP_CACHE_SIZE:
                 self._pixmaps.popitem(last=False)
         self.list.viewport().update()
+        self.thumbs_changed.emit()

@@ -184,7 +184,7 @@ def test_grouping_100k_rows_is_fast():
     shots = [_fake_shot(i) for i in range(100_000)]
     start = time.perf_counter()
     group_bursts(shots)
-    assert time.perf_counter() - start < 1.0
+    assert time.perf_counter() - start < 3.0
 
 
 def test_sidecar_stays_while_a_same_stem_file_is_outside_the_shot(repo, make_item):

@@ -135,8 +135,8 @@ def _recording(monkeypatch, sizes=None):
     calls = []
 
     def load(path, ext):
-        calls.append(path)
         size = sizes.pop(0) if sizes else (40, 30)
+        calls.append(path)  # after the pop: a waiter sees its size taken
         if callable(size):
             size = size()
         return Image.new("RGB", size)
@@ -217,9 +217,11 @@ def test_late_preview_for_an_old_file_is_not_shown(
         release.wait(5)
         return (90, 30)  # aspect 3.0: the stale picture
 
-    _recording(monkeypatch, sizes=[slow, (20, 20)])  # then the new one, aspect 1.0
+    # then the new one, aspect 1.0
+    calls = _recording(monkeypatch, sizes=[slow, (20, 20)])
     bursts, shots = _keys(review)
     review.open_at(bursts[0].key, shots[0][0])  # the slow load starts
+    qtbot.waitUntil(lambda: len(calls) == 1)  # it took the slow size
     first = review.shots()[0]
     ref = first.files[0]
     changed = Shot(
@@ -263,9 +265,10 @@ def test_late_preview_from_an_old_root_is_not_shown(
         release.wait(5)
         return (90, 30)
 
-    _recording(monkeypatch, sizes=[slow, (20, 20)])
+    calls = _recording(monkeypatch, sizes=[slow, (20, 20)])
     bursts, shots = _keys(review)
     review.open_at(bursts[0].key, shots[0][0])
+    qtbot.waitUntil(lambda: len(calls) == 1)  # it took the slow size
     review.set_root(tmp_path / "other")
     review.refresh()
     qtbot.waitUntil(lambda: _shown(review))
@@ -273,3 +276,55 @@ def test_late_preview_from_an_old_root_is_not_shown(
     review.wait()
     qtbot.wait(50)
     assert _aspect(review) == 1.0
+
+
+def test_failed_preview_says_no_preview(review, qtbot, monkeypatch):
+    def broken(path, ext):
+        raise OSError("bad file")
+
+    monkeypatch.setattr(mod, "load_preview", broken)
+    bursts, shots = _keys(review)
+    review.open_at(bursts[0].key, shots[0][2])
+    qtbot.waitUntil(lambda: review.image_label.text() == mod.NO_PREVIEW)
+
+
+def test_film_scrolls_to_the_current_shot(qtbot, tmp_path, monkeypatch):
+    monkeypatch.setattr(mod, "load_preview", lambda p, e: Image.new("RGB", (40, 30)))
+    view = BurstsView(object())
+    qtbot.addWidget(view)
+    view.set_shots([_shot(i, "a", i // 6) for i in range(1, 55)], tmp_path)
+    r = BurstReview(view, tmp_path)
+    qtbot.addWidget(r)
+    r.resize(600, 500)
+    r.show()
+    qtbot.waitExposed(r)
+    (burst,) = view.bursts_in_scope()
+    assert len(burst.shots) == 54
+    r.open_at(burst.key, burst.shots[0].key)
+    bar = r.film_scroll.horizontalScrollBar()
+    assert r.film.width() > r.film_scroll.viewport().width()
+    assert bar.value() == 0
+    r.open_at(burst.key, burst.shots[-1].key)
+    assert bar.value() == bar.maximum() > 0
+    r.wait()
+
+
+def test_film_repaints_when_thumbnails_arrive(review, qtbot):
+    from PySide6.QtCore import QEvent, QObject
+
+    class Paints(QObject):
+        n = 0
+
+        def eventFilter(self, obj, event):  # noqa: N802
+            if event.type() == QEvent.Type.Paint:
+                Paints.n += 1
+            return False
+
+    bursts, shots = _keys(review)
+    review.open_at(bursts[0].key, shots[0][0])
+    qtbot.wait(50)
+    counter = Paints()
+    review.film.installEventFilter(counter)
+    Paints.n = 0
+    review.bursts_view.thumbs_changed.emit()
+    qtbot.waitUntil(lambda: Paints.n > 0, timeout=1000)

@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -72,8 +73,12 @@ class _Load(QRunnable):
 
     def run(self) -> None:
         generation, key, abspath, ext = self._args
-        image = load_preview(abspath, ext)
-        self._signals.loaded.emit(generation, key, _to_qimage(image) if image else None)
+        try:
+            image = load_preview(abspath, ext)
+            result = _to_qimage(image) if image else None
+        except Exception:  # any failure to read the file means no preview
+            result = None
+        self._signals.loaded.emit(generation, key, result)
 
 
 class _Film(QWidget):
@@ -85,6 +90,15 @@ class _Film(QWidget):
         super().__init__()
         self._review = review
         self.setFixedHeight(STRIP_THUMB + 2 * STRIP_GAP)
+
+    def fit_shots(self) -> None:
+        """As wide as every shot needs; the scroll area shows a part of it."""
+        self.setFixedWidth(
+            STRIP_GAP + len(self._review.shots()) * (STRIP_THUMB + STRIP_GAP)
+        )
+
+    def rect_of(self, i: int) -> QRect:
+        return self._rect(i)
 
     def _rect(self, i: int) -> QRect:
         x = STRIP_GAP + i * (STRIP_THUMB + STRIP_GAP)
@@ -104,7 +118,7 @@ class _Film(QWidget):
             box = self._rect(i)
             marked = shot.key in marks
             painter.setOpacity(0.35 if marked else 1.0)
-            pixmap = review.bursts_view._thumb(shot.files[0])
+            pixmap = review.bursts_view.thumbnail(shot.files[0])
             if pixmap is None:
                 painter.fillRect(box, QColor(*colors.TILE_BACK))
             else:
@@ -184,6 +198,22 @@ class BurstReview(QWidget):
 
         self.film = _Film(self)
         self.film.picked.connect(self._go)
+        bursts_view.thumbs_changed.connect(self.film.update)
+        self.film_scroll = QScrollArea()
+        self.film_scroll.setWidget(self.film)
+        self.film_scroll.setWidgetResizable(False)
+        self.film_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.film_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.film_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.film_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        bar = self.film_scroll.style().pixelMetric(
+            QStyle.PixelMetric.PM_ScrollBarExtent
+        )
+        self.film_scroll.setFixedHeight(self.film.height() + bar)
         hint = QLabel(KEYS)
         hint.setEnabled(False)
 
@@ -191,7 +221,7 @@ class BurstReview(QWidget):
         layout.addLayout(head)
         layout.addWidget(self.scroll, 1)
         layout.addLayout(info)
-        layout.addWidget(self.film)
+        layout.addWidget(self.film_scroll)
         layout.addWidget(hint)
 
         self._pool = QThreadPool(self)
@@ -212,6 +242,14 @@ class BurstReview(QWidget):
             self._cache.clear()
             self._pending.clear()
             self._generation += 1
+
+    def reset(self) -> None:
+        """Forget the open burst (a gallery change, an empty catalog)."""
+        self._burst = None
+        self._index = 0
+        self.image_label.setPixmap(QPixmap())
+        self.image_label.setText(LOADING)
+        self.film.fit_shots()
 
     def shots(self) -> list[Shot]:
         return list(self._burst.shots) if self._burst else []
@@ -319,7 +357,12 @@ class BurstReview(QWidget):
         )
         self.prev_button.setEnabled(pos > 0)
         self.next_button.setEnabled(pos < len(bursts) - 1)
+        self.film.fit_shots()
         self._update_state()
+        box = self.film.rect_of(self._index)
+        self.film_scroll.ensureVisible(
+            box.center().x(), box.center().y(), box.width(), 0
+        )
         self._load(self._shot())
         self._draw_image()
 

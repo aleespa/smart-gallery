@@ -789,3 +789,45 @@ def test_burst_thumbnails_asked_again_when_page_is_shown(qtbot, repo, make_item)
     ctx.thumbs.ids.clear()
     view.show()
     qtbot.waitUntil(lambda: sorted(ctx.thumbs.ids) == sorted(first), timeout=2000)
+
+
+def test_gallery_change_resets_the_review(qtbot, repo, make_item, tmp_path):
+    _fill_shots(repo, make_item)
+    ctx = _ctx(repo)
+    view = _view(qtbot, ctx)
+    burst = _first_burst(view)
+    view.bursts_view.review_requested.emit(burst.key, burst.shots[0].key)
+    assert view.stack.currentWidget() is view.review
+    other_root = tmp_path / "other"
+    other_root.mkdir()
+    with GalleryRepository.create(other_root, label="other") as other:
+        other.upsert_many(
+            [
+                make_item("a/IMG_1.JPG", taken_ts=1_700_000_000),
+                make_item("a/IMG_2.JPG", taken_ts=1_700_000_001),
+            ]
+        )
+        db_path = other.db_path
+    _reload(qtbot, view, lambda: ctx.set_gallery(Gallery("u2", str(db_path), "o")))
+    assert view.review.current() is None
+    assert view.stack.currentWidget() is view.splitter
+    view.review.wait()
+
+
+def test_empty_catalog_resets_the_review(qtbot, repo, make_item):
+    _fill_shots(repo, make_item)
+    ctx = _ctx(repo)
+    view = _view(qtbot, ctx)
+    burst = _first_burst(view)
+    view.bursts_view.review_requested.emit(burst.key, burst.shots[0].key)
+    repo.delete_by_relpaths(
+        [
+            s.files[0].relpath
+            for b in view.bursts_view.bursts_in_scope()
+            for s in b.shots
+        ]
+    )
+    _reload(qtbot, view, ctx.catalog_updated.emit)
+    assert view.data.tree is None
+    assert view.review.current() is None
+    view.review.wait()

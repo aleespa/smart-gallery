@@ -309,3 +309,53 @@ def test_review_only_on_expanded_row(shown, qtbot):
     _click(qtbot, shown, centre)
     assert seen == []
     assert shown.expanded() == burst.key  # it was a plain row click
+
+
+def test_gap_box_applies_once_typing_ends(view):
+    assert view.gap_box.keyboardTracking() is False
+
+
+def _press_release(qtbot, view, press, release):
+    vp = view.list.viewport()
+    qtbot.mousePress(vp, Qt.MouseButton.LeftButton, pos=press)
+    qtbot.mouseRelease(vp, Qt.MouseButton.LeftButton, pos=release)
+
+
+def test_press_and_release_on_different_targets_do_nothing(shown, qtbot):
+    burst = shown.model.rows[0]
+    shown.set_expanded(burst.key)
+    seen = []
+    shown.review_requested.connect(lambda *a: seen.append(a))
+    centre = shown.list.itemDelegate().review_rect(_rect(shown, 0)).center()
+    cell0, cell1 = _cell_pos(shown, 0, 0), _cell_pos(shown, 0, 1)
+    _press_release(qtbot, shown, cell0, cell1)  # one shot to another
+    _press_release(qtbot, shown, cell0, _row_pos(shown, 0))  # shot to header
+    _press_release(qtbot, shown, _row_pos(shown, 0), cell1)  # header to shot
+    _press_release(qtbot, shown, cell0, centre)  # shot to Review
+    _press_release(qtbot, shown, centre, cell1)  # Review to shot
+    assert shown.marks() == set()
+    assert seen == []
+    assert shown.expanded() == burst.key
+    _press_release(qtbot, shown, cell1, cell1)  # a real click still works
+    assert shown.marks() == {burst.shots[1].key}
+
+
+def test_thumbnails_ready_tell_listeners(qtbot, tmp_path):
+    from PySide6.QtCore import QObject, Signal
+
+    class Thumbs(QObject):
+        ready = Signal(str, int, str)
+
+        def request(self, *_args):
+            pass
+
+    class Ctx:
+        thumbs = Thumbs()
+
+    v = BurstsView(Ctx())
+    qtbot.addWidget(v)
+    shot = _shot(1, "a", 0)
+    v.set_shots([shot, _shot(2, "a", 1)], tmp_path)
+    assert v.thumbnail(shot.files[0]) is None  # asks for it
+    with qtbot.waitSignal(v.thumbs_changed):
+        Ctx.thumbs.ready.emit(str(tmp_path), shot.files[0].id, "")

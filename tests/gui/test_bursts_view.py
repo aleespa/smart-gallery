@@ -146,3 +146,133 @@ def test_confirm_leave(view, monkeypatch):
     assert asked == []
     view.toggle(view.bursts_in_scope()[0].shots[0].key)
     assert view.confirm_leave() is False
+
+
+# ── Task 4: expanding a burst ────────────────────────────────────────────────
+from PySide6.QtCore import QPoint, QRect  # noqa: E402
+
+from smart_gallery.gui.storage import bursts_view as bv  # noqa: E402
+
+
+@pytest.fixture
+def shown(view, qtbot):
+    view.resize(900, 700)
+    view.show()
+    qtbot.waitExposed(view)
+    return view
+
+
+def _rect(view, row):
+    return view.list.visualRect(view.model.index(row))
+
+
+def _click(qtbot, view, pos, double=False):
+    vp = view.list.viewport()
+    if double:
+        qtbot.mouseDClick(vp, Qt.MouseButton.LeftButton, pos=pos)
+    else:
+        qtbot.mouseClick(vp, Qt.MouseButton.LeftButton, pos=pos)
+
+
+def _row_pos(view, row):
+    r = _rect(view, row)
+    return QPoint(r.left() + 5, r.top() + 5)
+
+
+def _cell_pos(view, row, n):
+    burst = view.model.rows[row]
+    cell = view.list.itemDelegate().shot_at(_rect(view, row), burst, QPoint(0, 0))
+    assert cell is None
+    d = view.list.itemDelegate()
+    r = _rect(view, row)
+    for y in range(r.top(), r.bottom(), 4):
+        for x in range(r.left(), r.right(), 4):
+            if d.shot_at(r, burst, QPoint(x, y)) == burst.shots[n].key:
+                return QPoint(x, y)
+    raise AssertionError("cell not found")
+
+
+def test_click_row_expands_one_at_a_time(shown, qtbot):
+    b0, b1 = shown.model.rows
+    collapsed = shown.list.visualRect(shown.model.index(1)).height()
+    _click(qtbot, shown, _row_pos(shown, 0))
+    assert shown.expanded() == b0.key
+    assert _rect(shown, 0).height() > collapsed
+    _click(qtbot, shown, _row_pos(shown, 1))
+    assert shown.expanded() == b1.key
+    _click(qtbot, shown, _row_pos(shown, 1))
+    assert shown.expanded() is None
+
+
+def test_click_shot_toggles(shown, qtbot):
+    shown.set_expanded(shown.model.rows[0].key)
+    shot = shown.model.rows[0].shots[2]
+    pos = _cell_pos(shown, 0, 2)
+    _click(qtbot, shown, pos)
+    assert shown.marks() == {shot.key}
+    _click(qtbot, shown, pos)
+    assert shown.marks() == set()
+
+
+def test_review_button_and_double_click(shown, qtbot):
+    burst = shown.model.rows[0]
+    shown.set_expanded(burst.key)
+    d = shown.list.itemDelegate()
+    centre = d.review_rect(_rect(shown, 0)).center()
+    with qtbot.waitSignal(shown.review_requested) as sig:
+        _click(qtbot, shown, centre)
+    assert sig.args == [burst.key, burst.shots[0].key]
+    with qtbot.waitSignal(shown.review_requested) as sig:
+        _click(qtbot, shown, _cell_pos(shown, 0, 1), double=True)
+    assert sig.args == [burst.key, burst.shots[1].key]
+    shown.list.setCurrentIndex(shown.model.index(1))
+    with qtbot.waitSignal(shown.review_requested) as sig:
+        qtbot.keyClick(shown.list, Qt.Key.Key_Return)
+    other = shown.model.rows[1]
+    assert sig.args == [other.key, other.shots[0].key]
+
+
+def test_refused_toggle_shows_keep_one(shown, qtbot):
+    burst = shown.model.rows[1]
+    shown.set_expanded(burst.key)
+    shown.toggle(burst.shots[0].key)
+    shown.click_shot(burst.shots[1].key)
+    assert shown.refused() == burst.shots[1].key
+    qtbot.waitUntil(lambda: shown.refused() is None, timeout=3000)
+
+
+def test_collapsed_strip_fills_the_row(shown):
+    d = shown.list.itemDelegate()
+    assert d.strip_count(900, 12) > 4
+    assert d.strip_count(900, 3) == 3
+    assert d.strip_count(10, 12) == 1
+
+
+def test_clear_marks_clears_dropped_notice(view, tmp_path):
+    burst = view.bursts_in_scope()[0]
+    view.toggle(burst.shots[0].key)
+    shots = [
+        (
+            dataclasses.replace(
+                s, files=tuple(dataclasses.replace(f, mtime_ns=1) for f in s.files)
+            )
+            if s.key == burst.shots[0].key
+            else s
+        )
+        for b in view.bursts_in_scope()
+        for s in b.shots
+    ]
+    view.set_shots(shots, tmp_path)
+    assert DROPPED.format(n=1) in view.scope_label.text()
+    view.clear_marks()
+    assert "cleared" not in view.scope_label.text()
+
+
+def test_constants():
+    assert (bv.GRID_THUMB, bv.REVIEW, bv.KEEP_TAG, bv.REMOVE_TAG) == (
+        150,
+        "Review",
+        "keep",
+        "remove",
+    )
+    assert isinstance(QRect(), QRect)

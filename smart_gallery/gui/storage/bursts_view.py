@@ -10,7 +10,17 @@ from __future__ import annotations
 from collections import OrderedDict
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, QRect, QSize, Qt, Signal
+from PySide6.QtCore import (
+    QAbstractListModel,
+    QEvent,
+    QModelIndex,
+    QPoint,
+    QRect,
+    QSize,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -68,11 +78,20 @@ MOVE_TITLE = "Move to Recycle Bin"
 CONFIRM = "Move {n:,} files ({size}) to the Recycle Bin?"
 LEAVE_TITLE = "Unapplied choices"
 LEAVE = "You have {n:,} unapplied choices. Discard them?"
+REVIEW = "Review"
+KEEP_TAG = "keep"
+REMOVE_TAG = "remove"
 KEY_ROLE, BURST_ROLE, STATE_ROLE = (Qt.ItemDataRole.UserRole + i for i in (1, 2, 3))
 
 THUMB = 52
 PAD = 6
 ROW_HEIGHT = THUMB + 2 * PAD
+GRID_THUMB = 150
+LINE = 16
+CELL_H = GRID_THUMB + 3 * LINE + PAD
+TEXT_MIN = 300  # width kept for the texts beside the collapsed strip
+REVIEW_SIZE = QSize(76, 24)
+REFUSED_MS = 1500
 PIXMAP_CACHE_SIZE = 600
 _YES = QMessageBox.StandardButton.Yes
 _NO = QMessageBox.StandardButton.No
@@ -112,13 +131,82 @@ class _BurstsModel(QAbstractListModel):
         return None
 
 
+class _List(QListView):
+    def __init__(self, view: BurstsView) -> None:
+        super().__init__()
+        self._view = view
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt API)
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            burst = self.currentIndex().data(BURST_ROLE)
+            if burst is not None:
+                self._view.review_requested.emit(burst.key, burst.shots[0].key)
+                return
+        super().keyPressEvent(event)
+
+
 class BurstsDelegate(QStyledItemDelegate):
     def __init__(self, view: BurstsView) -> None:
         super().__init__(view.list)
         self._view = view
+        self._swallow = False  # the release that ends a double-click
+
+    # -- geometry ------------------------------------------------------------
+    @staticmethod
+    def columns(width: int) -> int:
+        return max(1, (width - PAD) // (GRID_THUMB + PAD))
+
+    @staticmethod
+    def strip_count(width: int, n: int) -> int:
+        """How many thumbnails fit beside the texts of a collapsed row."""
+        return max(1, min(n, (width - 2 * PAD - TEXT_MIN) // (THUMB + 4)))
+
+    def grid_height(self, burst: Burst, width: int) -> int:
+        rows = -(-len(burst.shots) // self.columns(width))
+        return rows * CELL_H + PAD
+
+    def cell_rect(self, option_rect: QRect, i: int) -> QRect:
+        cols = self.columns(option_rect.width())
+        row, col = divmod(i, cols)
+        return QRect(
+            option_rect.left() + PAD + col * (GRID_THUMB + PAD),
+            option_rect.top() + ROW_HEIGHT + row * CELL_H,
+            GRID_THUMB,
+            CELL_H - PAD,
+        )
+
+    def shot_at(self, option_rect: QRect, burst: Burst, pos: QPoint) -> ShotKey | None:
+        for i, shot in enumerate(burst.shots):
+            if self.cell_rect(option_rect, i).contains(pos):
+                return shot.key
+        return None
+
+    def review_rect(self, option_rect: QRect) -> QRect:
+        return QRect(
+            QPoint(
+                option_rect.right() - PAD - REVIEW_SIZE.width(),
+                option_rect.top() + ROW_HEIGHT // 2,
+            ),
+            REVIEW_SIZE,
+        )
 
     def sizeHint(self, option, index) -> QSize:  # noqa: N802 (Qt API)
-        return QSize(option.rect.width(), ROW_HEIGHT)
+        width = self._view.list.viewport().width() or option.rect.width()
+        burst: Burst = index.data(BURST_ROLE)
+        if burst is not None and burst.key == self._view.expanded():
+            return QSize(width, ROW_HEIGHT + self.grid_height(burst, width))
+        return QSize(width, ROW_HEIGHT)
+
+    # -- painting ------------------------------------------------------------
+    def _draw_thumb(self, painter, ref, box: QRect) -> None:
+        pixmap = self._view._thumb(ref)
+        if pixmap is None:
+            painter.fillRect(box, QColor(*colors.TILE_BACK))
+            return
+        size = pixmap.size().scaled(box.size(), Qt.AspectRatioMode.KeepAspectRatio)
+        target = QRect(0, 0, size.width(), size.height())
+        target.moveCenter(box.center())
+        painter.drawPixmap(target, pixmap)
 
     def paint(self, painter: QPainter, option, index) -> None:
         burst: Burst = index.data(BURST_ROLE)
@@ -134,25 +222,16 @@ class BurstsDelegate(QStyledItemDelegate):
             r = option.rect
             palette = option.palette
             x, top = r.left() + PAD, r.top() + PAD
-            for shot in burst.shots[:4]:
-                box = QRect(x, top, THUMB, THUMB)
-                pixmap = self._view._thumb(shot.files[0])
-                if pixmap is None:
-                    painter.fillRect(box, QColor(*colors.TILE_BACK))
-                else:
-                    size = pixmap.size().scaled(
-                        box.size(), Qt.AspectRatioMode.KeepAspectRatio
-                    )
-                    target = QRect(0, 0, size.width(), size.height())
-                    target.moveCenter(box.center())
-                    painter.drawPixmap(target, pixmap)
+            for shot in burst.shots[: self.strip_count(r.width(), len(burst.shots))]:
+                self._draw_thumb(painter, shot.files[0], QRect(x, top, THUMB, THUMB))
                 x += THUMB + 4
             text_left = x + PAD
             width = r.right() - PAD - text_left
-            line_h = r.height() // 2 - PAD
+            line_h = ROW_HEIGHT // 2 - PAD
             first = QRect(text_left, top, width, line_h)
-            second = QRect(text_left, top + line_h, width, line_h)
+            second = QRect(text_left, top + line_h, width - REVIEW_SIZE.width(), line_h)
             flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
             bold = QFont(option.font)
             bold.setBold(True)
             painter.setFont(bold)
@@ -164,15 +243,95 @@ class BurstsDelegate(QStyledItemDelegate):
             painter.drawText(
                 second, flags, f"{where} · {format_bytes(burst.size_bytes)}"
             )
-            marked = self._view.marked_in(burst)
-            painter.setPen(QColor(colors.KEEP) if marked else palette.mid().color())
-            painter.drawText(
-                first,
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                index.data(STATE_ROLE),
-            )
+            keep, rest = self._view.state_parts(burst)
+            if rest:
+                painter.setPen(palette.text().color())
+                painter.drawText(first, right, rest)
+                used = painter.fontMetrics().horizontalAdvance(rest)
+                first.setRight(first.right() - used)
+                painter.setPen(QColor(colors.KEEP))
+            else:
+                painter.setPen(palette.placeholderText().color())
+            painter.drawText(first, right, keep)
+            self._paint_review(painter, r, palette)
+            if burst.key == self._view.expanded():
+                for i, shot in enumerate(burst.shots):
+                    self._paint_cell(painter, option, burst, i, shot)
         finally:
             painter.restore()
+
+    def _paint_review(self, painter, r: QRect, palette) -> None:
+        box = self.review_rect(r)
+        painter.setPen(palette.mid().color())
+        painter.setBrush(palette.button())
+        painter.drawRoundedRect(box, 4, 4)
+        painter.setPen(palette.buttonText().color())
+        painter.drawText(box, Qt.AlignmentFlag.AlignCenter, REVIEW)
+
+    def _paint_cell(self, painter, option, burst: Burst, i: int, shot: Shot) -> None:
+        palette = option.palette
+        cell = self.cell_rect(option.rect, i)
+        marked = shot.key in self._view.marks()
+        painter.save()
+        painter.setOpacity(0.35 if marked else 1.0)
+        box = QRect(cell.left(), cell.top(), GRID_THUMB, GRID_THUMB)
+        self._draw_thumb(painter, shot.files[0], box)
+        painter.restore()
+        flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        line = QRect(cell.left(), cell.top() + GRID_THUMB, GRID_THUMB, LINE)
+        refused = self._view.refused() == shot.key
+        tag = KEEP_ONE if refused else (REMOVE_TAG if marked else KEEP_TAG)
+        bold = QFont(option.font)
+        bold.setBold(True)
+        painter.setFont(bold)
+        painter.setPen(QColor(colors.ERROR if marked or refused else colors.KEEP))
+        painter.drawText(line, flags, tag)
+        painter.setFont(option.font)
+        painter.setPen(palette.text().color())
+        offset = shot.taken_ts - burst.shots[0].taken_ts
+        name = painter.fontMetrics().elidedText(
+            f"{shot.stem} · +{offset} s", Qt.TextElideMode.ElideRight, GRID_THUMB
+        )
+        line.translate(0, LINE)
+        painter.drawText(line, flags, name)
+        if len(shot.files) > 1:
+            painter.setPen(palette.placeholderText().color())
+            line.translate(0, LINE)
+            painter.drawText(line, flags, shot.formats)
+
+    # -- input ---------------------------------------------------------------
+    def editorEvent(self, event, model, option, index) -> bool:  # noqa: N802
+        kind = event.type()
+        if kind not in (
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.MouseButtonRelease,
+            QEvent.Type.MouseButtonDblClick,
+        ):
+            return False
+        burst: Burst | None = index.data(BURST_ROLE)
+        if burst is None or event.button() != Qt.MouseButton.LeftButton:
+            return False
+        pos = event.position().toPoint()
+        expanded = burst.key == self._view.expanded()
+        shot = self.shot_at(option.rect, burst, pos) if expanded else None
+        on_review = self.review_rect(option.rect).contains(pos)
+        if kind == QEvent.Type.MouseButtonPress:
+            return on_review or shot is not None  # these do not select the row
+        if kind == QEvent.Type.MouseButtonDblClick:
+            self._swallow = True
+            if shot is not None:
+                self._view.review_requested.emit(burst.key, shot)
+            return True
+        if self._swallow:
+            self._swallow = False
+            return True
+        if on_review:
+            self._view.review_requested.emit(burst.key, burst.shots[0].key)
+        elif shot is not None:
+            self._view.click_shot(shot)
+        elif pos.y() < option.rect.top() + ROW_HEIGHT:
+            self._view.set_expanded(None if expanded else burst.key)
+        return True
 
 
 class BurstsView(QWidget):
@@ -191,6 +350,7 @@ class BurstsView(QWidget):
         self._gap = DEFAULT_GAP
         self._scope: str | None = None
         self._dropped = 0
+        self._refused: ShotKey | None = None
         self._expanded: ShotKey | None = None
         self._root = Path()
         self._pixmaps: OrderedDict[tuple[int, int | None], QPixmap] = OrderedDict()
@@ -223,7 +383,7 @@ class BurstsView(QWidget):
         scope.addWidget(self.show_all)
 
         self.model = _BurstsModel(self)
-        self.list = QListView()
+        self.list = _List(self)
         self.list.setModel(self.model)
         self.list.setItemDelegate(BurstsDelegate(self))
         self.list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -346,6 +506,9 @@ class BurstsView(QWidget):
 
     def clear_marks(self) -> None:
         self._marks.clear()
+        if self._dropped:
+            self._dropped = 0
+            self._update_scope_label()
         self.list.viewport().update()
         self._update_footer()
 
@@ -366,19 +529,39 @@ class BurstsView(QWidget):
 
     def set_expanded(self, burst: ShotKey | None) -> None:
         self._expanded = burst
+        self.list.doItemsLayout()
         row = None if burst is None else self.model.row_of(burst)
         if row is not None:
             self.list.scrollTo(self.model.index(row))
         self.list.viewport().update()
 
-    def state_text(self, burst: Burst) -> str:
+    def refused(self) -> ShotKey | None:
+        """The shot whose tag reads "keep at least one" for a moment."""
+        return self._refused
+
+    def click_shot(self, shot: ShotKey) -> None:
+        if self.toggle(shot):
+            return
+        self._refused = shot
+        QTimer.singleShot(REFUSED_MS, self._clear_refused)
+        self.list.viewport().update()
+
+    def _clear_refused(self) -> None:
+        self._refused = None
+        self.list.viewport().update()
+
+    def state_parts(self, burst: Burst) -> tuple[str, str]:
+        """The state text split into its keeping part and the rest."""
         n, m = len(burst.shots), self.marked_in(burst)
         if not m:
-            return NOT_DECIDED
+            return NOT_DECIDED, ""
         size = format_bytes(
             sum(s.size_bytes for s in burst.shots if s.key in self._marks)
         )
-        return f"{KEEPING.format(k=n - m, n=n)} · {REMOVING.format(n=m, size=size)}"
+        return KEEPING.format(k=n - m, n=n), f" · {REMOVING.format(n=m, size=size)}"
+
+    def state_text(self, burst: Burst) -> str:
+        return "".join(self.state_parts(burst))
 
     # ── internals ───────────────────────────────────────────────────────────
     def _show_gap(self) -> None:
@@ -470,8 +653,8 @@ class BurstsView(QWidget):
             self._missing.add(key)
         else:
             self._pixmaps[key] = pixmap.scaled(
-                THUMB,
-                THUMB,
+                GRID_THUMB,
+                GRID_THUMB,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )

@@ -353,11 +353,13 @@ def test_sort_direction_button_matches_sort_box_height(qtbot, repo):
     assert view.descending.height() == view.sort.height()
 
 
-def test_folder_tree_uses_a_compact_indent(qtbot, repo):
+def test_folder_tree_indent_clears_the_selection_bar(qtbot, repo):
     from smart_gallery.gui.library.view import TREE_INDENT
 
     view, _ = _view(qtbot, repo.db_path)
-    assert view.tree.indentation() == TREE_INDENT < 20
+    # Windows 11 draws a selection bar at the row's left edge; under 20 px the
+    # expand arrow sits on top of it.
+    assert view.tree.indentation() == TREE_INDENT >= 20
 
 
 def test_fitted_size_follows_the_image_shape():
@@ -414,3 +416,21 @@ def test_viewer_window_matches_each_photo_shape(qtbot, repo, make_item):
     capped = viewer.width() >= int(screen * FIT_SCREEN_MAX) - 2
     assert abs(viewer.image.height() - height) <= 2 or capped
     assert viewer.image.width() > viewer.image.height()
+
+
+def test_filters_hide_behind_a_strip_and_come_back(qtbot, repo):
+    view, _ = _view(qtbot, repo.db_path)
+    view.show()
+    assert view.filters.isVisible() and not view.filters_strip.isVisible()
+    view.hide_filters_btn.click()
+    assert not view.filters.isVisible() and view.filters_strip.isVisible()
+    view.filters_strip.click()
+    assert view.filters.isVisible() and not view.filters_strip.isVisible()
+
+
+def test_sync_options_sit_right_of_sort(qtbot, repo):
+    view, _ = _view(qtbot, repo.db_path)
+    layout = view.header_controls.layout()
+    widgets = [layout.itemAt(i).widget() for i in range(layout.count())]
+    assert widgets.index(view.sort) < widgets.index(view.mirror_btn)
+    assert view.mirror_btn.text() == "Sync options"

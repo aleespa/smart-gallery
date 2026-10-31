@@ -30,6 +30,7 @@ from PySide6.QtGui import (
     QStandardItemModel,
 )
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -73,6 +74,11 @@ SORTS = (("Date taken", "date", True), ("Name", "name", False), ("Size", "size",
 ASCENDING_ARROW = "↑"
 DESCENDING_ARROW = "↓"
 PATH_ROLE = Qt.ItemDataRole.UserRole + 1
+HIDE_FILTERS_TEXT = "«"
+HIDE_FILTERS_TIP = "Hide the filters"
+SHOW_FILTERS_TIP = "Show the filters"
+FILTERS_STRIP_TEXT = "Filters"
+STRIP_WIDTH = 28
 
 NO_GALLERY = "Open or create a gallery to browse it here."
 DISCONNECTED = "Drive not connected. Plug in {label} to browse it."
@@ -321,6 +327,52 @@ def _tree_items(node: FolderNode, label: str) -> QStandardItem:
     return item
 
 
+class CollapsedStrip(QAbstractButton):
+    """A slim bar with its label running bottom to top; it stands in for a
+    hidden panel and brings it back when clicked."""
+
+    def __init__(self, text: str, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setText(text)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedWidth(STRIP_WIDTH)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+
+    def sizeHint(self) -> QSize:
+        return QSize(STRIP_WIDTH, self.fontMetrics().horizontalAdvance(self.text()))
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        palette = self.palette()
+        back = palette.color(QPalette.ColorRole.Button)
+        if self.isDown():
+            back = back.darker(115)
+        elif self.underMouse():
+            back = back.lighter(125)
+        painter.setPen(palette.color(QPalette.ColorRole.Mid))
+        painter.setBrush(back)
+        painter.drawRoundedRect(
+            QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 4, 4
+        )
+        painter.setPen(palette.color(QPalette.ColorRole.ButtonText))
+        painter.translate(0, self.height())
+        painter.rotate(-90)
+        # Rotated, x runs up the bar and y across it; the label starts at the top.
+        width = self.fontMetrics().horizontalAdvance(self.text())
+        top = QRectF(self.height() - width - 12, 0, width, self.width())
+        painter.drawText(top, Qt.AlignmentFlag.AlignCenter, self.text())
+        painter.end()
+
+    def enterEvent(self, event) -> None:
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self.update()
+        super().leaveEvent(event)
+
+
 class LibraryView(QWidget):
     def __init__(self, ctx: AppContext, parent: QWidget | None = None):
         super().__init__(parent)
@@ -362,27 +414,31 @@ class LibraryView(QWidget):
         )
         self.descending.setChecked(SORTS[0][2])
         self._show_direction(SORTS[0][2])
-        self.filters_btn = QToolButton()
-        self.filters_btn.setText("Filters")
-        self.filters_btn.setCheckable(True)
-        self.filters_btn.setChecked(True)
-        self.filters_btn.setSizePolicy(
+        # The filter panel hides itself with « in its top row; while hidden, a
+        # slim strip in its place brings it back.
+        self.hide_filters_btn = QToolButton()
+        self.hide_filters_btn.setText(HIDE_FILTERS_TEXT)
+        self.hide_filters_btn.setToolTip(HIDE_FILTERS_TIP)
+        self.hide_filters_btn.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
         )
+        self.filters.top_row.addWidget(self.hide_filters_btn)
+        self.filters_strip = CollapsedStrip(FILTERS_STRIP_TEXT)
+        self.filters_strip.setToolTip(SHOW_FILTERS_TIP)
+        self.filters_strip.setVisible(False)
         # The main window moves these to the right of its page header; a view
         # shown on its own keeps them above the grid.
         self.header_controls = QWidget()
         header = QHBoxLayout(self.header_controls)
         header.setContentsMargins(0, 0, 0, 0)
         header.addWidget(self.stats)
-        header.addSpacing(12)
-        self.mirror_btn = MirrorButton(ctx)
-        header.addWidget(self.mirror_btn)
-        header.addWidget(self.filters_btn)
-        header.addSpacing(12)
+        header.addSpacing(16)
         header.addWidget(QLabel("Sort by"))
         header.addWidget(self.sort)
         header.addWidget(self.descending)
+        header.addSpacing(16)
+        self.mirror_btn = MirrorButton(ctx)
+        header.addWidget(self.mirror_btn)
 
         self.grid = GroupedGrid()
         self.grid.setIconSize(QSize(ICON_EDGE, ICON_EDGE))
@@ -405,9 +461,11 @@ class LibraryView(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left)
         splitter.addWidget(self.filters)
+        splitter.addWidget(self.filters_strip)
         splitter.addWidget(right)
-        splitter.setStretchFactor(2, 1)
-        splitter.setSizes([220, PANEL_WIDTH, 800])
+        splitter.setStretchFactor(3, 1)
+        splitter.setCollapsible(2, False)  # else the strip shows at width 0
+        splitter.setSizes([220, PANEL_WIDTH, 0, 800])
         QVBoxLayout(self).addWidget(splitter)
 
         self._thumb_timer = QTimer(self)
@@ -420,7 +478,8 @@ class LibraryView(QWidget):
         self.sort.currentIndexChanged.connect(self._on_sort_changed)
         self.descending.toggled.connect(self._show_direction)
         self.descending.toggled.connect(self.reload_rows)
-        self.filters_btn.toggled.connect(self.filters.setVisible)
+        self.hide_filters_btn.clicked.connect(lambda: self.set_filters_shown(False))
+        self.filters_strip.clicked.connect(lambda: self.set_filters_shown(True))
         self.grid.doubleClicked.connect(self.open_viewer)
         self.grid_model.rowsInserted.connect(self._schedule_thumbs)
         self.grid.groups_toggled.connect(self._schedule_thumbs)
@@ -437,6 +496,11 @@ class LibraryView(QWidget):
             ctx.thumbs.ready.connect(self._on_thumb_ready)
 
         self.reload()
+
+    def set_filters_shown(self, shown: bool) -> None:
+        """Show the filter panel, or hide it behind the slim Filters strip."""
+        self.filters.setVisible(shown)
+        self.filters_strip.setVisible(not shown)
 
     # ── loading ─────────────────────────────────────────────────────────────
     def reload(self, *_args) -> None:

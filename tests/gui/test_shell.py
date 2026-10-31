@@ -12,8 +12,8 @@ def test_every_area_is_a_tab(qtbot):
         "Stats",
         "Storage",
         "People",
-        "Actions",
         "History",
+        "Advanced",
     ]
 
 

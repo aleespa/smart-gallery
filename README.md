@@ -209,7 +209,7 @@ smart-gallery bring-back E:/ --date-end 2019-12-31
   (`scan-faces`, `label-faces`, `merge-persons`, …) refuse on a mirror; its face
   data is a copy that each sync refreshes.
 
-In the desktop app the Library header has a **Mirror** button with the same
+In the desktop app the Library header has a **Sync options** button with the same
 actions (sync with a preview dialog that lists the files of each kind, free
 up, bring back, pair). Each sync or free-up runs exactly what its preview
 showed (`--expect-plan`).

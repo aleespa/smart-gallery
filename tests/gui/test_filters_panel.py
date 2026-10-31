@@ -207,13 +207,12 @@ def test_there_is_no_apply_button(qtbot, repo, make_item):
     assert "Apply" not in texts
 
 
-def test_clear_sits_in_the_column_below_the_filters(qtbot, repo, make_item):
+def test_clear_is_pinned_above_the_scrolling_filters(qtbot, repo, make_item):
     panel, ctx = _shown(qtbot, repo, make_item)
     button = panel.clear_btn
-    assert panel.scroll.widget().isAncestorOf(button)
-    exposure = panel.texts["max_shutter"]
-    below = exposure.mapTo(panel, exposure.rect().bottomLeft()).y()
-    assert button.mapTo(panel, button.rect().topLeft()).y() > below
+    assert not panel.scroll.isAncestorOf(button)  # never scrolls out of view
+    above = panel.scroll.mapTo(panel, panel.scroll.rect().topLeft()).y()
+    assert button.mapTo(panel, button.rect().bottomLeft()).y() <= above
 
     panel.cameras.pick("Sony A7")
     panel.apply()
@@ -277,3 +276,10 @@ def test_people_match_switch_roundtrip(qtbot, repo, make_item):
     assert options.people == ["Ann", "Bo"]
     panel.set_values(FilterValues(people=("Ann", "Bo")))
     assert panel.values().people_match == "any"
+
+
+def test_people_come_before_cameras(qtbot, repo, make_item):
+    panel, _ = _shown(qtbot, repo, make_item)
+    layout = panel.scroll.widget().layout()
+    order = [layout.itemAt(i).widget() for i in range(layout.count())]
+    assert order.index(panel.people_box) < order.index(panel._boxes["cameras"])

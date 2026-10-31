@@ -215,13 +215,13 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   `MainWindow` builds each area on its first visit and shows each as a tab in
   the top bar. Every page sits under a header that names it; a page that exposes a `header_controls`
   widget gets those controls on the header's right (Library's sort and
-  filters).
+  Sync options; its filter panel hides behind a slim strip instead).
 - **No system frame.** `MainWindow` is frameless: its top bar is a
   `gui/titlebar.py:TitleBar` (drag to move, double-click to maximize) with
   `WindowButtons` at the right, and a `ResizeFrame` margin resizes it. Moving
   and resizing use `startSystemMove`/`startSystemResize`, so snapping works.
-- **Mirror button.** `gui/mirror/` (`menu.py`, `dialogs.py`) is the Library
-  header's Mirror menu: sync (preview dialog with per-class file lists), free
+- **Sync options button.** `gui/mirror/` (`menu.py`, `dialogs.py`) is the
+  Library header's Sync options menu (`MirrorButton`, a QPushButton): sync (preview dialog with per-class file lists), free
   up, bring back, pair. It acts only on its own dry run, reads that dry run's
   `--plan-out` JSON, and passes it to the real run as `--expect-plan`. No new
   area.

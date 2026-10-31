@@ -23,7 +23,7 @@ look different, but the controls are the same.
 10. [Storage: where the space goes](#10-storage-where-the-space-goes)
 11. [People: finding photos by who is in them](#11-people-finding-photos-by-who-is-in-them)
 12. [Two drives: a working copy and a mirror](#12-two-drives-a-working-copy-and-a-mirror)
-13. [Actions and History: jobs](#13-actions-and-history-jobs)
+13. [Advanced and History: jobs](#13-advanced-and-history-jobs)
 14. [The command line](#14-the-command-line)
 15. [Where your data lives](#15-where-your-data-lives)
 16. [Troubleshooting and questions](#16-troubleshooting-and-questions)
@@ -158,12 +158,12 @@ From top to bottom:
 
 - **Top bar.** The *Smart Gallery* name, the **gallery button** (which
   gallery is open; click it to switch, add or create one), then one **tab per
-  page**: Library, Import / Export, Stats, Storage, People, Actions, History. The
+  page**: Library, Import / Export, Stats, Storage, People, History, Advanced. The
   buttons at the far right minimise, maximise and close the window. Drag the
   top bar to move the window; double-click it to maximise.
 - **Page header.** The open gallery's name in small capitals, the page title,
   and on the right the page's own controls (in the Library: item count,
-  **Mirror**, **Filters**, **Sort by**).
+  **Sort by**, **Sync options**).
 - **The page** itself.
 - **Status bar** at the bottom. While a job runs it shows the job's title,
   its current step, live counts and a **Cancel** button. When nothing runs it
@@ -250,7 +250,9 @@ screen. **Show in Explorer** opens the file's folder with the file selected.
 
 ### Filters
 
-Press **Filters** in the header to show or hide the filter panel.
+The filter panel sits between the folder tree and the photos. Press **«** at
+its top to hide it; a slim **Filters** strip stays in its place, and clicking
+it brings the panel back.
 
 ![The Library with the filter panel open](images/library-filters.png)
 
@@ -258,15 +260,15 @@ Press **Filters** in the header to show or hide the filter panel.
 |---|---|
 | **Date taken** | Only items taken between two dates (either end can be left empty). |
 | **Type** | Photos, Videos, Other files. None ticked means all. |
+| **People** | (with face recognition) photos with *any* or *all* of the chosen people. |
 | **Cameras**, **Lenses** | Tick one or more; the search box narrows long lists. |
 | **File extensions** | For example only `.CR3`, or only `.JPG`. |
 | **Exposure** | Aperture, ISO and shutter-speed ranges. |
-| **People** | (with face recognition) photos with *any* or *all* of the chosen people. |
 
 All active filters apply together: *Canon EOS R6* **and** *2024* **and**
 *ISO 1600 or more*. A camera, lens or exposure filter leaves out videos and
-other files, because they have no such values. **Clear all filters** resets
-everything. The **Stats** page uses the same filters, so a filter you set in
+other files, because they have no such values. **Clear all filters**, pinned
+at the top of the panel, resets everything. The **Stats** page uses the same filters, so a filter you set in
 the Library also shapes the charts.
 
 ### Greyed-out items
@@ -388,7 +390,7 @@ you add, delete, rename or edit files **outside** the app (in File Explorer,
 in a photo editor, from another program), run a **sync** so the catalog
 catches up:
 
-- In the app: **Actions** page, choose **sync**, press **Run**.
+- In the app: **Advanced** page, choose **sync**, press **Run**.
 - From a command prompt: `smart-gallery sync E:\`
 
 Sync is quick: it compares each file's size and modification time with the
@@ -555,9 +557,10 @@ What a sync does and does not do:
 - Nothing on the mirror is deleted outright, and nothing happens without a
   **preview** you confirm first.
 
-All mirror actions are in the **Mirror** button in the Library header.
+All mirror actions are in the **Sync options** button at the right of the
+Library header.
 
-![The Mirror menu](images/mirror-menu.png)
+![The Sync options menu](images/mirror-menu.png)
 
 ### Step 1: pair the drives (once)
 
@@ -659,13 +662,13 @@ and the next sync copies the files across.
 
 ---
 
-## 13. Actions and History: jobs
+## 13. Advanced and History: jobs
 
-### Actions
+### Advanced
 
-![The Actions page](images/area-actions.png)
+![The Advanced page](images/area-actions.png)
 
-The **Actions** page offers every Smart Gallery command as a form: pick a
+The **Advanced** page (the last tab) offers every Smart Gallery command as a form: pick a
 command on the left, fill in its options, press **Run**. Required fields are
 marked with `*`, each option has a short explanation under it, and the line at
 the bottom shows the exact command that will run. **Copy as CLI command**
@@ -697,7 +700,7 @@ repeats it with the same options.
 ## 14. The command line
 
 Everything the app does is also available as a command, which is handy for
-scripts or remote use. The app's [Actions page](#13-actions-and-history-jobs)
+scripts or remote use. The app's [Advanced page](#13-advanced-and-history-jobs)
 shows the command for any form.
 
 ```bash
@@ -759,7 +762,7 @@ drive letter is fine.
 
 **I deleted or edited files in File Explorer and the Library still shows the
 old state.**
-Run **sync** from the Actions page ([section 8](#8-keeping-the-catalog-up-to-date)).
+Run **sync** from the Advanced page ([section 8](#8-keeping-the-catalog-up-to-date)).
 
 **Thumbnails show a grey picture.**
 They are being made; give it a moment. A file the program cannot read (an

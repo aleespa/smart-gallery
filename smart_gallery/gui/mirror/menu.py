@@ -1,4 +1,4 @@
-"""The Mirror button in the Library header.
+"""The Sync options button in the Library header.
 
 One menu, built from the open gallery's pairing: sync to each mirror, free up
 space, bring files back, or pair with another gallery. Every write runs as a
@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QMenu, QMessageBox, QSizePolicy, QToolButton
+from PySide6.QtWidgets import QMenu, QMessageBox, QPushButton
 
 from smart_gallery.config import drive_root_of
 from smart_gallery.gui.context import AppContext
@@ -27,7 +27,7 @@ from smart_gallery.gui.paths import app_data_dir
 from smart_gallery.storage.tree import format_bytes
 
 PLANS_DIR = "mirror"  # app_data_dir() / PLANS_DIR / f"{timestamp}.json"
-BUTTON_TEXT = "Mirror"
+BUTTON_TEXT = "Sync options"
 SYNC_ENTRY = "Sync to {label}…"
 FREE_UP_ENTRY = "Free up space…"
 BRING_BACK_ENTRY = "Bring back…"
@@ -64,7 +64,9 @@ def peer_label(galleries, peer) -> str:
     return str(drive_root_of(peer.db_path))
 
 
-class MirrorButton(QToolButton):
+# A push button rather than a tool button: it draws its menu arrow with room to
+# spare, the same as the Sort by box beside it.
+class MirrorButton(QPushButton):
     def __init__(self, ctx: AppContext, parent=None):
         super().__init__(parent)
         self.ctx = ctx
@@ -74,8 +76,7 @@ class MirrorButton(QToolButton):
         # argvs of a job this button started -> what to do when it ends
         self._pending: dict[tuple, tuple] = {}
         self.setText(BUTTON_TEXT)
-        self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.setToolTip("Sync with a mirror drive, free up space, bring files back")
         self.setMenu(QMenu(self))
         ctx.gallery_changed.connect(self.refresh)
         ctx.catalog_updated.connect(self.refresh)

@@ -80,6 +80,7 @@ AREAS: list[Area] = [
     Area("dashboard", "Stats", "chart", _dashboard),
     Area("storage", "Storage", "drive", _storage),
     Area("people", "People", "people", _people),
-    Area("actions", "Actions", "play", _actions),
     Area("history", "History", "history", _history),
+    # The full command list: the last tab, for what the other pages don't cover.
+    Area("actions", "Advanced", "play", _actions),
 ]

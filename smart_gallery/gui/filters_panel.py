@@ -3,7 +3,8 @@
 It edits a ``FilterValues`` and publishes the parsed query with
 ``ctx.set_filters`` after a short pause in editing, so there is no Apply
 button. Every panel also follows ``filters_changed``, so two panels never
-show different filters. "Clear all filters" sits at the end of the column.
+show different filters. "Clear all filters" is pinned above the column, so
+it stays in view while the filters scroll.
 
 A panel made with ``shared=False`` (the Export page) keeps its own filters
 instead: it neither publishes nor follows ``ctx.filters``, and emits
@@ -90,10 +91,10 @@ _EXPOSURE = (
 )
 # (field, section title, noun for the search hint)
 _PICKERS = (
+    ("people", "People", "people"),
     ("cameras", "Cameras", "cameras"),
     ("lenses", "Lenses", "lenses"),
     ("extensions", "File extensions", "extensions"),
-    ("people", "People", "people"),
 )
 _LISTS = tuple(name for name, _, _ in _PICKERS)
 
@@ -164,17 +165,14 @@ class FilterPanel(QWidget):
             if name == "people":
                 box_layout.addWidget(self.people_match)
             self._boxes[name] = box
-            if name != "people":
-                body.addWidget(box)
+            body.addWidget(box)
         body.addWidget(self._exposure_box())
         self.people_box = self._boxes["people"]
         self.people_box.setVisible(False)
-        body.addWidget(self.people_box)
+        body.addStretch(1)
         self.clear_btn = QPushButton(CLEAR_TEXT)
         self.clear_btn.setObjectName("accentButton")
         self.clear_btn.setStyleSheet(CLEAR_STYLE)  # on the button: nothing can undo it
-        body.addWidget(self.clear_btn)
-        body.addStretch(1)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -187,6 +185,11 @@ class FilterPanel(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        # Outside the scroll, so it is always in view; a page may add its own
+        # buttons to this row (the Library's hide button).
+        self.top_row = QHBoxLayout()
+        self.top_row.addWidget(self.clear_btn, 1)
+        layout.addLayout(self.top_row)
         layout.addWidget(self.scroll, 1)
         layout.addWidget(self.errors)
         self.setMinimumWidth(PANEL_WIDTH)

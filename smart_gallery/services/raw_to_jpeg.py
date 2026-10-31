@@ -47,6 +47,11 @@ BATCH = 50  # photos per ExifTool pass
 _ORIENTATION_TAG = 0x0112
 
 
+class RawToJpegRefused(ValueError):
+    """The job was refused before touching anything (a mirror, or no Recycle
+    Bin), so its list can be run again."""
+
+
 @dataclass
 class RawToJpegReport:
     converted: int = 0
@@ -329,6 +334,9 @@ class _Job:
             self.fail(photo, problem)
             self.finish(photo)
             return
+        xmp_rel = None
+        if photo.xmp is not None:
+            xmp_rel = PurePosixPath(relpath).with_name(photo.xmp.name).as_posix()
         cur = conn.cursor()
         try:
             repo._upsert(cur, [photo.item])
@@ -337,6 +345,10 @@ class _Job:
             ).fetchone()[0]
             moved = move_faces(conn, src, dst, rotate, photo.width, photo.height)
             repo._delete(cur, [relpath])
+            if xmp_rel is not None:
+                # Dropped with the CR3's row: if recycling the file fails, the
+                # next sync simply adds it back.
+                repo._delete(cur, [xmp_rel])
             # From here the JPEG must outlive any interruption: once the CR3
             # may be in the Recycle Bin, the JPEG is the only copy on disk.
             self.uncommitted.discard(photo.jpeg)
@@ -360,20 +372,25 @@ class _Job:
                 )
                 logger.warning(self.report.failures[-1])
             else:
-                xmp_rel = PurePosixPath(relpath).with_name(photo.xmp.name).as_posix()
-                repo._delete(cur, [xmp_rel])
-                self.catalog.pop(xmp_rel, None)
                 freed += xmp_size
         try:
             conn.commit()
         except sqlite3.Error:
+            conn.rollback()
+            # The CR3's row still owns its faces. A sync now would drop that
+            # row (the file is gone) and its faces with it.
+            jpeg_rel = PurePosixPath(relpath).with_name(photo.jpeg.name).as_posix()
             logger.error(
-                f"{relpath} is in the Recycle Bin and {photo.jpeg.name} is on the "
-                "drive, but the catalog could not be updated; run sync."
+                f"The catalog could not be updated after {relpath} went to the "
+                f"Recycle Bin. Restore {relpath} from the Recycle Bin and delete "
+                f"{jpeg_rel}, then run raw-to-jpeg again. Do not run sync first: "
+                "it would drop the CR3's faces."
             )
             raise
 
         self.catalog.pop(relpath, None)
+        if xmp_rel is not None:
+            self.catalog.pop(xmp_rel, None)
         for face_id in moved:  # recut from the JPEG when next shown
             try:
                 crop_path(self.root, face_id).unlink(missing_ok=True)
@@ -395,10 +412,13 @@ def replace_raws(
     progress_callback: ProgressCallback | None = None,
 ) -> RawToJpegReport:
     """Replace each listed CR3 with its embedded JPEG; see the module docstring."""
-    ensure_not_mirror(repo)
+    try:
+        ensure_not_mirror(repo)
+    except ValueError as exc:
+        raise RawToJpegRefused(str(exc)) from None
     root = drive_root_of(repo.db_path)
     if not supports_recycle_bin(root):
-        raise ValueError(
+        raise RawToJpegRefused(
             f"The Recycle Bin is not available on {root}; nothing was converted."
         )
     job = _Job(repo, progress_callback, len(entries))

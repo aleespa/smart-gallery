@@ -1,8 +1,10 @@
 """Move a photo's faces to another media row, keeping face ids.
 
 Used when a CR3 is replaced by its embedded JPEG. Boxes are stored in the
-pixels the scanner decoded: the unrotated embedded preview for a RAW, the
-EXIF-oriented image for a JPEG, so boxes are rotated into the oriented frame.
+pixels the scanner decoded, and the JPEG is read in its EXIF-oriented frame.
+The caller chooses the orientation: the CR3's when the scan saw stored pixels
+(the embedded preview had no Orientation tag of its own), or 1 when the boxes
+are already in the oriented frame (the preview carried its own tag).
 Nothing here commits; the caller owns the transaction.
 """
 

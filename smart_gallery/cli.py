@@ -55,6 +55,7 @@ from smart_gallery.services import (
     recycle_files,
     rename_gallery,
     replace_raws,
+    RawToJpegRefused,
     scan_faces,
     split_person,
     sync_drive,
@@ -1204,7 +1205,7 @@ def _handle_raw_to_jpeg(args):
         refused = False
         try:
             report = replace_raws(repo, entries, progress_callback=cb)
-        except ValueError:  # a mirror, or no Recycle Bin: nothing was touched
+        except RawToJpegRefused:  # a mirror, or no Recycle Bin: nothing touched
             refused = True
             raise
         finally:

@@ -6,10 +6,12 @@ fixed sizes and orientations, and ``analyze_paths`` builds catalog items from
 ``stat``. The Recycle Bin is a recorder.
 """
 
+import sqlite3
 from pathlib import Path
 
 import numpy as np
 import pytest
+from loguru import logger
 from PIL import Image
 
 from smart_gallery import cli
@@ -390,3 +392,96 @@ def test_cli_keeps_list_when_refused(
 
     assert exc.value.code == 1
     assert list_file.exists() and cr3.exists()
+
+
+class _FailingCommit:
+    """Wraps a connection; its first commit raises (sqlite3 connections can't
+    be monkeypatched)."""
+
+    def __init__(self, conn):
+        self._conn = conn
+        self.failed = False
+
+    def commit(self):
+        if not self.failed:
+            self.failed = True
+            raise sqlite3.OperationalError("disk I/O error")
+        self._conn.commit()
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+def test_commit_failure_points_at_recycle_bin(repo, drive, make_item, fake):
+    fake.cr3_orientation = 6
+    cr3, entry = _catalogued(repo, drive, make_item, "a/IMG_15.CR3")
+    src = _media_id(repo, "a/IMG_15.CR3")
+    fid, pid, _ = _add_face(repo, src)
+    before = tuple(_face(repo, fid))
+    messages = []
+    sink = logger.add(messages.append, level="ERROR", format="{message}")
+    real = repo.conn
+    repo.conn = _FailingCommit(real)
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            replace_raws(repo, [entry])
+    finally:
+        repo.conn = real
+        logger.remove(sink)
+
+    text = "".join(messages)
+    assert "Restore a/IMG_15.CR3 from the Recycle Bin" in text
+    assert "delete a/IMG_15.JPG" in text
+    assert "Do not run sync" in text
+    # The CR3 went to the (fake) Recycle Bin; the JPEG stays for the user.
+    assert fake.recycled == [cr3] and (drive / "a/IMG_15.JPG").exists()
+    assert _media_id(repo, "a/IMG_15.CR3") == src
+    assert _media_id(repo, "a/IMG_15.JPG") is None
+    assert tuple(_face(repo, fid)) == before
+
+
+def test_xmp_recycle_failure_still_converts(repo, drive, make_item, fake):
+    cr3, entry = _catalogued(repo, drive, make_item, "IMG_16.CR3")
+    xmp, _ = _catalogued(repo, drive, make_item, "IMG_16.xmp", b"<x/>")
+    fake.fail_recycle.add("IMG_16.xmp")
+
+    report = replace_raws(repo, [entry])
+
+    assert report.converted == 1
+    assert len(report.failures) == 1 and "IMG_16.xmp" in report.failures[0]
+    assert fake.recycled == [cr3] and xmp.exists()
+    # The xmp's row went with the CR3's; the next sync adds it back.
+    assert repo.index_for_sync().keys() == {"IMG_16.JPG"}
+
+
+def test_cli_deletes_list_when_failing_after_start(
+    repo, drive, make_item, fake, monkeypatch, tmp_path
+):
+    _, entry = _catalogued(repo, drive, make_item, "IMG_17.CR3")
+    list_file = tmp_path / "raw.txt"
+    write_list(list_file, [entry])
+
+    def boom(*_a, **_kw):
+        raise ValueError("went wrong mid-run")
+
+    monkeypatch.setattr(cli, "replace_raws", boom)
+    monkeypatch.setattr(cli, "LOG_DIR", tmp_path / "logs")
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["raw-to-jpeg", str(drive), "--list", str(list_file)])
+
+    assert exc.value.code == 1
+    assert not list_file.exists()
+
+
+def test_cli_keeps_list_on_mirror(repo, drive, make_item, fake, monkeypatch, tmp_path):
+    _, entry = _catalogued(repo, drive, make_item, "IMG_18.CR3")
+    repo.add_peer("mirror", Peer("u" * 32, "x.db"))
+    list_file = tmp_path / "raw.txt"
+    write_list(list_file, [entry])
+    monkeypatch.setattr(cli, "LOG_DIR", tmp_path / "logs")
+
+    with pytest.raises(SystemExit):
+        cli.main(["raw-to-jpeg", str(drive), "--list", str(list_file)])
+
+    assert list_file.exists()

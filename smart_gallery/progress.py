@@ -35,6 +35,7 @@ SCANNING = "Scanning faces"
 FILING = "Sorting faces"
 RECYCLING = "Moving files to Recycle Bin"
 FREEING = "Freeing up space"
+CONVERTING = "Converting to JPEG"
 
 
 @dataclass(frozen=True)

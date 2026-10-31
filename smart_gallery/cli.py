@@ -54,6 +54,7 @@ from smart_gallery.services import (
     read_list,
     recycle_files,
     rename_gallery,
+    replace_raws,
     scan_faces,
     split_person,
     sync_drive,
@@ -74,6 +75,7 @@ DETAIL_LOG_COMMANDS = {
     "undo-faces",
     "find-faces",
     "recycle",
+    "raw-to-jpeg",
     "sync-mirror",
     "free-up",
     "bring-back",
@@ -552,6 +554,25 @@ def build_parser() -> argparse.ArgumentParser:
             "Text file with one 'relpath<TAB>size<TAB>mtime_ns' line per file. "
             "It is deleted once the run starts moving files, so it can't be "
             "replayed; it is kept when the drive has no Recycle Bin."
+        ),
+    )
+
+    p_raw = sub.add_parser(
+        "raw-to-jpeg",
+        help=(
+            "Replace listed CR3 photos with their camera JPEG; the CR3 goes to "
+            "the Recycle Bin and its faces move to the JPEG."
+        ),
+    )
+    p_raw.add_argument("drive", type=Path, help=DRIVE_HELP)
+    p_raw.add_argument(
+        "--list",
+        required=True,
+        type=Path,
+        help=(
+            "Text file with one 'relpath<TAB>size<TAB>mtime_ns' line per CR3. "
+            "It is deleted once the run starts converting, so it can't be "
+            "replayed; it is kept when the job is refused."
         ),
     )
 
@@ -1176,6 +1197,30 @@ def _handle_recycle(args):
     )
 
 
+def _handle_raw_to_jpeg(args):
+    entries = read_list(args.list)
+    cb = progress_reporter()
+    with GalleryRepository.open(args.drive) as repo:
+        refused = False
+        try:
+            report = replace_raws(repo, entries, progress_callback=cb)
+        except ValueError:  # a mirror, or no Recycle Bin: nothing was touched
+            refused = True
+            raise
+        finally:
+            cb.close()
+            if not refused:
+                # A list is used once, as for recycle.
+                args.list.unlink(missing_ok=True)
+    for failure in report.failures:
+        logger.error(f"Not converted: {failure}")
+    logger.success(
+        f"Converted {report.converted:,} CR3(s) to JPEG, freeing "
+        f"{format_bytes(report.freed_bytes)} and moving {report.faces_moved:,} "
+        f"face(s); {report.skipped:,} skipped, {len(report.failures):,} failed."
+    )
+
+
 def _handle_rename(args):
     with GalleryRepository.open(args.drive) as repo:
         name = rename_gallery(repo, args.name)
@@ -1506,6 +1551,7 @@ _HANDLERS = {
     "convert-raw": _handle_convert_cr3,
     "convert-cr3": _handle_convert_cr3,
     "recycle": _handle_recycle,
+    "raw-to-jpeg": _handle_raw_to_jpeg,
     "rename": _handle_rename,
     "dashboard": _handle_dashboard,
     "ui": _handle_ui,

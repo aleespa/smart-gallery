@@ -44,6 +44,7 @@ from smart_gallery.services.mirror import (
     plan_mirror_sync,
     purge_trash,
 )
+from smart_gallery.services.raw_to_jpeg import RawToJpegReport, replace_raws
 from smart_gallery.services.recycle import (
     RecycleReport,
     read_list,
@@ -107,6 +108,8 @@ __all__ = [
     "convert_cr3",
     "ConvertCr3Report",
     "recycle_files",
+    "replace_raws",
+    "RawToJpegReport",
     "RecycleReport",
     "read_list",
     "rename_gallery",

@@ -184,16 +184,21 @@ the new row instead of being re-detected:
   `media_id`; `face_rejections` and any per-media face bookkeeping
   (`face_scan_state` at the current `FACE_DET_VERSION`, cached face crops)
   follow, so the JPEG is not rescanned.
-- **Box coordinates must be rotated for portrait shots.**
+- **Box coordinates are rotated only when the scan saw unrotated pixels.**
   `analysis/faces.py:decode` reads a RAW's embedded preview with
-  `cv2.imdecode`. The embedded image has no EXIF of its own, so CR3 boxes
-  are in **stored (unrotated) pixel coordinates**. The new JPEG gets the
-  CR3's Orientation tag copied in step 2, and `decode` reads JPEGs with
-  `cv2.imread`, which applies EXIF Orientation. So for Orientation 6 / 8 /
-  3 the boxes must be rotated into the oriented frame; for 1 (or none) they
-  are unchanged. The test: a rescan of the JPEG would find the same box.
-  `IMG_8028` in the sample pairs is a real "Rotate 90 CW" fixture; unit
-  tests can build synthetic ones.
+  `cv2.imdecode`, which applies the preview's **own** EXIF Orientation if
+  it has one. Corrected 2026-10-31 after checking real files: the R8's
+  embedded JPEG carries Orientation (e.g. `IMG_6778.CR3`: Rotate 90 CW),
+  so its faces were found in the **oriented** frame, and E:'s
+  `face_scan_state` records 4000×6000 for 1,029 portrait CR3s. The repo's
+  `test.CR3` fixture has a preview with no Orientation tag, so its faces
+  would be in the stored frame. The new JPEG gets the CR3's Orientation
+  (step 2) and is read by `cv2.imread`, which applies it. So:
+  rotate boxes by the CR3's Orientation (3 / 6 / 8) only when the
+  extracted preview has no Orientation tag of its own; otherwise leave
+  them. When `face_scan_state` has `img_w/img_h`, they must equal the
+  frame this rule implies; if not, the photo is not converted. The test:
+  a rescan of the JPEG would find the same box.
 - **Embeddings are kept as they are.** They come from landmark-aligned
   face crops of identical pixels, so rotating the frame does not change
   them in any way that matters. *My call:* recomputing would need the face

@@ -162,6 +162,10 @@ class _Grid(QListView):
             self._view.pick_all_in_scope()
         elif event.key() == Qt.Key.Key_Escape:
             self._view.clear_picks_in_scope()
+        elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            key = self.currentIndex().data(KEY_ROLE)
+            if key is not None:
+                self._view.open_viewer(key)
         elif event.key() == Qt.Key.Key_Space:
             key = self.currentIndex().data(KEY_ROLE)
             if key is not None:
@@ -256,11 +260,18 @@ class _PickViewer(MediaViewer):
         self._keys = keys
         super().__init__(ctx, root, rows, index, view)
         view.picks_changed.connect(self._retitle)
+        self.finished.connect(lambda *_: view.picks_changed.disconnect(self._retitle))
         self.setFocus()  # not a button: Space would press it
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt API)
         if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
             self._raw_view.toggle(self._keys[self._index])
+            return
+        if event.key() == Qt.Key.Key_Left:
+            self.show_previous()  # the base shortcut does not fire unfocused
+            return
+        if event.key() == Qt.Key.Key_Right:
+            self.show_next()
             return
         super().keyPressEvent(event)
 
@@ -362,6 +373,9 @@ class RawView(QWidget):
             self._missing.clear()
             self._requested.clear()
         self._root = root
+        if self.viewer is not None:
+            self.viewer.close()
+            self.viewer = None
         before = self._cands
         self._cands = {c.key: c for c in cands}
         old = self._picks

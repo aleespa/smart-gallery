@@ -267,3 +267,34 @@ def test_thumbnails_request_through_ctx(qtbot, tmp_path):
     v.forget_thumb_requests()
     v.thumbnail(c.raw)
     assert len(ctx.thumbs.calls) == 2
+
+
+def test_enter_opens_viewer_on_current_cell(view):
+    view.show()
+    key = _key(2, "a")
+    QTest.mouseClick(
+        view.list.viewport(), Qt.MouseButton.LeftButton, pos=_center(view, key)
+    )
+    QTest.keyClick(view.list, Qt.Key.Key_Return)
+    assert view.viewer.isVisible()
+    assert view.viewer.row().relpath == _cands()[1].raw.relpath
+    view.viewer.close()
+
+
+def test_viewer_arrows_step_and_space_toggles_shown(view):
+    view.show()
+    viewer = view.open_viewer(_key(1, "a"))
+    QTest.keyClick(viewer, Qt.Key.Key_Right)
+    assert viewer.row().relpath == _cands()[1].raw.relpath
+    QTest.keyClick(viewer, Qt.Key.Key_Space)
+    assert view.picks() == {_key(2, "a")}
+    QTest.keyClick(viewer, Qt.Key.Key_Left)
+    assert viewer.row().relpath == _cands()[0].raw.relpath
+    viewer.close()
+
+
+def test_reload_closes_open_viewer(view, tmp_path):
+    viewer = view.open_viewer(_key(1, "a"))
+    view.set_candidates(_cands(), tmp_path)
+    assert not viewer.isVisible()
+    assert view.viewer is None

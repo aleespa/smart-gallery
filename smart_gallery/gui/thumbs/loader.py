@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
+from PySide6.QtCore import QCoreApplication, QObject, QRunnable, QThreadPool, Signal
 
 from smart_gallery.config import to_abspath
 from smart_gallery.gui.thumbs.cache import ensure_thumbnail
@@ -26,7 +26,10 @@ class _Task(QRunnable):
         if not loader._start((root, item_id), self._generation):
             return  # cancelled while queued
         path = loader._work(self._job)
-        loader._finished.emit(root, item_id, str(path) if path else "")
+        try:
+            loader._finished.emit(root, item_id, str(path) if path else "")
+        except RuntimeError:
+            pass  # the loader was deleted (the app closed) while this ran
 
 
 class _PoolLoader(QObject):
@@ -46,6 +49,11 @@ class _PoolLoader(QObject):
         # The loader lives in the GUI thread, so a signal emitted from a pool
         # thread reaches this slot through a queued connection.
         self._finished.connect(self._on_finished)
+        # On quit, drop the queue: Qt would otherwise build every queued
+        # thumbnail before exiting, for a loader that no longer exists.
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self.cancel_pending)
 
     def _submit(self, job: tuple) -> None:
         """Queue ``job`` (``(root, id, ...)``) unless that key is in flight."""

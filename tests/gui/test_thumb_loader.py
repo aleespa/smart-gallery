@@ -126,3 +126,27 @@ def test_same_id_in_two_roots_is_delivered_per_root(
     assert sorted(got) == sorted(
         (str(root), 5, str(thumb_path(root, 5, 1))) for root in roots
     )
+
+
+def test_quitting_drops_queued_thumbnails(qapp, make_loader, monkeypatch, tmp_path):
+    gate, started = _gated(monkeypatch)
+    loader = make_loader()
+    for i in range(1, 11):
+        loader.request(tmp_path, i, 1, f"p{i}.jpg", ".jpg", "image")
+    qapp.aboutToQuit.emit()
+    gate.set()
+    loader._pool.waitForDone(10000)
+    assert len(started) <= loader_mod.MAX_THREADS
+
+
+def test_task_ignores_a_deleted_loader(qapp, monkeypatch, tmp_path):
+    import shiboken6
+
+    monkeypatch.setattr(loader_mod, "ensure_thumbnail", lambda *a: None)
+    loader = ThumbnailLoader()
+    loader._pool.waitForDone(1000)
+    task = loader_mod._Task(
+        loader, 0, (tmp_path, 1, 1, tmp_path / "a.jpg", ".jpg", "image")
+    )
+    shiboken6.delete(loader)
+    task.run()  # must not raise "Signal source has been deleted"

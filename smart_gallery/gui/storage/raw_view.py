@@ -63,6 +63,7 @@ CONFIRM_TITLE = "Convert to JPEG"
 CONFIRM = (
     "Convert {n:,} photos to JPEG and move their CR3s ({size}) to the Recycle Bin?"
 )
+BIN_LIMIT = "\n\n{drive}'s Recycle Bin holds {limit}."
 BIN_WARNING = (
     "\n\nThat is more than {drive}'s Recycle Bin holds ({limit}); "
     "Windows will empty the oldest items to make room."
@@ -546,10 +547,9 @@ class RawView(QWidget):
         size = sum(c.raw.size_bytes for c in picked)
         text = CONFIRM.format(n=len(picked), size=format_bytes(size))
         limit = recycle_bin_capacity(self._root)
-        if limit is not None and size > limit:
-            text += BIN_WARNING.format(
-                drive=self.root_name(), limit=format_bytes(limit)
-            )
+        if limit is not None:  # None: no limit known
+            note = BIN_WARNING if size > limit else BIN_LIMIT
+            text += note.format(drive=self.root_name(), limit=format_bytes(limit))
         if QMessageBox.question(self, CONFIRM_TITLE, text, _YES | _NO, _NO) == _YES:
             self.convert_requested.emit(replacement_entries(picked))
 

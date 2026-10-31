@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from smart_gallery.gui.storage import raw_view
 from smart_gallery.gui.storage.raw_view import (
+    BIN_LIMIT,
     BIN_WARNING,
     CONFIRM,
     DROPPED,
@@ -210,6 +211,19 @@ def test_confirm_warns_over_bin_limit(view, monkeypatch, tmp_path):
     text = asked[0][2]
     assert BIN_WARNING.format(drive=view.root_name(), limit=format_bytes(MB)) in text
     assert text.startswith(CONFIRM.format(n=1, size=format_bytes(20 * MB)))
+
+
+def test_confirm_names_bin_limit_when_known(view, monkeypatch):
+    view.toggle(_key(1, "a"))
+    monkeypatch.setattr(raw_view, "recycle_bin_capacity", lambda p: 100 * MB)
+    asked = _answer(monkeypatch, QMessageBox.StandardButton.No)
+    view.convert_button.click()
+    text = asked[0][2]
+    limit = format_bytes(100 * MB)
+    assert text == CONFIRM.format(n=1, size=format_bytes(20 * MB)) + BIN_LIMIT.format(
+        drive=view.root_name(), limit=limit
+    )
+    assert "empty the oldest" not in text
 
 
 def test_double_click_opens_viewer_and_space_toggles(view, qtbot):

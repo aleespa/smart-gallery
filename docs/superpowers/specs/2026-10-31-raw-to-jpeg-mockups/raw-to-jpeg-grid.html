@@ -1,0 +1,83 @@
+<style>
+  .app { display:flex; border:1px solid #ccc; border-radius:6px; overflow:hidden; font-size:13px; background:#fafafa; color:#222; }
+  .tree { width:170px; flex:none; border-right:1px solid #ddd; padding:8px; background:#f2f2f2; }
+  .tree div { padding:3px 4px; border-radius:3px; }
+  .tree .sel { background:#e8734a; color:#fff; }
+  .main { flex:1; padding:10px; min-width:0; display:flex; flex-direction:column; gap:8px; }
+  .seg { display:inline-flex; border:1px solid #bbb; border-radius:6px; overflow:hidden; }
+  .seg span { padding:3px 10px; background:#fff; border-right:1px solid #bbb; }
+  .seg span:last-child { border-right:none; }
+  .seg .on { background:#e8734a; color:#fff; }
+  .scope { color:#555; }
+  .grid { display:flex; flex-wrap:wrap; gap:8px; }
+  .t { position:relative; width:118px; }
+  .t img { width:118px; height:79px; object-fit:cover; border-radius:3px; display:block; border:3px solid transparent; }
+  .t.pick img { border-color:#e8734a; }
+  .t .chk { position:absolute; top:6px; left:6px; width:16px; height:16px; border-radius:3px; background:rgba(255,255,255,.85); border:1px solid #888; font-size:12px; line-height:16px; text-align:center; }
+  .t.pick .chk { background:#e8734a; border-color:#e8734a; color:#fff; }
+  .t .xmp { position:absolute; top:6px; right:6px; font-size:10px; padding:0 5px; border-radius:7px; background:#555; color:#fff; }
+  .t small { display:block; color:#666; }
+  .foot { display:flex; align-items:center; gap:10px; border-top:1px solid #ddd; padding-top:8px; }
+  .go { margin-left:auto; background:#e8734a; color:#fff; border:none; border-radius:4px; padding:5px 12px; }
+  .ghost { background:#fff; border:1px solid #bbb; border-radius:4px; padding:4px 10px; }
+  .side { width:230px; flex:none; border-left:1px solid #ddd; padding:8px; background:#fff; }
+  .side img { width:100%; border-radius:3px; }
+</style>
+
+<h2>Storage page: RAW → JPEG</h2>
+<p class="subtitle">You pick a folder on the left. Its CR3s that have no JPEG show as a grid, and every photo starts unpicked. Click to pick the ones you'll never edit. The footer converts them and sends the CR3s to the Recycle Bin. A and B differ only in how you look closely before picking. Real photos from E:.</p>
+
+<div class="options">
+<div class="option" data-choice="grid" onclick="toggleSelect(this)">
+<div class="letter">A</div>
+<div class="content" style="width:100%">
+<h3>Grid only</h3>
+<p>Click picks a photo. Double-click opens it large, the way the Library viewer does. Shift-click picks a range, and Ctrl+A picks all.</p>
+<div class="app">
+  <div class="tree"><div>E:/</div><div>&nbsp;Photos</div><div>&nbsp;&nbsp;Canon</div><div>&nbsp;&nbsp;&nbsp;2025</div><div class="sel">&nbsp;&nbsp;&nbsp;&nbsp;05</div><div>&nbsp;&nbsp;&nbsp;&nbsp;06</div><div>&nbsp;&nbsp;&nbsp;2026</div></div>
+  <div class="main">
+    <div><span class="seg"><span>RAW + JPEG pairs</span><span>Bursts</span><span class="on">RAW → JPEG</span></span></div>
+    <div class="scope">In <b>Canon/2025/05</b> · 412 CR3s without a JPEG · 7.8 GB &nbsp; <u>Show all</u></div>
+    <div class="grid">
+      <div class="t pick"><img src="/files/plant0.jpg"><span class="chk">✓</span><small>IMG_1464 · 19 MB</small></div>
+      <div class="t pick"><img src="/files/plant3.jpg"><span class="chk">✓</span><small>IMG_1467 · 19 MB</small></div>
+      <div class="t"><img src="/files/dune0.jpg"><span class="chk"></span><span class="xmp">edited</span><small>IMG_1502 · 21 MB</small></div>
+      <div class="t pick"><img src="/files/dune2.jpg"><span class="chk">✓</span><small>IMG_1504 · 20 MB</small></div>
+      <div class="t"><img src="/files/gran0.jpg"><span class="chk"></span><small>IMG_1530 · 18 MB</small></div>
+      <div class="t"><img src="/files/lion0.jpg"><span class="chk"></span><small>IMG_1588 · 22 MB</small></div>
+      <div class="t pick"><img src="/files/sky0.jpg"><span class="chk">✓</span><small>IMG_1601 · 17 MB</small></div>
+      <div class="t pick"><img src="/files/sky2.jpg"><span class="chk">✓</span><small>IMG_1603 · 17 MB</small></div>
+      <div class="t"><img src="/files/plant8.jpg"><span class="chk"></span><small>IMG_1620 · 19 MB</small></div>
+      <div class="t"><img src="/files/lion1.jpg"><span class="chk"></span><small>IMG_1641 · 23 MB</small></div>
+    </div>
+    <div class="foot"><span><b>6 picked</b> · 111 MB of CR3 → about 7 MB of JPEG · frees ~104 MB</span><button class="ghost">Clear</button><button class="go">Convert 6 and recycle the CR3s</button></div>
+  </div>
+</div>
+</div></div>
+
+<div class="option" data-choice="grid-preview" onclick="toggleSelect(this)">
+<div class="letter">B</div>
+<div class="content" style="width:100%">
+<h3>Grid with a preview pane</h3>
+<p>The photo under the cursor (or the last one clicked) shows large on the right, with its date, lens and settings. Click still picks.</p>
+<div class="app">
+  <div class="tree"><div>E:/</div><div>&nbsp;Photos</div><div>&nbsp;&nbsp;Canon</div><div>&nbsp;&nbsp;&nbsp;2025</div><div class="sel">&nbsp;&nbsp;&nbsp;&nbsp;05</div><div>&nbsp;&nbsp;&nbsp;&nbsp;06</div></div>
+  <div class="main">
+    <div><span class="seg"><span>RAW + JPEG pairs</span><span>Bursts</span><span class="on">RAW → JPEG</span></span></div>
+    <div class="scope">In <b>Canon/2025/05</b> · 412 CR3s without a JPEG · 7.8 GB</div>
+    <div class="grid">
+      <div class="t pick"><img src="/files/plant0.jpg"><span class="chk">✓</span><small>IMG_1464</small></div>
+      <div class="t pick"><img src="/files/plant3.jpg"><span class="chk">✓</span><small>IMG_1467</small></div>
+      <div class="t"><img src="/files/dune0.jpg"><span class="chk"></span><span class="xmp">edited</span><small>IMG_1502</small></div>
+      <div class="t pick"><img src="/files/dune2.jpg"><span class="chk">✓</span><small>IMG_1504</small></div>
+      <div class="t"><img src="/files/gran0.jpg"><span class="chk"></span><small>IMG_1530</small></div>
+      <div class="t"><img src="/files/lion0.jpg"><span class="chk"></span><small>IMG_1588</small></div>
+    </div>
+    <div class="foot"><span><b>3 picked</b> · frees ~54 MB</span><button class="go">Convert 3 and recycle the CR3s</button></div>
+  </div>
+  <div class="side"><img src="/files/dune2.jpg"><p><b>IMG_1504.CR3</b><br>2025-05-14 17:32 · RF100-400mm<br>1/1000 · f/8 · ISO 400</p></div>
+</div>
+</div></div>
+</div>
+
+<p class="subtitle" style="margin-top:14px">"edited" marks a CR3 that has an .xmp sidecar (edits made in Lightroom or darktable). Nothing happens until you press the footer button.</p>

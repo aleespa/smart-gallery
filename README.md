@@ -345,7 +345,7 @@ time.
 smart-gallery recycle E:/ --list recycle.txt
 ```
 
-### Storage page: pairs and bursts
+### Storage page: pairs, bursts and RAW → JPEG
 
 The desktop app's **Storage** page shows where the space goes (the size tree on
 the left) and, on the right, three lists you switch between: **RAW + JPEG pairs**,
@@ -368,8 +368,12 @@ convert: each one gets the camera's own embedded JPEG, with all its metadata
 copied. It was measured to look the same as the camera's JPEG at about a quarter
 of its file size (roughly 5% of the CR3). Faces, named people and rejections
 move with the photo. Each photo is converted on its own, and its CR3 goes to the
-Recycle Bin only after the JPEG has been checked. The confirmation warns when
-the picks are more than the drive's Recycle Bin holds. From a terminal:
+Recycle Bin only after the JPEG has been checked. The JPEG is written and
+checked in `.smart_gallery/staging` first and moved beside its CR3 only as that
+photo is saved, so a stopped or killed run leaves no stray JPEGs (the next run
+clears the staging folder). The confirmation names the drive's Recycle Bin
+limit when it is known, and warns when the picks are more than it holds. From
+a terminal:
 
 ```bash
 smart-gallery raw-to-jpeg E:/ --list picks.txt
@@ -377,6 +381,12 @@ smart-gallery raw-to-jpeg E:/ --list picks.txt
 
 The next mirror sync copies the new JPEGs to the mirror and moves the mirror's
 CR3s to its trash. Expect the large-delete confirmation after a big conversion.
+
+If the app or the command is killed in the instant between a CR3 going to the
+Recycle Bin and the catalog being saved, that CR3's faces still belong to its
+catalog row. Restore the CR3 from the Recycle Bin and delete its new JPEG
+before you run `sync` (a sync first would drop the CR3's row and its faces),
+then convert it again.
 
 ### `rename` — name a gallery
 

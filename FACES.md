@@ -224,6 +224,9 @@ uv run smart-gallery find-faces E:/     # scans only the new images, then sorts
 * `sync` drops face data for files whose pixels changed (keeping your
   decisions for the rescan, see above), and the database FK cascade removes
   faces for deleted files.
+* A CR3 replaced by its JPEG on the Storage page (RAW → JPEG, or
+  `raw-to-jpeg`) keeps its faces: they move to the new JPEG with your names,
+  decisions and rejections, so it is not rescanned.
 
 ---
 

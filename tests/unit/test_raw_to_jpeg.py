@@ -45,11 +45,11 @@ class Fake:
         self.recycled.append(path)
         path.unlink()
 
-    def extract(self, sources, suffix=".jpg"):
+    def extract(self, photos):
         self.extract_calls += 1
-        for source in sources:
-            size = self.embedded_size.get(source.name, (W, H))
-            out = source.with_suffix(suffix)
+        for p in photos:
+            size = self.embedded_size.get(p.cr3.name, (W, H))
+            out = p.staged
             if size is None or out.exists():  # -w never overwrites
                 continue
             exif = Image.Exif()
@@ -98,7 +98,7 @@ def fake(monkeypatch, make_item):
     monkeypatch.setattr(raw_to_jpeg, "supports_recycle_bin", lambda p: True)
     monkeypatch.setattr(raw_to_jpeg, "recycle_bin_capacity", lambda p: None)
     monkeypatch.setattr(raw_to_jpeg, "move_to_recycle_bin", f.move)
-    monkeypatch.setattr(raw_to_jpeg, "extract_embedded", f.extract)
+    monkeypatch.setattr(raw_to_jpeg, "_extract", f.extract)
     monkeypatch.setattr(raw_to_jpeg, "_copy_metadata", f.copy_metadata)
     monkeypatch.setattr(raw_to_jpeg, "_read_tags", f.read_tags)
     monkeypatch.setattr(raw_to_jpeg, "analyze_paths", fake_analyze)
@@ -423,12 +423,14 @@ def test_commit_failure_points_at_recycle_bin(repo, drive, make_item, fake):
     real = repo.conn
     repo.conn = _FailingCommit(real)
     try:
-        with pytest.raises(sqlite3.OperationalError):
+        with pytest.raises(raw_to_jpeg.RawToJpegCommitFailed) as exc:
             replace_raws(repo, [entry])
     finally:
         repo.conn = real
         logger.remove(sink)
 
+    assert isinstance(exc.value, ValueError)
+    assert isinstance(exc.value.__cause__, sqlite3.OperationalError)
     text = "".join(messages)
     assert "Restore a/IMG_15.CR3 from the Recycle Bin" in text
     assert "delete a/IMG_15.JPG" in text
@@ -485,3 +487,301 @@ def test_cli_keeps_list_on_mirror(repo, drive, make_item, fake, monkeypatch, tmp
         cli.main(["raw-to-jpeg", str(drive), "--list", str(list_file)])
 
     assert list_file.exists()
+
+
+# -- staging and cancel ------------------------------------------------------
+
+
+def _staging(drive):
+    return drive / ".smart_gallery" / "staging"
+
+
+def test_jpeg_stays_in_staging_until_replace(repo, drive, make_item, fake, monkeypatch):
+    paths, entries = zip(
+        *(_catalogued(repo, drive, make_item, f"d{i}/IMG_1.CR3") for i in range(2))
+    )
+    seen = []
+    real_replace = raw_to_jpeg._Job.replace
+
+    def spy(job, photo):
+        # After write_jpegs, before this photo's replace: nothing beside the
+        # CR3; the JPEG waits in staging.
+        seen.append(
+            (
+                photo.staged.parent == _staging(drive),
+                photo.staged.is_file(),
+                photo.jpeg.exists(),
+            )
+        )
+        real_replace(job, photo)
+
+    monkeypatch.setattr(raw_to_jpeg._Job, "replace", spy)
+
+    report = replace_raws(repo, list(entries))
+
+    assert report.converted == 2
+    # Same stem in two folders: staged names never collide.
+    assert seen == [(True, True, False), (True, True, False)]
+    assert (drive / "d0/IMG_1.JPG").is_file() and (drive / "d1/IMG_1.JPG").is_file()
+    assert not _staging(drive).exists()
+
+
+def test_staged_files_are_invisible_to_sync(drive):
+    from smart_gallery.config import iter_files
+
+    leftover = _staging(drive) / "id7-IMG_7.JPG"
+    leftover.parent.mkdir(parents=True)
+    leftover.write_bytes(b"jpeg")
+
+    assert leftover not in set(iter_files(drive))
+
+
+def test_new_run_clears_staging_leftovers(repo, drive, make_item, fake, monkeypatch):
+    leftover = _staging(drive) / "id99-IMG_99.JPG"  # from a killed run
+    leftover.parent.mkdir(parents=True)
+    leftover.write_bytes(b"stale")
+    _, entry = _catalogued(repo, drive, make_item, "IMG_20.CR3")
+    cleared = []
+    real_write = raw_to_jpeg._Job.write_jpegs
+
+    def spy(job, photos):
+        cleared.append(not leftover.exists())
+        real_write(job, photos)
+
+    monkeypatch.setattr(raw_to_jpeg._Job, "write_jpegs", spy)
+
+    report = replace_raws(repo, [entry])
+
+    assert report.converted == 1 and cleared == [True]
+    assert not _staging(drive).exists()
+
+
+def test_cancel_mid_batch_work_leaves_nothing_beside_cr3s(
+    repo, drive, make_item, fake, monkeypatch, tmp_path
+):
+    stop = tmp_path / "stop"
+    monkeypatch.setenv("SG_CANCEL_FILE", str(stop))
+    real_copy = fake.copy_metadata
+
+    def copy_then_cancel(pairs):
+        out = real_copy(pairs)
+        stop.write_text("")  # Cancel pressed while ExifTool works
+        return out
+
+    monkeypatch.setattr(raw_to_jpeg, "_copy_metadata", copy_then_cancel)
+    paths, entries = zip(
+        *(_catalogued(repo, drive, make_item, f"IMG_{i}.CR3") for i in range(3))
+    )
+    before = repo.index_for_sync()
+
+    with pytest.raises(Cancelled) as exc:
+        replace_raws(repo, list(entries))
+
+    assert exc.value.report.converted == 0
+    assert all(p.exists() for p in paths) and fake.recycled == []
+    assert list(drive.glob("*.JPG")) == []
+    assert not _staging(drive).exists()
+    assert repo.index_for_sync() == before
+
+
+def test_progress_reported_per_photo_during_batch(repo, drive, make_item, fake):
+    _, entries = zip(
+        *(_catalogued(repo, drive, make_item, f"IMG_{i}.CR3") for i in range(3))
+    )
+    events = []
+
+    replace_raws(repo, list(entries), progress_callback=events.append)
+
+    # One at the start, one per photo while checking the batch, one per photo
+    # once it is done.
+    assert [e.done for e in events] == [0, 0, 0, 0, 1, 2, 3]
+
+
+def test_batch_is_small():
+    assert raw_to_jpeg.BATCH <= 10
+
+
+def test_file_appearing_at_target_is_never_overwritten(
+    repo, drive, make_item, fake, monkeypatch
+):
+    cr3, entry = _catalogued(repo, drive, make_item, "IMG_21.CR3")
+    real_replace = raw_to_jpeg._Job.replace
+
+    def intruder(job, photo):
+        photo.jpeg.write_bytes(b"not ours")
+        real_replace(job, photo)
+
+    monkeypatch.setattr(raw_to_jpeg._Job, "replace", intruder)
+
+    report = replace_raws(repo, [entry])
+
+    assert report.converted == 0
+    assert len(report.failures) == 1 and "could not move" in report.failures[0]
+    assert (drive / "IMG_21.JPG").read_bytes() == b"not ours"
+    assert cr3.exists() and fake.recycled == []
+    assert _media_id(repo, "IMG_21.CR3") is not None
+    assert not _staging(drive).exists()
+
+
+# -- face frame without recorded scan dimensions -----------------------------
+
+
+def _forget_scan_dims(repo, media_id):
+    repo.conn.execute(
+        "UPDATE face_scan_state SET img_w=NULL, img_h=NULL WHERE media_id=?",
+        (media_id,),
+    )
+    repo.conn.commit()
+
+
+def test_null_scan_dims_with_fitting_boxes_converts(repo, drive, make_item, fake):
+    fake.cr3_orientation = 6  # stored frame 60x40, JPEG frame 40x60
+    _, entry = _catalogued(repo, drive, make_item, "IMG_22.CR3")
+    src = _media_id(repo, "IMG_22.CR3")
+    fid, _, _ = _add_face(repo, src, box=(50, 30, 12, 12))  # inside +10%
+    _forget_scan_dims(repo, src)
+
+    report = replace_raws(repo, [entry])
+
+    assert report.converted == 1 and report.failures == []
+    row = _face(repo, fid)
+    assert row["media_id"] == _media_id(repo, "IMG_22.JPG")
+    box = (row["bbox_x"], row["bbox_y"], row["bbox_w"], row["bbox_h"])
+    assert box == rotate_box((50, 30, 12, 12), 6, W, H)
+
+
+def test_null_scan_dims_with_box_outside_keeps_cr3(repo, drive, make_item, fake):
+    fake.cr3_orientation = 6
+    fake.preview_orientation = 6  # boxes should be in the 40x60 frame ...
+    cr3, entry = _catalogued(repo, drive, make_item, "IMG_23.CR3")
+    src = _media_id(repo, "IMG_23.CR3")
+    fid, _, _ = _add_face(repo, src, box=(45, 5, 10, 10))  # ... x+w=55 > 44
+    _forget_scan_dims(repo, src)
+
+    report = replace_raws(repo, [entry])
+
+    assert report.converted == 0
+    assert len(report.failures) == 1 and "face frame mismatch" in report.failures[0]
+    assert cr3.exists() and fake.recycled == []
+    assert not (drive / "IMG_23.JPG").exists()
+    assert _face(repo, fid)["media_id"] == src
+
+
+def test_null_scan_dims_carryover_outside_keeps_cr3(repo, drive, make_item, fake):
+    cr3, entry = _catalogued(repo, drive, make_item, "IMG_24.CR3")
+    src = _media_id(repo, "IMG_24.CR3")
+    _add_face(repo, src)  # fits
+    _forget_scan_dims(repo, src)
+    repo.conn.execute(
+        "INSERT INTO face_carryover(media_id, bbox_x, bbox_y, bbox_w, bbox_h, "
+        "state) VALUES (?, -20, 0, 5, 5, 'user')",
+        (src,),
+    )
+    repo.conn.commit()
+
+    report = replace_raws(repo, [entry])
+
+    assert report.converted == 0 and "face frame mismatch" in report.failures[0]
+    assert cr3.exists()
+
+
+def test_preview_orientation_differs_with_faces_keeps_cr3(repo, drive, make_item, fake):
+    fake.cr3_orientation = 6
+    fake.preview_orientation = 8
+    cr3, entry = _catalogued(repo, drive, make_item, "IMG_25.CR3")
+    src = _media_id(repo, "IMG_25.CR3")
+    fid, _, _ = _add_face(repo, src, img_size=(H, W))
+
+    report = replace_raws(repo, [entry])
+
+    assert report.converted == 0
+    assert "orientations differ" in report.failures[0]
+    assert cr3.exists() and fake.recycled == []
+    assert not (drive / "IMG_25.JPG").exists()
+    assert _face(repo, fid)["media_id"] == src
+
+
+def test_catalog_row_for_jpeg_name_is_skipped(repo, drive, make_item, fake):
+    cr3, entry = _catalogued(repo, drive, make_item, "IMG_26.CR3")
+    repo.upsert_many([make_item("IMG_26.JPG")])  # a row, but no file
+
+    report = replace_raws(repo, [entry])
+
+    assert (report.converted, report.skipped) == (0, 1)
+    assert cr3.exists() and fake.extract_calls == 0
+    assert not (drive / "IMG_26.JPG").exists()
+
+
+def test_unreadable_folder_fails_only_its_photos(
+    repo, drive, make_item, fake, monkeypatch
+):
+    bad, a = _catalogued(repo, drive, make_item, "locked/IMG_27.CR3")
+    good, b = _catalogued(repo, drive, make_item, "open/IMG_28.CR3")
+    real_iterdir = Path.iterdir
+
+    def iterdir(self):
+        if self.name == "locked":
+            raise PermissionError("Access is denied")
+        return real_iterdir(self)
+
+    monkeypatch.setattr(Path, "iterdir", iterdir)
+
+    report = replace_raws(repo, [a, b])
+
+    assert report.converted == 1
+    assert len(report.failures) == 1
+    assert "locked/IMG_27.CR3" in report.failures[0]
+    assert "could not list its folder" in report.failures[0]
+    assert bad.exists() and fake.recycled == [good]
+
+
+# -- CLI ---------------------------------------------------------------------
+
+
+def test_cli_commit_failure_exits_cleanly(
+    repo, drive, make_item, fake, monkeypatch, tmp_path
+):
+    _, entry = _catalogued(repo, drive, make_item, "IMG_29.CR3")
+    list_file = tmp_path / "raw.txt"
+    write_list(list_file, [entry])
+
+    def boom(*_a, **_kw):
+        raise raw_to_jpeg.RawToJpegCommitFailed("could not be updated")
+
+    monkeypatch.setattr(cli, "replace_raws", boom)
+    monkeypatch.setattr(cli, "LOG_DIR", tmp_path / "logs")
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["raw-to-jpeg", str(drive), "--list", str(list_file)])
+
+    assert exc.value.code == 1
+    assert not list_file.exists()
+
+
+def test_cli_logs_partial_counts_on_cancel(
+    repo, drive, make_item, fake, monkeypatch, tmp_path, capfd
+):
+    stop = tmp_path / "stop"
+    monkeypatch.setenv("SG_CANCEL_FILE", str(stop))
+    paths, entries = zip(
+        *(_catalogued(repo, drive, make_item, f"IMG_3{i}.CR3") for i in range(2))
+    )
+    list_file = tmp_path / "raw.txt"
+    write_list(list_file, list(entries))
+    real_move = fake.move
+
+    def move_then_cancel(path):
+        real_move(path)
+        stop.write_text("")  # Cancel pressed while the first photo finishes
+
+    monkeypatch.setattr(raw_to_jpeg, "move_to_recycle_bin", move_then_cancel)
+    monkeypatch.setattr(cli, "LOG_DIR", tmp_path / "logs")
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["raw-to-jpeg", str(drive), "--list", str(list_file)])
+
+    assert exc.value.code == 130
+    text = capfd.readouterr().err
+    assert "Converted 1 CR3(s) to JPEG before cancelling" in text
+    assert not paths[0].exists() and paths[1].exists()
+    assert not (drive / "IMG_31.JPG").exists()

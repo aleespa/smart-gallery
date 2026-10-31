@@ -1208,6 +1208,18 @@ def _handle_raw_to_jpeg(args):
         except RawToJpegRefused:  # a mirror, or no Recycle Bin: nothing touched
             refused = True
             raise
+        except Cancelled as exc:
+            done = getattr(exc, "report", None)
+            if done is not None:
+                for failure in done.failures:
+                    logger.error(f"Not converted: {failure}")
+                logger.warning(
+                    f"Converted {done.converted:,} CR3(s) to JPEG before "
+                    f"cancelling, freeing {format_bytes(done.freed_bytes)} and "
+                    f"moving {done.faces_moved:,} face(s); {done.skipped:,} "
+                    f"skipped, {len(done.failures):,} failed."
+                )
+            raise
         finally:
             cb.close()
             if not refused:

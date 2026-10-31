@@ -103,3 +103,35 @@ def test_real_cr3_portrait(repo, drive, copy_image, monkeypatch):
     ).fetchone()
     assert tuple(dims) == (h, w)
     assert repo.index_for_sync().keys() == {"Shots/IMG.JPG"}
+    assert not (drive / ".smart_gallery" / "staging").exists()
+
+
+def test_same_stem_in_two_folders_with_unicode(repo, drive, copy_image, monkeypatch):
+    """One ExifTool process stages both (one -execute group each), keyed by
+    catalog id so the two IMG.JPGs never collide."""
+    recycled = []
+
+    def fake_move(path):
+        recycled.append(path)
+        path.unlink()
+
+    monkeypatch.setattr(raw_to_jpeg, "supports_recycle_bin", lambda p: True)
+    monkeypatch.setattr(raw_to_jpeg, "recycle_bin_capacity", lambda p: None)
+    monkeypatch.setattr(raw_to_jpeg, "move_to_recycle_bin", fake_move)
+    rels = ["A/IMG.CR3", "Niños/IMG.CR3"]
+    cr3s = [copy_image(drive, "test.CR3", rel) for rel in rels]
+    repo.upsert_many(analyze_paths(cr3s, drive_root=drive))
+    entries = []
+    for rel, cr3 in zip(rels, cr3s):
+        st = cr3.stat()
+        entries.append(RecycleEntry(rel, st.st_size, st.st_mtime_ns))
+
+    report = replace_raws(repo, entries)
+
+    assert report.failures == [] and report.converted == 2
+    for rel, cr3 in zip(rels, cr3s):
+        jpeg = drive / rel.replace(".CR3", ".JPG")
+        assert jpeg.is_file() and not cr3.exists()
+        assert jpeg.stat().st_mtime_ns == entries[rels.index(rel)].mtime_ns
+        assert _tags(jpeg)["Orientation"] == 6
+    assert not (drive / ".smart_gallery" / "staging").exists()

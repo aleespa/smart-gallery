@@ -561,7 +561,7 @@ def _bursts_state(**state):
 def test_switch_shows_bursts_and_is_remembered(qtbot, repo, make_item):
     _fill_shots(repo, make_item)
     view = _view(qtbot, _ctx(repo))
-    pairs_button, bursts_button = view.right_switch
+    pairs_button, bursts_button, _raw_button = view.right_switch
     assert view.right_stack.currentWidget() is view.pairs_view
     bursts_button.click()
     assert view.right_stack.currentWidget() is view.bursts_view
@@ -831,3 +831,95 @@ def test_empty_catalog_resets_the_review(qtbot, repo, make_item):
     assert view.data.tree is None
     assert view.review.current() is None
     view.review.wait()
+
+
+# ── RAW -> JPEG ─────────────────────────────────────────────────────────────
+def _fill_raws(repo, make_item):
+    repo.upsert_many(
+        [
+            make_item("a/C1.CR3", size_bytes=3000),
+            make_item("a/C2.CR3", size_bytes=3000),
+            make_item("b/C3.CR3", size_bytes=3000),
+        ]
+    )
+
+
+def test_load_storage_includes_raws(repo, make_item):
+    _fill_raws(repo, make_item)
+    assert len(load_storage(repo).raws) == 3
+
+
+def test_third_switch_shows_raw_view_and_is_remembered(qtbot, repo, make_item):
+    _fill_raws(repo, make_item)
+    view = _view(qtbot, _ctx(repo))
+    view.right_switch[2].click()
+    assert view.right_stack.currentWidget() is view.raw_view
+    assert load_json(view.state_path)["right"] == "raw"
+    again = _view(qtbot, _ctx(repo, "u2"))
+    assert again.right_stack.currentWidget() is again.raw_view
+    assert again.right_switch[2].isChecked()
+
+
+def test_tree_scopes_raw_view(qtbot, repo, make_item):
+    _fill_raws(repo, make_item)
+    view = _view(qtbot, _ctx(repo))
+    assert len(view.raw_view.model.rows) == 3
+    view.tree_view.tree.setCurrentIndex(_child(view, "a"))
+    assert view.raw_view.scope() == "a"
+    assert len(view.raw_view.model.rows) == 2
+    view.raw_view.show_all.click()
+    assert view.raw_view.scope() is None
+    assert not view.tree_view.tree.currentIndex().isValid()
+
+
+def test_leave_guard_counts_raw_picks(qtbot, repo, make_item, monkeypatch):
+    _fill_raws(repo, make_item)
+    ctx = _ctx(repo)
+    view = _view(qtbot, ctx)
+    view.raw_view.toggle(view.data.raws[0].key)
+    view.raw_view.toggle(view.data.raws[1].key)
+    asked = []
+
+    def answer(parent, title, text, *rest):
+        asked.append(text)
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", answer)
+    assert ctx.can_leave()
+    assert asked == ["You have 2 unapplied choices. Discard them?"]
+    assert view.raw_view.picks() == set()
+
+
+def test_convert_starts_raw_to_jpeg_job(qtbot, repo, make_item, drive, monkeypatch):
+    _fill_raws(repo, make_item)
+    ctx = _ctx(repo)
+    ctx.jobs = _Jobs()
+    view = _view(qtbot, ctx)
+    view.right_switch[2].click()
+    cand = view.data.raws[0]
+    view.raw_view.toggle(cand.key)
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Yes
+    )
+    view.raw_view.convert_button.click()
+    (spec,) = ctx.jobs.specs
+    assert spec.title == "Convert to JPEG"
+    argv = spec.argvs[0]
+    assert argv[:3] == ("raw-to-jpeg", str(drive.resolve()), "--list")
+    got = [e.relpath for e in read_list(Path(argv[3]))]
+    assert got == [cand.raw.relpath]
+
+
+def test_gallery_change_clears_picks(qtbot, repo, make_item, tmp_path):
+    _fill_raws(repo, make_item)
+    ctx = _ctx(repo)
+    view = _view(qtbot, ctx)
+    view.raw_view.toggle(view.data.raws[0].key)
+    other = tmp_path / "other"
+    other.mkdir()
+    with GalleryRepository.create(other) as r2:
+        path = r2.db_path
+    view.data = None
+    ctx.set_gallery(Gallery("u2", str(path), "other"))
+    _loaded(qtbot, view)
+    assert view.raw_view.picks() == set()

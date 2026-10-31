@@ -348,8 +348,8 @@ smart-gallery recycle E:/ --list recycle.txt
 ### Storage page: pairs and bursts
 
 The desktop app's **Storage** page shows where the space goes (the size tree on
-the left) and, on the right, two lists you switch between: **RAW + JPEG pairs**
-and **Bursts**. Picking a folder in the tree scopes both lists.
+the left) and, on the right, three lists you switch between: **RAW + JPEG pairs**,
+**Bursts** and **RAW → JPEG**. Picking a folder in the tree scopes all three.
 
 **Bursts.** A burst is a run of shots from the same folder and camera, each at
 most the *gap* after the one before. The gap is set at the top of the list,
@@ -361,6 +361,22 @@ through it and mark or keep each shot (Esc goes back). Nothing happens until you
 confirm: marked shots (with their RAW, JPEG and sidecar files) go to the
 Recycle Bin through `recycle`, and can be restored from there. Marks you have
 not applied are lost if you leave the page, after one question.
+
+**RAW → JPEG.** The third list offers every CR3 that has no JPEG beside it (CR2
+is not offered, and neither are CR3s freed up to a mirror). Pick photos, then
+convert: each one gets the camera's own embedded JPEG, with all its metadata
+copied. It was measured to look the same as the camera's JPEG at about a quarter
+of its file size (roughly 5% of the CR3). Faces, named people and rejections
+move with the photo. Each photo is converted on its own, and its CR3 goes to the
+Recycle Bin only after the JPEG has been checked. The confirmation warns when
+the picks are more than the drive's Recycle Bin holds. From a terminal:
+
+```bash
+smart-gallery raw-to-jpeg E:/ --list picks.txt
+```
+
+The next mirror sync copies the new JPEGs to the mirror and moves the mirror's
+CR3s to its trash. Expect the large-delete confirmation after a big conversion.
 
 ### `rename` — name a gallery
 

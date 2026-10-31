@@ -3,13 +3,14 @@
 ``FaceGrid`` shows ``FaceTile`` crops from ``ctx.face_crops`` (asked for only
 for the tiles in view, after the grid settles), selects them with checkboxes
 and an accent outline, and marks the faces the user confirmed with a small
-tick. ``FaceActionBar`` turns a button press into a
+tick (``mark_confirmed`` adds it in place). ``FaceActionBar`` turns a button press into a
 ``LabelEntry``; neither widget starts a job.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -54,6 +55,9 @@ TILE_ROLE = Qt.ItemDataRole.UserRole + 1
 
 SELECTED = "{n:,} faces selected"
 SELECTED_ONE = "1 face selected"
+CONFIRM_PERSON = "✓ {name}"
+CONFIRM_GROUP = "✓ This group"
+CONFIRM_TIP = "These faces are {who}: lock them there and use them to recognise {who}"
 NOT_PERSON = "Not {name}"
 NOT_GROUP = "Not this group"
 MOVE_TO = "Move to… ▾"
@@ -131,6 +135,14 @@ class _FaceModel(QAbstractListModel):
             del self.tiles[first : row + 1]
             self.endRemoveRows()
             row = first - 1
+
+    def mark_confirmed(self, ids: set[int]) -> None:
+        """Show these faces as confirmed (the tick) without a reload."""
+        for row, tile in enumerate(self.tiles):
+            if tile.face_id in ids and tile.state != "user":
+                self.tiles[row] = replace(tile, state="user")
+                index = self.index(row)
+                self.dataChanged.emit(index, index)
 
     def forget_crops(self) -> None:
         self._pixmaps.clear()
@@ -280,6 +292,9 @@ class FaceGrid(QListView):
         self._model.remove_ids(set(ids))
         self._on_selection()
 
+    def mark_confirmed(self, ids: Iterable[int]) -> None:
+        self._model.mark_confirmed(set(ids))
+
     def _on_selection(self, *_args) -> None:
         self.faces_selected.emit(self.selected_face_ids())
 
@@ -322,7 +337,8 @@ class FaceGrid(QListView):
 class FaceActionBar(QWidget):
     """'N faces selected' and the corrections for them.
 
-    ``reject`` and ``ignore`` False leave only **Move to…** (the hidden pile).
+    ``confirm``, ``reject`` and ``ignore`` False leave only **Move to…** (the
+    hidden pile). Confirm and Not show only while the faces have a person.
     """
 
     action = Signal(object)  # LabelEntry
@@ -331,6 +347,7 @@ class FaceActionBar(QWidget):
         self,
         parent: QWidget | None = None,
         *,
+        confirm: bool = True,
         reject: bool = True,
         ignore: bool = True,
     ):
@@ -339,7 +356,11 @@ class FaceActionBar(QWidget):
         self._person: PersonRow | None = None
         self._people: list[PersonRow] = []
 
+        self._confirm = confirm
+        self._reject_shown = reject
+
         self.count_label = QLabel()
+        self.confirm_button = QPushButton(CONFIRM_GROUP)
         self.not_button = QPushButton(NOT_GROUP)
         self.move_menu = QMenu(self)
         self.move_button = QToolButton()
@@ -348,27 +369,35 @@ class FaceActionBar(QWidget):
         self.move_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.move_button.setStyleSheet("QToolButton::menu-indicator { image: none; }")
         self.ignore_button = QPushButton(IGNORE)
-        self.not_button.setHidden(not reject)
         self.ignore_button.setHidden(not ignore)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.count_label)
         layout.addStretch(1)
+        layout.addWidget(self.confirm_button)
         layout.addWidget(self.not_button)
         layout.addWidget(self.move_button)
         layout.addWidget(self.ignore_button)
 
+        self.confirm_button.clicked.connect(self._confirm_faces)
         self.not_button.clicked.connect(self._reject)
         self.ignore_button.clicked.connect(self._ignore)
         self.set_faces([])
-        self._rebuild_menu()
+        self.set_person(None)
 
     def set_person(self, person: PersonRow | None) -> None:
         """The person the faces are filed under now (None: no one)."""
         self._person = person
         name = person.name if person is not None else None
         self.not_button.setText(NOT_PERSON.format(name=name) if name else NOT_GROUP)
+        self.confirm_button.setText(
+            CONFIRM_PERSON.format(name=name) if name else CONFIRM_GROUP
+        )
+        who = name or "this group"
+        self.confirm_button.setToolTip(CONFIRM_TIP.format(who=who))
+        self.confirm_button.setHidden(not self._confirm or person is None)
+        self.not_button.setHidden(not self._reject_shown or person is None)
         self._rebuild_menu()
 
     def set_people(self, people: PeopleList | None) -> None:
@@ -383,7 +412,13 @@ class FaceActionBar(QWidget):
         self._faces = list(ids)
         n = len(self._faces)
         self.count_label.setText(SELECTED_ONE if n == 1 else SELECTED.format(n=n))
-        for button in (self.not_button, self.move_button, self.ignore_button):
+        buttons = (
+            self.confirm_button,
+            self.not_button,
+            self.move_button,
+            self.ignore_button,
+        )
+        for button in buttons:
             button.setEnabled(n > 0)
 
     def _rebuild_menu(self) -> None:
@@ -405,6 +440,11 @@ class FaceActionBar(QWidget):
     def _emit(self, entry: LabelEntry) -> None:
         if self._faces:
             self.action.emit(entry)
+
+    def _confirm_faces(self) -> None:
+        if self._person is not None:
+            faces = tuple(self._faces)
+            self._emit(LabelEntry("confirm", faces, person_id=self._person.id))
 
     def _reject(self) -> None:
         if self._person is not None:

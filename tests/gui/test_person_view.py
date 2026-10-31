@@ -234,6 +234,38 @@ def test_not_person_emits_reject_entry(qtbot, repo, cat):
     ]
 
 
+def test_confirm_person_emits_confirm_entry(qtbot, repo, cat):
+    alice = cat.person("Alice")
+    f1 = cat.face(cat.photo(), alice)
+    f2 = cat.face(cat.photo(), alice)
+    view = _view(qtbot, _ctx(repo))
+    page = _open_person(qtbot, view, alice)
+    _open_faces(qtbot, page)
+    sent = []
+    page.labels.connect(sent.append)
+    bar = page.action_bar
+    assert not bar.confirm_button.isHidden()
+    assert not bar.confirm_button.isEnabled()
+    assert bar.confirm_button.text() == "✓ Alice"
+    assert "Alice" in bar.confirm_button.toolTip()
+    _pick(page.faces_grid, f1, f2)
+    bar.confirm_button.click()
+    assert sent == [[LabelEntry("confirm", (f1, f2), person_id=alice)]]
+    # They stay on Alice's grid, now ticked as confirmed.
+    tiles = page.faces_grid.tiles()
+    assert [t.face_id for t in tiles] == [f1, f2]
+    assert {t.state for t in tiles} == {"user"}
+
+
+def test_confirm_group_label(qtbot, repo, cat):
+    group = cat.person(None)
+    cat.face(cat.photo(), group)
+    view = _view(qtbot, _ctx(repo))
+    page = _open_person(qtbot, view, group)
+    _open_faces(qtbot, page)
+    assert page.action_bar.confirm_button.text() == "✓ This group"
+
+
 def test_new_person_emits_new_person_entry(qtbot, repo, cat, monkeypatch):
     alice = cat.person("Alice")
     f1 = cat.face(cat.photo(), alice)
@@ -398,6 +430,7 @@ def test_hidden_faces_view_and_unhide_job(qtbot, repo, cat):
     assert _grid_ids(page.faces_grid) == [tiny, ignored]
     bar = page.action_bar
     assert bar.not_button.isHidden()
+    assert bar.confirm_button.isHidden()
     assert bar.ignore_button.isHidden()
     assert not bar.move_button.isHidden()
     sent = []

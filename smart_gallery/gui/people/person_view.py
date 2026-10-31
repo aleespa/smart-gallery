@@ -596,7 +596,7 @@ class HiddenFacesPage(QWidget):
         note = QLabel(HIDDEN_NOTE)
         note.setWordWrap(True)
         self.faces_grid = FaceGrid(ctx)
-        self.action_bar = FaceActionBar(reject=False, ignore=False)
+        self.action_bar = FaceActionBar(confirm=False, reject=False, ignore=False)
         self.groups = QListWidget()
         self.groups.setMaximumHeight(160)
         self.groups_title = QLabel(HIDDEN_GROUPS)

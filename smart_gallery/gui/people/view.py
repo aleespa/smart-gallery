@@ -289,16 +289,23 @@ class PeopleView(QWidget):
         self.right.setCurrentWidget(self.hidden_page)
 
     def send_labels(self, entries: list) -> None:
-        """Hide the corrected faces now and send the corrections as one job."""
+        """Hide the corrected faces now and send the corrections as one job.
+
+        Faces confirmed from the person's own grid stay there with a tick.
+        """
         entries = list(entries)
         if not entries:
             return
         gone = {face for entry in entries for face in entry.faces}
-        for grid in (
-            self.person_page.faces_grid,
-            self.person_page.review_grid,
-            self.hidden_page.faces_grid,
-        ):
+        confirmed = {
+            face
+            for entry in entries
+            if entry.action == "confirm"
+            for face in entry.faces
+        }
+        self.person_page.faces_grid.mark_confirmed(confirmed)
+        self.person_page.faces_grid.remove_faces(gone - confirmed)
+        for grid in (self.person_page.review_grid, self.hidden_page.faces_grid):
             grid.remove_faces(gone)
         if self.ctx.current is not None:
             root = str(drive_root_of(Path(self.ctx.current.db_path)))

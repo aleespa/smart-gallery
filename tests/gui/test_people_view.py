@@ -456,6 +456,19 @@ def _grid_with(view, *ids):
     return grid
 
 
+def test_confirm_keeps_faces_on_the_person_grid(qtbot, repo, cat):
+    alice = cat.person("Alice")
+    view = _view(qtbot, _ctx(repo, _Jobs()))
+    grid = _grid_with(view, 1, 2, 3)
+    review = view.person_page.review_grid
+    review.set_tiles(_tiles(2))
+    view.send_labels(
+        [LabelEntry("confirm", (2,), person_id=alice), LabelEntry("ignore", (3,))]
+    )
+    assert [(t.face_id, t.state) for t in grid.tiles()] == [(1, "auto"), (2, "user")]
+    assert review.tiles() == []
+
+
 def test_burst_of_corrections_becomes_one_job(qtbot, repo, cat):
     cat.person("Alice")
     ctx = _ctx(repo, _Jobs())

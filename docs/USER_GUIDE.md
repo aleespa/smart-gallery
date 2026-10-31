@@ -493,8 +493,10 @@ flowchart LR
    away groups of strangers; **Hidden groups** shows them again.
 3. **Fix mistakes.** On a person's page, **Photos** shows their photos and
    **Faces** shows every face, least sure first. Select faces (tick boxes) and
-   confirm them, **Move to…** another person, **New person…**, or say
-   **Not this group**. The suggestions strip offers close matches to accept
+   confirm them with **✓ <name>** (they get a small tick, and the app uses
+   confirmed faces to recognise that person, so each one helps), **Move to…**
+   another person, **New person…**, or say **Not <name>** (**Not this
+   group**). The suggestions strip offers close matches to accept
    or reject. Your corrections are sent as one job when you leave the page,
    and the remaining faces are sorted again so the suggestions improve.
    **Find more** (beside **Show in Library**) searches the faces nobody has

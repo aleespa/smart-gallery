@@ -1,4 +1,7 @@
-"""Extract embedded JPEG images from Canon CR2/CR3 files with ExifTool."""
+"""Extract embedded JPEG images from Canon CR2/CR3 files with ExifTool.
+
+CR3 files carry the image as ``JpgFromRaw``; CR2 files as ``PreviewImage``.
+"""
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,17 +37,32 @@ def _input_files(sources) -> list[tuple[Path, Path | None]]:
     return found
 
 
-def _extract_previews(sources: list[Path]) -> str:
-    """Write each RAW's ``JpgFromRaw`` beside it as ``<stem>.jpg``.
+def extract_embedded(sources: list[Path], suffix: str = ".jpg") -> str:
+    """Write each RAW's full-size embedded JPEG beside it as ``<stem><suffix>``.
 
-    One process for the whole batch: starting ExifTool costs far more than
-    extracting a preview. ``-w`` never overwrites, and writes nothing for a
-    file without the tag, so callers detect failures by the missing output.
-    Returns ExifTool's stderr.
+    The image is ``JpgFromRaw`` (CR3), or ``PreviewImage`` for a RAW without
+    it (Canon CR2). ExifTool cannot fall back inside one call, so there is one
+    process per pass: the ``JpgFromRaw`` pass, then a ``PreviewImage`` pass
+    over the sources whose output is still missing or empty. ``-w`` never
+    overwrites, so empty outputs are deleted first. Callers detect failures by
+    the missing output. Returns ExifTool's stderr.
     """
-    return run_exiftool_argfile(
-        ["-b", "-JpgFromRaw", "-w", "%d%f.jpg", *map(str, sources)]
+    template = "%d%f" + suffix
+    stderr = run_exiftool_argfile(
+        ["-b", "-JpgFromRaw", "-w", template, *map(str, sources)]
     )
+    missing = []
+    for source in sources:
+        output = source.with_suffix(suffix)
+        if output.is_file() and output.stat().st_size:
+            continue
+        output.unlink(missing_ok=True)
+        missing.append(source)
+    if missing:
+        stderr += run_exiftool_argfile(
+            ["-b", "-PreviewImage", "-w", template, *map(str, missing)]
+        )
+    return stderr
 
 
 def _copy_metadata(pairs: list[tuple[Path, Path]]) -> list[str]:
@@ -71,7 +89,7 @@ def _copy_metadata(pairs: list[tuple[Path, Path]]) -> list[str]:
 
 
 def convert_cr3(sources) -> ConvertCr3Report:
-    """Write the embedded ``JpgFromRaw`` image from each CR2/CR3 as JPEG.
+    """Write the embedded JPEG (``JpgFromRaw``, else ``PreviewImage``) of each CR2/CR3.
 
     Directory inputs are searched recursively. Each JPEG is written beside
     its source, unless a same-stem JPEG already exists, in which case the RAW
@@ -98,7 +116,7 @@ def convert_cr3(sources) -> ConvertCr3Report:
         pending.append(source)
 
     if pending:
-        stderr = _extract_previews(pending).splitlines()
+        stderr = extract_embedded(pending).splitlines()
         pairs = []
         for source in pending:
             output = source.with_suffix(".jpg")
@@ -108,7 +126,7 @@ def convert_cr3(sources) -> ConvertCr3Report:
             output.unlink(missing_ok=True)
             reason = next(
                 (line for line in stderr if source.name in line),
-                "no embedded JpgFromRaw image was returned",
+                "no embedded JPEG image was returned",
             )
             message = f"Could not extract JPEG from {source}: {reason}"
             logger.warning(message)

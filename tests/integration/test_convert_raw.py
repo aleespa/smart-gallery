@@ -71,3 +71,11 @@ def test_jpeg_only_export_of_a_real_raw(tmp_path, copy_image, make_item):
     assert report.converted == 1 and report.excluded == []
     assert _tags(jpeg)["Orientation"] == _tags(raw)["Orientation"] == 6
     assert not raw.with_suffix(".jpg").exists()
+
+
+def test_cr2_uses_preview_image(tmp_path, copy_image):
+    raw = copy_image(tmp_path, "test.CR2", "Shots/IMG_0002.CR2")
+    report = convert_cr3([tmp_path])
+    assert report.converted == 1
+    assert report.failures == []
+    assert raw.with_suffix(".jpg").stat().st_size > 0

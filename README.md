@@ -7,7 +7,9 @@ filtered subsets elsewhere — all without re-scanning the whole drive.
 
 New to Smart Gallery? Start with the **[User Guide](docs/USER_GUIDE.md)**, a
 walk-through of the desktop app for first-time users. This README is the
-command-line reference.
+command-line reference. To understand exactly what a command does to your files and
+catalog, and what it reports, see the
+**[Technical Reference](docs/TECHNICAL_REFERENCE.md)**.
 
 ## Requirements
 

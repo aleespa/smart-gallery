@@ -9,6 +9,10 @@ something goes wrong.
 The screenshots come from a small demo library. Your folders and photos will
 look different, but the controls are the same.
 
+To see exactly what each job does behind the scenes (which files it reads
+and writes, what it refuses to do, and what its summary means), read the
+[Technical Reference](TECHNICAL_REFERENCE.md).
+
 **Contents**
 
 1. [What Smart Gallery is](#1-what-smart-gallery-is)
@@ -67,6 +71,23 @@ Because the catalog travels with the drive, you can plug the drive into
 another computer, or get a different drive letter, and the gallery still
 works.
 
+### Supported file types
+
+| Kind | Extensions | What Smart Gallery reads |
+|---|---|---|
+| Photos | `.jpg` `.jpeg` `.png` `.webp` | Date taken, camera, lens, exposure, GPS, size |
+| Canon RAW photos | `.cr3` `.cr2` | The same information, plus the full-size JPEG the camera stores inside the file |
+| Videos | `.mp4` `.mov` `.avi` `.mkv` `.m4v` `.3gp` `.gif` | Date, size in pixels, length, codec, frame rate |
+| Anything else | | Name, folder and size only |
+
+**RAW support is currently for Canon cameras: `.CR3` (and the older
+`.CR2`).** For these files Smart Gallery shows thumbnails and previews,
+finds faces, pairs each RAW with its same-named JPEG on the Storage page,
+exports them as JPEGs, and can replace a CR3 with its camera JPEG to save
+space. RAW files from other makers (`.NEF`, `.ARW`, `.RAF`, `.DNG`, …) are
+kept in the catalog as *other files*: they are counted and copied, but their
+camera information is not read and they get no thumbnail.
+
 ### What you can do with it
 
 | Task | Where |
@@ -78,7 +99,7 @@ works.
 | Group photos by person (face recognition) | [People](#11-people-finding-photos-by-who-is-in-them) |
 | Keep a second drive as an identical backup | [Mirror](#12-two-drives-a-working-copy-and-a-mirror) |
 | Copy a selection out (optionally with RAW photos as JPEGs) | [Export](#export) |
-| Write an Excel report, compare catalogs | [Actions](#13-actions-and-history-jobs) |
+| Write an Excel report, compare catalogs | [Advanced](#13-advanced-and-history-jobs) |
 
 ---
 
@@ -179,7 +200,7 @@ start another, the app tells you a job is already running.
 - **Cancel** asks the job to stop after the file it is working on, so nothing
   is left half-copied. If it does not stop, click again (**Force stop**) to
   end it at once.
-- Every job is recorded on the [History page](#13-actions-and-history-jobs)
+- Every job is recorded on the [History page](#13-advanced-and-history-jobs)
   with its log, and can be run again from there.
 - If you close the window while a job runs, the app asks whether to cancel it
   first.

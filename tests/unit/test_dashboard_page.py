@@ -48,6 +48,8 @@ def test_load_dashboard_computes_everything(repo, make_item, tmp_path):
     assert result.video.months == ("2026-07",)
     assert result.video.series["Minutes"] == (2.0,)
     assert result.geotag_count == 1
+    assert result.days == data.photos_per_day(fi)
+    assert sum(result.days.values()) == 2  # photos only, not the video
 
     assert result.map_page == out / "map.html"
     page = result.map_page.read_text(encoding="utf-8")

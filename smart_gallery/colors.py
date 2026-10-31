@@ -146,3 +146,6 @@ VIDEO = FILE_TYPE_COLORS["Videos"]  # video minutes: the same as in file types
 SETTINGS_COLORS: dict[str, str] = dict(
     zip(("Aperture", "Shutter Speed", "ISO", "Focal Length"), categorical(4))
 )
+# Photo calendar (Stats): days with photos, from fewest to most. Empty days
+# are drawn from the palette's text colour so they follow light and dark.
+CALENDAR_SHADES: tuple[str, ...] = ("#FFD2A8", SUNSET[1], "#FF825F", ACCENT)

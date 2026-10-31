@@ -12,7 +12,9 @@ from PySide6.QtWebEngineWidgets import QWebEngineView  # noqa: E402
 from PySide6.QtWidgets import QLabel, QTableView, QTabWidget  # noqa: E402
 
 from smart_gallery.gui import theme  # noqa: E402
+from smart_gallery.gui.dashboard.calendar import PhotoCalendar  # noqa: E402
 from smart_gallery.gui.dashboard.view import (  # noqa: E402
+    CALENDAR_PANEL,
     FILES_PANEL,
     MAP_PANEL,
     PANELS,
@@ -93,6 +95,9 @@ def test_dashboard_native_panels(qtbot, repo, make_item):
     assert len(_charts(view, SETTINGS_PANEL)) == 4
     assert len(_charts(view, TIMELINE_PANEL)) == 1
     assert len(_charts(view, VIDEO_PANEL)) == 1
+    calendar = view.panels[CALENDAR_PANEL].body
+    assert isinstance(calendar, PhotoCalendar)
+    assert calendar.heading.text() == "2 photos in 2026"
     webs = view.panels[MAP_PANEL].findChildren(QWebEngineView)
     assert webs == [view.map_view]
     assert view.map_caption.text() == "Displaying 1 geotagged photos"
@@ -108,8 +113,9 @@ def test_dashboard_videos_only_hides_image_panels(qtbot, repo, make_item):
     _loaded(qtbot, view)
 
     assert view.stack.currentIndex() == 0
-    for title in (FILES_PANEL, SETTINGS_PANEL, TIMELINE_PANEL, MAP_PANEL):
+    for title in (FILES_PANEL, SETTINGS_PANEL, TIMELINE_PANEL, CALENDAR_PANEL):
         assert not _shown(view, title)
+    assert not _shown(view, MAP_PANEL)
     assert _shown(view, VIDEO_PANEL)
     assert len(_charts(view, VIDEO_PANEL)) == 1
 
@@ -252,3 +258,31 @@ def test_headings_use_the_serif_face(qtbot, repo, make_item):
     ]
     assert cameras.font().families()[0] == theme.SERIF[0]
     assert cameras.font().pointSizeF() == theme.SECTION_PT
+
+
+def test_calendar_year_survives_catalog_updates_not_filter_changes(
+    qtbot, repo, make_item
+):
+    from smart_gallery.organize.filters import FilterOptions
+
+    repo.upsert_many(
+        [
+            make_item("a/1.jpg", date_taken="2024-05-01"),
+            make_item("a/2.jpg", date_taken="2026-06-01"),
+        ]
+    )
+    view, ctx = _view(qtbot, repo.db_path)
+    first = _loaded(qtbot, view)
+    calendar = view.panels[CALENDAR_PANEL].body
+    assert calendar.year == 2026  # the most recent year first
+    calendar.year_box.setCurrentText("2024")
+    assert calendar.year == 2024
+
+    ctx.catalog_updated.emit()
+    qtbot.waitUntil(lambda: view.data is not first)
+    second = view.data
+    assert view.panels[CALENDAR_PANEL].body.year == 2024
+
+    ctx.set_filters(FilterOptions())
+    qtbot.waitUntil(lambda: view.data is not second)
+    assert view.panels[CALENDAR_PANEL].body.year == 2026

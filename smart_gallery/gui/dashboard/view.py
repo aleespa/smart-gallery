@@ -32,6 +32,7 @@ from smart_gallery.dashboard.data import SETTINGS_COLORS, VIDEO_COLOR
 from smart_gallery.gui import theme
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.dashboard import charts
+from smart_gallery.gui.dashboard.calendar import PhotoCalendar
 from smart_gallery.gui.dashboard.model import DashboardData, load_dashboard
 from smart_gallery.gui.filters_panel import PANEL_WIDTH, FilterPanel
 from smart_gallery.gui.paths import app_data_dir
@@ -50,9 +51,17 @@ logger = logging.getLogger(__name__)
 FILES_PANEL = "Cameras and Lenses"
 SETTINGS_PANEL = "Camera Settings Distribution"
 TIMELINE_PANEL = "Photography Timeline"
+CALENDAR_PANEL = "Photo Calendar"
 VIDEO_PANEL = "Video Recording Summary"
 MAP_PANEL = "Photo Map"
-PANELS = (FILES_PANEL, SETTINGS_PANEL, TIMELINE_PANEL, VIDEO_PANEL, MAP_PANEL)
+PANELS = (
+    FILES_PANEL,
+    SETTINGS_PANEL,
+    TIMELINE_PANEL,
+    CALENDAR_PANEL,
+    VIDEO_PANEL,
+    MAP_PANEL,
+)
 
 # Chart-area widths (px) at which a grid goes multi-column. The ranked camera
 # and lens bars need the width for their long names.
@@ -185,6 +194,9 @@ class DashboardView(QWidget):
         self.data: DashboardData | None = None
         self._query = RepoQuery(ctx, self)
         self.theme_watcher = charts.ThemeWatcher([], self)
+        # The calendar's year, kept across catalog updates; None (the most
+        # recent year) after a gallery or filter change.
+        self._calendar_year: int | None = None
 
         self.filters = FilterPanel(ctx)
 
@@ -254,6 +266,8 @@ class DashboardView(QWidget):
 
         self._query.finished.connect(self._on_data)
         self._query.failed.connect(self._on_failed)
+        ctx.gallery_changed.connect(self._reset_calendar_year)
+        ctx.filters_changed.connect(self._reset_calendar_year)
         ctx.gallery_changed.connect(self.reload)
         ctx.filters_changed.connect(self.reload)
         ctx.catalog_updated.connect(self.reload)
@@ -265,6 +279,9 @@ class DashboardView(QWidget):
             save_json(self.state_path, {"collapsed": names})
         except OSError as exc:  # e.g. the file is locked; the next save retries
             logger.warning("Could not save %s: %s", self.state_path, exc)
+
+    def _reset_calendar_year(self, *_args) -> None:
+        self._calendar_year = None
 
     def reload(self, *_args) -> None:
         if self.ctx.current is None:
@@ -297,6 +314,7 @@ class DashboardView(QWidget):
         self.panels[TIMELINE_PANEL].set_body(
             self._month_body(result.timeline, {}, "photos", True, TIMELINE_HEIGHT)
         )
+        self.panels[CALENDAR_PANEL].set_body(self._calendar_body(result.days))
         self.panels[VIDEO_PANEL].set_body(
             self._month_body(
                 result.video, {"Minutes": VIDEO_COLOR}, "min", False, VIDEO_HEIGHT
@@ -359,6 +377,17 @@ class DashboardView(QWidget):
         if ms is None:
             return None
         return self._chart(charts.month_bar_chart(ms, colors, unit, stacked), height)
+
+    def _calendar_body(self, days) -> QWidget | None:
+        if not days:
+            return None
+        calendar = PhotoCalendar(days, self._calendar_year)
+        calendar.year_box.currentTextChanged.connect(self._keep_calendar_year)
+        return calendar
+
+    def _keep_calendar_year(self, text: str) -> None:
+        if text:
+            self._calendar_year = int(text)
 
     def _show_map(self, result: DashboardData) -> None:
         panel = self.panels[MAP_PANEL]

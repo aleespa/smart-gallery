@@ -410,6 +410,8 @@ the Library:
 - **Cameras and Lenses**: which cameras and lenses you use most,
 - **Camera Settings Distribution**: apertures, ISO, shutter speeds, focal lengths,
 - **Photography Timeline**: photos per month,
+- **Photo Calendar**: one square per day of a year you pick, shaded by how
+  many photos you took that day (hover a square for the count),
 - **Video Recording Summary**,
 - **Photo Map**: where geotagged photos were taken.
 

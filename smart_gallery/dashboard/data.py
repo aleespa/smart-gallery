@@ -7,7 +7,8 @@ ends draw identical values."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from datetime import date, timedelta
+from typing import Iterable, Optional
 
 import numpy as np
 import pandas as pd
@@ -37,6 +38,7 @@ _MONTH_NAMES = (
     "Nov",
     "Dec",
 )
+_DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 
 def color_for(name: str, rank: int) -> str:
@@ -273,3 +275,85 @@ def geotagged(fi) -> pd.DataFrame:
     df_loc["latitude"] = pd.to_numeric(df_loc["latitude"], errors="coerce")
     df_loc["longitude"] = pd.to_numeric(df_loc["longitude"], errors="coerce")
     return df_loc.dropna(subset=["latitude", "longitude"])
+
+
+# --- photo calendar ---------------------------------------------------------
+# One square per day, a column per week (Sunday on top), as GitHub draws its
+# contributions; days with photos take one of CALENDAR_LEVELS shades.
+CALENDAR_LEVELS = 4
+
+
+def photos_per_day(fi) -> dict[date, int]:
+    """Dated photos per calendar day, leaving out 1970 and future dates."""
+    if fi.empty or "date_taken" not in fi.columns:
+        return {}
+    tmp = _drop_implausible_dates(fi.dropna(subset=["date_taken"]))
+    if tmp.empty:
+        return {}
+    counts = tmp["date_taken"].dt.date.value_counts()
+    return {day: int(n) for day, n in counts.items()}
+
+
+def calendar_years(days: Iterable[date]) -> list[int]:
+    """The years that have photos, most recent first."""
+    return sorted({day.year for day in days}, reverse=True)
+
+
+def calendar_thresholds(counts: Iterable[int]) -> tuple[float, ...]:
+    """Upper bounds of the shades below the top one: quartiles of the busy days.
+
+    Quartiles rather than an even split of the maximum, so one huge trip day
+    does not leave every other day in the faintest shade."""
+    busy = [c for c in counts if c > 0]
+    if not busy:
+        return (0.0,) * (CALENDAR_LEVELS - 1)
+    steps = [i / CALENDAR_LEVELS for i in range(1, CALENDAR_LEVELS)]
+    return tuple(float(q) for q in np.quantile(busy, steps))
+
+
+def calendar_level(count: int, thresholds: Iterable[float]) -> int:
+    """0 for an empty day, else 1 (fewest) to CALENDAR_LEVELS (most)."""
+    if count <= 0:
+        return 0
+    return 1 + sum(count > t for t in thresholds)
+
+
+def calendar_start(year: int) -> date:
+    """The Sunday that heads the first column: on or before 1 January."""
+    first = date(year, 1, 1)
+    return first - timedelta(days=(first.weekday() + 1) % 7)
+
+
+def calendar_cell(day: date) -> tuple[int, int]:
+    """(week column, weekday row with Sunday 0) of ``day`` in its year."""
+    offset = (day - calendar_start(day.year)).days
+    return offset // 7, offset % 7
+
+
+def calendar_weeks(year: int) -> int:
+    """How many week columns the year spans (53, or 54 in rare years)."""
+    return calendar_cell(date(year, 12, 31))[0] + 1
+
+
+def calendar_month_labels(year: int) -> tuple[tuple[int, str], ...]:
+    """(week column, month name) for each month, at the week of its 1st."""
+    return tuple(
+        (calendar_cell(date(year, month, 1))[0], name)
+        for month, name in enumerate(_MONTH_NAMES, start=1)
+    )
+
+
+def day_tooltip(day: date, count: int) -> str:
+    """``"14 photos on Sat 12 Oct 2026"``."""
+    when = (
+        f"{_DAY_NAMES[day.weekday()]} {day.day} "
+        f"{_MONTH_NAMES[day.month - 1]} {day.year}"
+    )
+    if count == 0:
+        return f"No photos on {when}"
+    return f"{count:,} photo{'' if count == 1 else 's'} on {when}"
+
+
+def calendar_heading(total: int, year: int) -> str:
+    """``"1,284 photos in 2026"``."""
+    return f"{total:,} photo{'' if total == 1 else 's'} in {year}"

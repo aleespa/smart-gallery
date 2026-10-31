@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 import plotly.graph_objects as go
@@ -34,6 +35,7 @@ class DashboardData:
     settings: dict  # spec name -> stop buckets, non-empty specs only
     timeline: MonthSeries | None
     video: MonthSeries | None
+    days: dict[date, int]  # dated photos per day, for the photo calendar
     geotag_count: int
     map_page: Path | None  # None when no photo has a geotag
 
@@ -81,6 +83,7 @@ def load_dashboard(db_path, filters, out_dir: Path) -> DashboardData:
         settings=data.settings_buckets(fi),
         timeline=data.monthly_by_camera(fi),
         video=data.video_minutes_by_month(fv),
+        days=data.photos_per_day(fi),
         geotag_count=geotag_count,
         map_page=map_page,
     )

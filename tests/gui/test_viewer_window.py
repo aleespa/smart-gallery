@@ -291,3 +291,20 @@ def test_info_panel_shows_sections(qtbot, repo, make_item):
     qtbot.waitUntil(lambda: "Canon EOS R6" in viewer.info_text())
     text = viewer.info_text()
     assert "14 June 2026" in text and "EXPOSURE" in text and "a/1.jpg" in text
+
+
+def test_info_panel_shows_only_the_current_photo(qtbot, repo, make_item):
+    from PySide6.QtWidgets import QLabel
+
+    _photo(repo, make_item, "a/1.jpg", camera="Canon EOS R6")
+    _photo(repo, make_item, "a/2.jpg", camera="Nikon Z6")
+    viewer, _ = _open(qtbot, repo)
+    qtbot.waitUntil(lambda: "Canon EOS R6" in viewer.info_text())
+    viewer.show_next()
+    qtbot.waitUntil(lambda: "Nikon Z6" in viewer.info_text())
+    shown = [
+        label.text()
+        for label in viewer.info_body.findChildren(QLabel)
+        if label.isVisibleTo(viewer.info_body)
+    ]
+    assert "a/1.jpg" not in shown and "Canon EOS R6" not in shown

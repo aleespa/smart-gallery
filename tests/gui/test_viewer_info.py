@@ -140,3 +140,18 @@ def test_photo_people_counts(repo, make_item):
 def test_photo_people_none_without_face_tables(repo, make_item):
     repo.conn.execute("DROP TABLE faces")
     assert photo_people(repo, 1) is None
+
+
+def test_old_scan_faces_fall_back_to_the_photo_size(repo, make_item):
+    """A scan from before image sizes were recorded: the photo's own size
+    stands in (the viewer still refuses a box whose orientation disagrees)."""
+    repo.upsert_many([make_item("p.jpg", width=3456, height=5184)])
+    media = repo.conn.execute("SELECT id FROM media_items").fetchone()[0]
+    _face(repo, media, None, "new")
+    repo.conn.execute(
+        "INSERT INTO face_scan_state (media_id, det_version, n_faces) VALUES (?, 'v', 1)",
+        (media,),
+    )
+    repo.conn.commit()
+    (face,) = photo_people(repo, media).faces
+    assert face.img_size == (3456, 5184)

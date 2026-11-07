@@ -177,9 +177,12 @@ def photo_people(repo, media_id: int) -> PhotoPeople | None:
     rows = repo.conn.execute(
         "SELECT f.id, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h,"
         " CASE WHEN p.name IS NOT NULL AND p.name <> '' THEN p.name END AS name,"
-        " s.img_w, s.img_h"
+        # Scans before image sizes were recorded: the photo's own size stands
+        # in; the viewer refuses it when its orientation disagrees.
+        " COALESCE(s.img_w, m.width) AS img_w, COALESCE(s.img_h, m.height) AS img_h"
         " FROM faces f LEFT JOIN persons p ON p.id = f.person_id"
         " LEFT JOIN face_scan_state s ON s.media_id = f.media_id"
+        " JOIN media_items m ON m.id = f.media_id"
         " WHERE f.media_id = ? AND f.state <> 'ignored'"
         " AND (p.hidden IS NULL OR p.hidden = 0)"
         " ORDER BY f.id",

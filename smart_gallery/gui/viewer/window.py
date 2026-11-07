@@ -63,10 +63,13 @@ CHIP_STYLE = "border: 1px solid palette(mid); border-radius: 9px; padding: 1px 8
 ACCENT_CHIP_STYLE = (
     "border: 1px solid palette(highlight); border-radius: 9px; padding: 1px 8px;"
 )
+_TINT = theme.qcolor(theme.ACCENT)
 TOOL_STYLE = (
     "QToolButton { border: none; border-radius: 6px; padding: 4px; }"
     " QToolButton:hover { background: palette(midlight); }"
-    " QToolButton:checked { background: palette(highlight); }"
+    # A soft accent tint for a toggled button, not a solid block of colour.
+    f" QToolButton:checked {{ background: rgba({_TINT.red()}, {_TINT.green()},"
+    f" {_TINT.blue()}, 60); border-bottom: 2px solid palette(highlight); }}"
 )
 TIPS = {
     "zoom": "Zoom: fit or 100 % (Z)",

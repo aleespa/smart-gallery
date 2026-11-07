@@ -36,6 +36,8 @@ RAW_EXTENSIONS = frozenset(
     {".cr2", ".cr3", ".nef", ".arw", ".dng", ".raf", ".rw2", ".orf"}
 )
 RAW_PREVIEW_TAGS = ("-PreviewImage", "-JpgFromRaw", "-ThumbnailImage")
+# The full-size embedded JPEG first: for looking closely (the viewer's zoom).
+RAW_LARGEST_TAGS = ("-JpgFromRaw", "-PreviewImage", "-ThumbnailImage")
 JPEG_EXTENSIONS = frozenset({".jpg", ".jpeg", ".jpe"})
 
 
@@ -159,16 +161,18 @@ def _fit_rgb(image, max_edge: int):
     return image
 
 
-def load_preview(abspath: Path, ext: str, max_edge: int = 2048):
+def load_preview(abspath: Path, ext: str, max_edge: int = 2048, largest: bool = False):
     """A large upright RGB Pillow image of the file for the viewer: the file
-    itself for regular images, the embedded preview for RAW. None when it
-    cannot be read. Never raises."""
+    itself for regular images, the embedded preview for RAW (with
+    ``largest``, the full-size embedded JPEG first). None when it cannot be
+    read. Never raises."""
     try:
         from PIL import Image
 
         ext = (ext or "").lower()
         if ext in RAW_EXTENSIONS:
-            image = _open_raw_preview(Path(abspath))
+            tags = RAW_LARGEST_TAGS if largest else RAW_PREVIEW_TAGS
+            image = _open_raw_preview(Path(abspath), tags)
         else:
             image = Image.open(abspath)
             if ext in JPEG_EXTENSIONS:
@@ -183,7 +187,7 @@ _TRANSPOSE = {2: "FLIP_LEFT_RIGHT", 3: "ROTATE_180", 4: "FLIP_TOP_BOTTOM",
               5: "TRANSPOSE", 6: "ROTATE_270", 7: "TRANSVERSE", 8: "ROTATE_90"}  # fmt: skip
 
 
-def _open_raw_preview(abspath: Path):
+def _open_raw_preview(abspath: Path, tags=RAW_PREVIEW_TAGS):
     """First decodable embedded image of a RAW file, as an open Pillow image,
     turned upright.
 
@@ -194,7 +198,7 @@ def _open_raw_preview(abspath: Path):
     """
     from PIL import Image
 
-    image = _open_embedded(abspath, RAW_PREVIEW_TAGS)
+    image = _open_embedded(abspath, tags)
     if image is None:
         raise ValueError(f"no embedded preview in {abspath}")
     if image.getexif().get(0x0112, 1) != 1:

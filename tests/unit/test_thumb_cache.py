@@ -381,3 +381,29 @@ def test_raw_thumbnail_replaces_the_old_sideways_one(drive, monkeypatch):
 
 def test_jpeg_thumbnail_name_unchanged(drive):
     assert thumb_path(drive, 1, 100, ".jpg") == thumb_path(drive, 1, 100)
+
+
+def test_load_preview_largest_asks_jpgfromraw_first(drive, monkeypatch):
+    buf = io.BytesIO()
+    Image.new("RGB", (60, 40), "red").save(buf, "JPEG")
+    tags = []
+
+    class Result:
+        returncode = 0
+
+        def __init__(self, out):
+            self.stdout = out
+
+    def fake_run(args, **kwargs):
+        if "-b" in args:
+            tags.append(args[2])
+            return Result(buf.getvalue())
+        return Result(b"1")
+
+    monkeypatch.setattr(cache.subprocess, "run", fake_run)
+    (drive / "x.cr3").write_bytes(b"raw")
+    assert cache.load_preview(drive / "x.cr3", ".cr3", largest=True).size == (60, 40)
+    assert tags[0] == "-JpgFromRaw"
+    tags.clear()
+    cache.load_preview(drive / "x.cr3", ".cr3")
+    assert tags[0] == "-PreviewImage"

@@ -39,6 +39,7 @@ from smart_gallery.gui.library.model import LibraryRow
 from smart_gallery.gui.repo_query import RepoQuery
 from smart_gallery.gui.thumbs.cache import load_preview
 from smart_gallery.gui.viewer.info import format_duration, format_size  # noqa: F401
+from smart_gallery.gui.viewer.previews import to_qimage as _to_qimage
 from smart_gallery.models import MediaItem
 from smart_gallery.util import format_shutter
 
@@ -107,13 +108,6 @@ def fitted_size(image: QSize, area_height: int, chrome: QSize, screen: QSize) ->
     width = max(MIN_AREA.width(), width)
     height = max(MIN_AREA.height(), height)
     return QSize(width + chrome.width(), height + chrome.height())
-
-
-def _to_qimage(image) -> QImage:
-    """QImage copy of an RGB Pillow image; safe to build on a worker thread."""
-    w, h = image.size
-    data = image.tobytes("raw", "RGB")
-    return QImage(data, w, h, 3 * w, QImage.Format.Format_RGB888).copy()
 
 
 def show_in_explorer(abspath: Path) -> None:

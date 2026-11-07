@@ -27,7 +27,7 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -46,7 +46,7 @@ from PySide6.QtWidgets import (
 from smart_gallery.gui import theme
 from smart_gallery.gui.library.model import LibraryRow
 from smart_gallery.gui.library.viewer import MediaViewer
-from smart_gallery.gui.viewer.stage import face_rect
+from smart_gallery.gui.viewer.stage import Box, face_rect
 from smart_gallery.gui.people.model import FaceTile, PeopleList, PersonRow
 from smart_gallery.services.label_faces import LabelEntry
 
@@ -249,37 +249,24 @@ class _TickDelegate(QStyledItemDelegate):
         painter.restore()
 
 
-BOX_WIDTH = 1 / 250  # of the photo's longer side, for the face's outline
-
-
 class FaceViewer(MediaViewer):
     """The photo viewer stepping through faces: each face's whole photo, with
-    the face outlined."""
+    that face outlined (the faces button turns the outline off)."""
 
     def __init__(self, ctx, root: Path, tiles: list[FaceTile], index: int, parent):
         rows = [LibraryRow(t.media_id, t.relpath, "image", t.ext, None) for t in tiles]
         self.tiles = tiles
         super().__init__(ctx, root, rows, index, parent)
+        self.faces_btn.setChecked(True)
 
     def tile(self) -> FaceTile:
         return self.tiles[self._index]
 
-    def _decorate(self, image: QImage) -> QImage:
-        rect = face_rect(self.tile(), image.size())
-        if rect is None:
-            return image
-        out = image.convertToFormat(QImage.Format.Format_RGB32)
-        width = max(2.0, max(out.width(), out.height()) * BOX_WIDTH)
-        pad = width
-        painter = QPainter(out)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(theme.qcolor(theme.ACCENT), width))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRoundedRect(
-            rect.adjusted(-pad, -pad, pad, pad), width * 2, width * 2
-        )
-        painter.end()
-        return out
+    def boxes(self) -> list[Box]:
+        if not self.faces_btn.isChecked():
+            return []
+        rect = face_rect(self.tile(), self.stage.image_size())
+        return [Box(rect)] if rect is not None else []
 
 
 _MOUSE_EVENTS = (

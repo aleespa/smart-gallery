@@ -728,6 +728,7 @@ def test_face_rect_scales_to_the_preview():
 
 
 def test_face_viewer_outlines_the_face(qtbot, repo, cat):
+    from PySide6.QtCore import QRectF
     from PySide6.QtGui import QColor, QImage
 
     from smart_gallery.gui.people.faces_grid import FaceViewer
@@ -739,9 +740,11 @@ def test_face_viewer_outlines_the_face(qtbot, repo, cat):
     )
     viewer = FaceViewer(_ctx(repo), drive_root_of(repo.db_path), [tile], 0, None)
     qtbot.addWidget(viewer)
-    image = QImage(400, 400, QImage.Format.Format_RGB888)
+    assert viewer.faces_btn.isChecked()  # the face is outlined from the start
+    image = QImage(400, 400, QImage.Format.Format_RGB32)
     image.fill(QColor("white"))
-    out = viewer._decorate(image)
-    assert out.pixelColor(140, 98) != QColor("white")  # the top edge
-    assert out.pixelColor(140, 140) == QColor("white")  # inside the face
-    assert out.pixelColor(10, 10) == QColor("white")  # elsewhere
+    viewer.stage.set_image(image, sharp=True)  # a preview twice the scan's size
+    (box,) = viewer.boxes()
+    assert box.rect == QRectF(100, 100, 80, 80) and box.label == ""
+    viewer.faces_btn.setChecked(False)
+    assert viewer.boxes() == []

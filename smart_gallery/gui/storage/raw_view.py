@@ -8,7 +8,7 @@ catalog.
 from __future__ import annotations
 
 from collections import OrderedDict
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from PySide6.QtCore import (
     QAbstractListModel,
@@ -262,28 +262,22 @@ class _PickViewer(MediaViewer):
         super().__init__(ctx, root, rows, index, view)
         view.picks_changed.connect(self._retitle)
         self.closed.connect(lambda: view.picks_changed.disconnect(self._retitle))
-        self.setFocus()  # not a button: Space would press it
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt API)
         if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
             self._raw_view.toggle(self._keys[self._index])
-            return
-        if event.key() == Qt.Key.Key_Left:
-            self.show_previous()  # the base shortcut does not fire unfocused
-            return
-        if event.key() == Qt.Key.Key_Right:
-            self.show_next()
+            event.accept()
             return
         super().keyPressEvent(event)
 
-    def show_index(self, index: int) -> None:
-        super().show_index(index)
+    def on_shown(self) -> None:
         self._retitle()
 
     def _retitle(self) -> None:
+        if not hasattr(self, "_keys"):
+            return
         picked = self._keys[self._index] in self._raw_view.picks_ref()
-        name = PurePosixPath(self.row().relpath).name
-        self.setWindowTitle(f"{name} · {PICKED if picked else NOT_PICKED}")
+        self.status_label.setText(PICKED if picked else NOT_PICKED)
 
 
 class RawView(QWidget):

@@ -282,7 +282,7 @@ class MediaViewer(QWidget):
         self.info_btn.toggled.connect(self._set_info_open)
         self.close_btn.clicked.connect(self.close)
 
-    def _keys(self) -> dict:
+    def _key_actions(self) -> dict:
         """Key → action. Handled in ``keyPressEvent``, so they work whatever
         has focus inside the window (children pass unused keys up)."""
         return {
@@ -300,7 +300,7 @@ class MediaViewer(QWidget):
     def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt API)
         action = None
         if not event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier:
-            action = self._keys().get(event.key())
+            action = self._key_actions().get(event.key())
         if action is None:
             super().keyPressEvent(event)
             return

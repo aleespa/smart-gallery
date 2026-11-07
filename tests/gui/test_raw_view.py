@@ -1,4 +1,5 @@
 import dataclasses
+from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QObject, Qt, Signal
@@ -7,6 +8,8 @@ from PySide6.QtWidgets import QMessageBox
 
 from smart_gallery.gui.storage import raw_view
 from smart_gallery.gui.storage.raw_view import (
+    NOT_PICKED,
+    PICKED,
     BIN_LIMIT,
     BIN_WARNING,
     CONFIRM,
@@ -238,10 +241,12 @@ def test_double_click_opens_viewer_and_space_toggles(view, qtbot):
     assert viewer.row().relpath == _cands()[0].raw.relpath
     QTest.keyClick(viewer, Qt.Key.Key_Space)
     assert view.picks() == {key}
-    assert "Picked" in viewer.windowTitle()
+    assert viewer.status_label.text() == PICKED
+    assert viewer.windowTitle() == Path(_cands()[0].raw.relpath).name
+    viewer.info_btn.click()  # a toolbar click takes no focus: Space still picks
     QTest.keyClick(viewer, Qt.Key.Key_Space)
     assert view.picks() == set()
-    assert "Not picked" in viewer.windowTitle()
+    assert viewer.status_label.text() == NOT_PICKED
     viewer.close()
 
 

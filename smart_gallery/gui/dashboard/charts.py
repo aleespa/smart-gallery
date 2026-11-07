@@ -393,9 +393,15 @@ def _color_scheme() -> Qt.ColorScheme:
 
 
 def apply_theme(view: QChartView) -> None:
-    """Light or dark chart theme from the OS, colours and fonts from the app."""
+    """Dark chart theme for the (always dark) app, colours and fonts from the
+    app. The palette decides when the system scheme is not known."""
     chart = view.chart()
-    dark = _color_scheme() == Qt.ColorScheme.Dark
+    scheme = _color_scheme()
+    if scheme == Qt.ColorScheme.Unknown:
+        window = QApplication.palette().color(QPalette.Window)
+        dark = window.lightness() < 128
+    else:
+        dark = scheme == Qt.ColorScheme.Dark
     chart.setTheme(QChart.ChartThemeDark if dark else QChart.ChartThemeLight)
 
     palette = QApplication.palette()

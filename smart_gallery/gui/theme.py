@@ -14,6 +14,7 @@ palette role or one of the names re-exported here, never a colour literal.
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
@@ -22,6 +23,8 @@ from smart_gallery.colors import (  # noqa: F401  (re-exported for the GUI)
     BADGE_BACK,
     BADGE_TEXT,
     BRAND_CAPS,
+    DARK_DISABLED_TEXT,
+    DARK_PALETTE,
     CLOSE_HOVER,
     ERROR,
     ON_ACCENT,
@@ -53,12 +56,34 @@ def qcolor(color: str | tuple[int, ...]) -> QColor:
 
 
 def apply_theme(app: QApplication) -> None:
-    """Make the body face the default (keeping the size) and the Sunset
-    accent the palette's highlight."""
+    """Make the body face the default (keeping the size), the app always dark
+    whatever the system is set to, and the Sunset accent the palette's
+    highlight."""
     font = QFont(app.font())
     font.setFamilies(SANS)
     app.setFont(font)
+    app.styleHints().setColorScheme(Qt.ColorScheme.Dark)
+    if app.palette().color(QPalette.ColorRole.Window).lightness() >= 128:
+        # The platform did not follow (offscreen, older Windows styles):
+        # Fusion with the same dark colours.
+        app.setStyle("Fusion")
+        app.setPalette(dark_palette())
     app.setPalette(accent_palette(app.palette()))
+
+
+def dark_palette() -> QPalette:
+    """The dark palette Qt's windows11 style uses, from ``colors``."""
+    palette = QPalette()
+    for name, color in DARK_PALETTE.items():
+        palette.setColor(getattr(QPalette.ColorRole, name), qcolor(color))
+    disabled = qcolor(DARK_DISABLED_TEXT)
+    for role in (
+        QPalette.ColorRole.Text,
+        QPalette.ColorRole.WindowText,
+        QPalette.ColorRole.ButtonText,
+    ):
+        palette.setColor(QPalette.ColorGroup.Disabled, role, disabled)
+    return palette
 
 
 def accent_palette(palette: QPalette) -> QPalette:

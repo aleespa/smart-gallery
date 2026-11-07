@@ -91,3 +91,40 @@ def test_apply_theme_sets_font_and_accent(qapp):
     finally:
         qapp.setFont(font)
         qapp.setPalette(palette)
+
+
+def test_apply_theme_is_always_dark(qapp):
+    """The app is dark whatever the system is set to; where Qt cannot follow
+    the request (offscreen, older Windows styles) it uses the same colours."""
+    from PySide6.QtGui import QPalette
+
+    from smart_gallery.gui import theme
+
+    font, palette, style = qapp.font(), qapp.palette(), qapp.style().name()
+    try:
+        theme.apply_theme(qapp)
+        p = qapp.palette()
+        assert p.color(QPalette.ColorRole.Window).lightness() < 128
+        assert p.color(QPalette.ColorRole.Base).lightness() < 128
+        assert p.color(QPalette.ColorRole.WindowText).lightness() > 200
+        assert p.color(QPalette.ColorRole.Highlight).name() == theme.ACCENT.lower()
+    finally:
+        qapp.setStyle(style)
+        qapp.setFont(font)
+        qapp.setPalette(palette)
+
+
+def test_dark_palette_matches_windows_11_dark():
+    from PySide6.QtGui import QPalette
+
+    from smart_gallery.gui import theme
+
+    p = theme.dark_palette()
+    role = QPalette.ColorRole
+    assert p.color(role.Window).name() == "#1e1e1e"
+    assert p.color(role.Base).name() == "#2d2d2d"
+    assert p.color(role.Button).name() == "#3c3c3c"
+    assert p.color(role.Text).name() == "#ffffff"
+    assert p.color(role.PlaceholderText).alpha() == 128
+    disabled = p.color(QPalette.ColorGroup.Disabled, role.Text)
+    assert disabled.name() == "#9d9d9d"

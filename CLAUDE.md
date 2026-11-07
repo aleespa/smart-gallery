@@ -252,6 +252,10 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   selection, checked box and the open tab share it. Style sheets should use
   `palette(highlight)` rather than a hard-coded colour. The brand name
   (`gui/brand.py`) runs along the same `SUNSET` stops.
+  The app is **always dark** (no light mode): `apply_theme` asks Qt for the
+  dark scheme, and where the platform ignores that (offscreen tests, older
+  Windows styles) it switches to Fusion with `theme.dark_palette()`, the same
+  colours from `colors.DARK_PALETTE`. Don't add light-mode branches.
 - **Photo viewer.** `gui/viewer/` is the one viewer every page opens
   (Library, person photos, `FaceViewer`, the RAW picker); `window.py`
   composes `stage.py` (fit/zoom/boxes), `previews.py`, `filmstrip.py` and the

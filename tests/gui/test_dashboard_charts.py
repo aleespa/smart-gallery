@@ -533,3 +533,20 @@ def test_theme_switch_keeps_label_axis_settings(qtbot, desktop_font, monkeypatch
     assert not axis.isGridLineVisible()
     assert axis.labelsAngle() == -90
     assert set(SHUTTER.labels) <= set(texts), texts
+
+
+def test_charts_dark_when_the_app_palette_is_dark(qtbot, monkeypatch):
+    """Where the system scheme is unknown, the app's (always dark) palette
+    decides, so charts never come out light on the dark app."""
+    from smart_gallery.gui import theme
+
+    ms = MonthSeries(("2026-01",), {"A": (1.0,)})
+    view = _view(qtbot, charts.month_bar_chart(ms, {"A": "#123456"}, "photos", True))
+    _scheme(monkeypatch, Qt.ColorScheme.Unknown)
+    old = QApplication.palette()
+    try:
+        QApplication.setPalette(theme.dark_palette())
+        charts.apply_theme(view)
+        assert view.chart().theme() == QChart.ChartThemeDark
+    finally:
+        QApplication.setPalette(old)

@@ -43,10 +43,36 @@ CLOSE_HOVER = "#C42B1C"  # the window close button, as the system draws it
 # ── neutrals ────────────────────────────────────────────────────────────────
 NEUTRAL = "#9E9E9E"  # the "Other" category in charts
 TILE_BACK = (128, 128, 128, 50)  # library placeholder tile
+# ── dark mode ───────────────────────────────────────────────────────────────
+# The app is always dark. Qt's windows11 style supplies these itself when asked
+# for the dark scheme; they are applied directly where it cannot (offscreen,
+# older Windows styles), so every platform looks the same. Role -> colour.
+DARK_PALETTE = {
+    "Window": "#1E1E1E",
+    "WindowText": "#FFFFFF",
+    "Base": "#2D2D2D",
+    "AlternateBase": (255, 255, 255, 15),
+    "Text": "#FFFFFF",
+    "Button": "#3C3C3C",
+    "ButtonText": "#FFFFFF",
+    "BrightText": "#FFAB9B",
+    "Light": "#787878",
+    "Midlight": "#5A5A5A",
+    "Mid": "#282828",
+    "Dark": "#1E1E1E",
+    "Shadow": "#000000",
+    "ToolTipBase": "#3C3C3C",
+    "ToolTipText": "#D4D4D4",
+    "PlaceholderText": (255, 255, 255, 128),
+    "Link": "#FFAB9B",
+    "LinkVisited": "#FF8279",
+}
+DARK_DISABLED_TEXT = "#9D9D9D"  # text, window text and button text when disabled
+
 # How opaque the tint over the main window's Acrylic backdrop is (0-255):
 # higher is calmer and easier to read, lower shows more of what is behind.
 BACKDROP_TINT_ALPHA = 175
-VIEWER_STAGE = "#161616"  # the photo viewer's backdrop, in light and dark themes
+VIEWER_STAGE = "#161616"  # the photo viewer's backdrop
 VIEWER_ON_STAGE = "#F2F2F2"  # arrows, glyphs and messages on the backdrop
 VIEWER_ARROW_BACK = (0, 0, 0, 115)  # the arrow buttons' translucent pill
 VIEWER_SHADOW = (0, 0, 0, 70)  # the photo's soft shadow, per ring

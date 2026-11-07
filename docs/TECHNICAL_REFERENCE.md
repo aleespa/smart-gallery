@@ -1112,13 +1112,16 @@ by its `db_uuid`, like a mirror (9.2).
 
 `gui/thumbs/cache.py`. Thumbnails (256 px) are cached on the gallery's drive
 at `.smart_gallery\thumbs\<id÷1000>\<id>-<mtime_ns>.jpg`; the mtime in the
-name makes an edited file get a fresh thumbnail. A `.none` marker records a
+name makes an edited file get a fresh thumbnail. RAW thumbnails end in
+`-r1.jpg`: they are turned upright by the RAW's own Orientation tag (the
+embedded previews carry none), and the suffix makes the sideways ones from
+before that be made again, deleting the old file. A `.none` marker records a
 file that couldn't be thumbnailed, so it isn't retried.
 
 | File | Source of the picture |
 |---|---|
 | JPEG/PNG/WebP | The image itself |
-| CR2/CR3 | The embedded preview (`PreviewImage`, else `JpgFromRaw`, else `ThumbnailImage`), via ExifTool |
+| CR2/CR3 | The embedded preview (`PreviewImage`, else `JpgFromRaw`, else `ThumbnailImage`), via ExifTool, turned by the RAW's Orientation |
 | Video | A typical frame chosen by ffmpeg if installed, else the embedded thumbnail |
 | Other | No thumbnail (grey placeholder) |
 

@@ -43,8 +43,14 @@ class _Unavailable(Exception):
     """ExifTool could not run (missing, timed out): retry later, no marker."""
 
 
-def thumb_path(root: Path, media_id: int, mtime_ns: int | None) -> Path:
-    name = f"{media_id}-{mtime_ns or 0}.jpg"
+# RAW thumbnails made before previews were turned upright have the plain name;
+# this suffix makes them be made again (and the old file is removed then).
+RAW_THUMB_SUFFIX = "-r1"
+
+
+def thumb_path(root: Path, media_id: int, mtime_ns: int | None, ext: str = "") -> Path:
+    suffix = RAW_THUMB_SUFFIX if (ext or "").lower() in RAW_EXTENSIONS else ""
+    name = f"{media_id}-{mtime_ns or 0}{suffix}.jpg"
     return Path(root) / ".smart_gallery" / "thumbs" / str(media_id // 1000) / name
 
 
@@ -69,7 +75,7 @@ def ensure_thumbnail(
 
 
 def _ensure(root, media_id, mtime_ns, abspath, ext, media_type) -> Path | None:
-    dest = thumb_path(root, media_id, mtime_ns)
+    dest = thumb_path(root, media_id, mtime_ns, ext)
     marker = _marker_path(dest)
     if dest.is_file():
         return dest
@@ -100,7 +106,20 @@ def _ensure(root, media_id, mtime_ns, abspath, ext, media_type) -> Path | None:
         return dest if dest.is_file() else None
     finally:
         tmp.unlink(missing_ok=True)
+    _remove_legacy(root, media_id, mtime_ns, dest)
     return dest
+
+
+def _remove_legacy(root, media_id, mtime_ns, dest: Path) -> None:
+    """Delete the thumbnail a RAW had under its old name, now replaced."""
+    legacy = thumb_path(root, media_id, mtime_ns)
+    if legacy == dest:
+        return
+    for path in (legacy, _marker_path(legacy)):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _write_marker(marker: Path) -> None:
@@ -160,16 +179,43 @@ def load_preview(abspath: Path, ext: str, max_edge: int = 2048):
         return None
 
 
-def _open_raw_preview(abspath: Path):
-    """First decodable embedded image of a RAW file, as an open Pillow image.
+_TRANSPOSE = {2: "FLIP_LEFT_RIGHT", 3: "ROTATE_180", 4: "FLIP_TOP_BOTTOM",
+              5: "TRANSPOSE", 6: "ROTATE_270", 7: "TRANSVERSE", 8: "ROTATE_90"}  # fmt: skip
 
+
+def _open_raw_preview(abspath: Path):
+    """First decodable embedded image of a RAW file, as an open Pillow image,
+    turned upright.
+
+    Cameras store the embedded previews as the sensor saw them, without an
+    orientation of their own; the RAW's Orientation tag says how to turn them.
     Raises _Unavailable when ExifTool cannot run, ValueError when it ran but
     no tag yielded a usable image.
     """
+    from PIL import Image
+
     image = _open_embedded(abspath, RAW_PREVIEW_TAGS)
     if image is None:
         raise ValueError(f"no embedded preview in {abspath}")
-    return image
+    if image.getexif().get(0x0112, 1) != 1:
+        return image  # the preview says itself; exif_transpose turns it
+    method = _TRANSPOSE.get(_raw_orientation(abspath))
+    if method is None:
+        return image
+    with image:
+        return image.transpose(getattr(Image.Transpose, method))
+
+
+def _raw_orientation(abspath: Path) -> int:
+    """The RAW file's EXIF Orientation (1-8); 1 when it has none."""
+    out = _run_tool(
+        [_get_exiftool_path(), "-s3", "-n", "-Orientation", str(abspath)],
+        EXIFTOOL_TIMEOUT_S,
+    )
+    try:
+        return int(out.strip() or 1)
+    except ValueError:
+        return 1
 
 
 def _open_embedded(abspath: Path, tags):

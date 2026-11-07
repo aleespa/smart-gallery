@@ -245,7 +245,8 @@ def test_raw_falls_through_exiftool_tags(drive, monkeypatch):
     (drive / "x.cr3").write_bytes(b"raw")
     out = _ensure(drive, "x.cr3", ext=".cr3")
     assert out is not None
-    assert calls == ["-PreviewImage", "-JpgFromRaw"]
+    # Then the RAW's orientation, to turn the preview upright.
+    assert calls == ["-PreviewImage", "-JpgFromRaw", "-n"]
     with Image.open(out) as im:
         assert max(im.size) == THUMB_EDGE
 
@@ -278,7 +279,7 @@ def test_raw_with_no_preview_in_any_tag_records_failure(drive, monkeypatch):
     monkeypatch.setattr(cache.subprocess, "run", lambda args, **kw: Empty())
     (drive / "x.cr3").write_bytes(b"raw")
     assert _ensure(drive, "x.cr3", ext=".cr3") is None
-    assert thumb_path(drive, 1, 100).with_suffix(".none").is_file()
+    assert thumb_path(drive, 1, 100, ".cr3").with_suffix(".none").is_file()
 
 
 @pytest.mark.exiftool
@@ -315,3 +316,68 @@ def test_load_preview_unreadable_returns_none(drive):
     (drive / "bad.jpg").write_bytes(b"junk")
     assert cache.load_preview(drive / "bad.jpg", ".jpg") is None
     assert cache.load_preview(drive / "missing.jpg", ".jpg") is None
+
+
+def _fake_raw(monkeypatch, orientation: bytes, preview_exif: int | None = None):
+    """subprocess.run as ExifTool on a RAW with a 600x400 preview."""
+    buf = io.BytesIO()
+    image = Image.new("RGB", (600, 400), "red")
+    if preview_exif is None:
+        image.save(buf, "JPEG")
+    else:
+        exif = Image.Exif()
+        exif[0x0112] = preview_exif
+        image.save(buf, "JPEG", exif=exif)
+    asked = []
+
+    class Result:
+        returncode = 0
+
+        def __init__(self, out):
+            self.stdout = out
+
+    def fake_run(args, **kwargs):
+        if "-Orientation" in args:
+            asked.append(args)
+            return Result(orientation)
+        return Result(buf.getvalue())
+
+    monkeypatch.setattr(cache.subprocess, "run", fake_run)
+    return asked
+
+
+def test_raw_preview_turned_by_the_raw_orientation(drive, monkeypatch):
+    # A portrait shot (rotate 90 CW), as ExifTool prints it: "6" and a newline.
+    _fake_raw(monkeypatch, b"6" + bytes([13, 10]))
+    (drive / "x.cr3").write_bytes(b"raw")
+    assert cache.load_preview(drive / "x.cr3", ".cr3").size == (400, 600)
+    with Image.open(_ensure(drive, "x.cr3", ext=".cr3")) as im:
+        assert im.width < im.height
+
+
+def test_raw_preview_upright_needs_no_turn(drive, monkeypatch):
+    _fake_raw(monkeypatch, b"1")
+    (drive / "x.cr3").write_bytes(b"raw")
+    assert cache.load_preview(drive / "x.cr3", ".cr3").size == (600, 400)
+
+
+def test_raw_preview_with_its_own_orientation_keeps_it(drive, monkeypatch):
+    asked = _fake_raw(monkeypatch, b"6", preview_exif=8)
+    (drive / "x.cr3").write_bytes(b"raw")
+    assert cache.load_preview(drive / "x.cr3", ".cr3").size == (400, 600)
+    assert asked == []  # the preview's own tag wins; no second lookup
+
+
+def test_raw_thumbnail_replaces_the_old_sideways_one(drive, monkeypatch):
+    _fake_raw(monkeypatch, b"6")
+    (drive / "x.cr3").write_bytes(b"raw")
+    old = thumb_path(drive, 1, 100)
+    old.parent.mkdir(parents=True)
+    old.write_bytes(b"old sideways thumbnail")
+    out = _ensure(drive, "x.cr3", ext=".cr3")
+    assert out == thumb_path(drive, 1, 100, ".cr3") and out != old
+    assert not old.exists()
+
+
+def test_jpeg_thumbnail_name_unchanged(drive):
+    assert thumb_path(drive, 1, 100, ".jpg") == thumb_path(drive, 1, 100)

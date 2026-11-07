@@ -308,3 +308,57 @@ def test_info_panel_shows_only_the_current_photo(qtbot, repo, make_item):
         if label.isVisibleTo(viewer.info_body)
     ]
     assert "a/1.jpg" not in shown and "Canon EOS R6" not in shown
+
+
+def test_holding_right_does_not_queue_every_photo(qtbot, repo, make_item, monkeypatch):
+    """Landing after a burst, the shown photo's preview is not stuck behind a
+    decode for every photo passed on the way."""
+    import time
+
+    real = previews_mod.load_preview
+
+    def slow(*args, **kwargs):
+        time.sleep(0.05)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(previews_mod, "load_preview", slow)
+    for i in range(30):
+        _photo(repo, make_item, f"a/{i:02d}.jpg", (300, 200))
+    viewer, _ = _open(qtbot, repo)
+    for _ in range(29):
+        QTest.keyClick(viewer, Qt.Key.Key_Right)
+    started = time.monotonic()
+    qtbot.waitUntil(viewer.has_preview, timeout=5000)
+    assert time.monotonic() - started < 0.6  # ~80 queued decodes take ~2 s
+
+
+def test_reopens_on_the_monitor_it_was_left_on(
+    qtbot, repo, make_item, monkeypatch, tmp_path
+):
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QGuiApplication
+
+    from smart_gallery.gui import paths
+    from smart_gallery.gui.viewer.state import STATE_FILE, ViewerState, save_state
+
+    class SecondScreen:
+        def availableGeometry(self):  # noqa: N802 (Qt API)
+            return QRect(1920, 0, 1920, 1080)
+
+    second = SecondScreen()
+    monkeypatch.setattr(
+        QGuiApplication,
+        "screenAt",
+        staticmethod(lambda point: second if point.x() >= 1920 else None),
+    )
+    save_state(paths.app_data_dir() / STATE_FILE, ViewerState((2000, 100, 700, 500)))
+    _photo(repo, make_item, "a/1.jpg")
+    ctx = _ctx(repo.db_path)
+    viewer = MediaViewer(ctx, repo.drive_root, _rows(repo), 0)
+    qtbot.addWidget(viewer)
+    assert (viewer.x(), viewer.y(), viewer.width(), viewer.height()) == (
+        2000,
+        100,
+        700,
+        500,
+    )

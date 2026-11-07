@@ -87,3 +87,40 @@ def test_cache_is_bounded(qtbot, tmp_path):
             loader.request(i, path, ".jpg", "image")
     kept = [i for i in range(len(paths)) if loader.cached(i, PREVIEW_EDGE) is not None]
     assert kept == list(range(2, CACHE_SIZE + 2))
+
+
+def test_cancel_pending_lets_the_latest_request_go_first(qtbot, tmp_path, monkeypatch):
+    """Holding → queues a decode per photo passed; on landing, the viewer
+    drops the queue so the photo it stops on is not stuck behind them."""
+    import time
+
+    import smart_gallery.gui.viewer.previews as mod
+
+    real = mod.load_preview
+
+    def slow(*args, **kwargs):
+        time.sleep(0.05)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(mod, "load_preview", slow)
+    paths = [_jpeg(tmp_path / f"{i}.jpg", (40, 30)) for i in range(41)]
+    loader = PreviewLoader()
+    for i in range(40):
+        loader.request(i, paths[i], ".jpg", "image")
+    loader.cancel_pending()
+    started = time.monotonic()
+    with qtbot.waitSignal(
+        loader.ready, check_params_cb=lambda r: r.key == 40, timeout=3000
+    ):
+        loader.request(40, paths[40], ".jpg", "image")
+    assert time.monotonic() - started < 0.5  # 40 queued decodes would take ~1 s
+
+
+def test_only_one_full_size_preview_is_kept(qtbot, tmp_path):
+    loader = PreviewLoader()
+    for i in range(3):
+        path = _jpeg(tmp_path / f"z{i}.jpg", (300, 200))
+        with qtbot.waitSignal(loader.ready):
+            loader.request(i, path, ".jpg", "image", edge=ZOOM_EDGE)
+    kept = [i for i in range(3) if loader.cached(i, ZOOM_EDGE) is not None]
+    assert kept == [2]

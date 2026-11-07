@@ -122,6 +122,10 @@ class PreviewLoader(QObject):
         slot = (result.key, result.edge)
         awaited = self._inflight.pop(slot, False)
         if result.image is not None:
+            if result.edge > PREVIEW_EDGE:
+                # Full-size previews are large (~70 MB for 24 MP): keep one.
+                for other in [k for k in self._cache if k[1] > PREVIEW_EDGE]:
+                    del self._cache[other]
             self._cache[slot] = result.image
             self._cache.move_to_end(slot)
             while len(self._cache) > CACHE_SIZE:

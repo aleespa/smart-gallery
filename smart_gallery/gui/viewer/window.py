@@ -178,8 +178,7 @@ class MediaViewer(QWidget):
 
         self._build()
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        screen = (self.screen() or QGuiApplication.primaryScreen()).availableGeometry()
-        self.setGeometry(place(self._state.geometry, screen))
+        self.setGeometry(place(self._state.geometry, self._home_screen()))
         self._set_info_open(self._state.info_open)
         self._set_strip_open(self._state.strip_open)
 
@@ -310,6 +309,16 @@ class MediaViewer(QWidget):
         action()
         event.accept()
 
+    def _home_screen(self) -> QRect:
+        """The available area of the screen the window was left on (a
+        monitor unplugged since: the window's own, else the primary)."""
+        saved = self._state.geometry
+        screen = None
+        if saved is not None:
+            screen = QGuiApplication.screenAt(QRect(*saved).center())
+        screen = screen or self.screen() or QGuiApplication.primaryScreen()
+        return screen.availableGeometry()
+
     # ── navigation ──────────────────────────────────────────────────────────
     def row(self) -> LibraryRow:
         return self.rows[self._index]
@@ -345,6 +354,8 @@ class MediaViewer(QWidget):
         self.stage.set_play_glyph(False)
         self._show_sections([])
 
+        # Decodes queued for photos passed on the way would delay this one.
+        self._previews.cancel_pending()
         if row.offloaded:
             label = self._holder(row) if self._holder else None
             self.stage.set_message(

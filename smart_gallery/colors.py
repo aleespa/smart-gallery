@@ -43,6 +43,9 @@ CLOSE_HOVER = "#C42B1C"  # the window close button, as the system draws it
 # ── neutrals ────────────────────────────────────────────────────────────────
 NEUTRAL = "#9E9E9E"  # the "Other" category in charts
 TILE_BACK = (128, 128, 128, 50)  # library placeholder tile
+# How opaque the tint over the main window's Acrylic backdrop is (0-255):
+# higher is calmer and easier to read, lower shows more of what is behind.
+BACKDROP_TINT_ALPHA = 175
 VIEWER_STAGE = "#161616"  # the photo viewer's backdrop, in light and dark themes
 VIEWER_ON_STAGE = "#F2F2F2"  # arrows, glyphs and messages on the backdrop
 VIEWER_ARROW_BACK = (0, 0, 0, 115)  # the arrow buttons' translucent pill

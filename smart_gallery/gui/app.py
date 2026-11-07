@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QCloseEvent, QFont, QPalette
+from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtGui import QCloseEvent, QFont, QPainter, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from smart_gallery.gui import theme
+from smart_gallery.gui import backdrop, theme
 from smart_gallery.gui.areas import AREAS, Area
 from smart_gallery.gui.brand import BrandLabel
 from smart_gallery.gui.context import AppContext
@@ -71,7 +71,13 @@ class MainWindow(QMainWindow):
     def __init__(self, ctx: AppContext | None = None):
         super().__init__()
         self.setWindowTitle("Smart Gallery")
-        self.setWindowFlag(Qt.WindowType.FramelessWindowHint)
+        # Windows 11: a frame with its title bar hidden, and Acrylic behind
+        # the window (see gui/backdrop.py); elsewhere no system frame at all.
+        self.backdrop = backdrop.supported()
+        if self.backdrop:
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        else:
+            self.setWindowFlag(Qt.WindowType.FramelessWindowHint)
         self.ctx = ctx or AppContext(self)
         if self.ctx.galleries is None:
             self.ctx.galleries = GalleryStore(app_data_dir() / "galleries.json")
@@ -117,6 +123,9 @@ class MainWindow(QMainWindow):
         self.ctx.gallery_changed.connect(self._update_header)
         self.resize(1200, 800)
         self.show_area(AREAS[0].id)
+        if self.backdrop:
+            self.winId()  # the native window now, so the backdrop is set
+            backdrop.apply(self)  # before it is first shown (no flash)
 
     def _build_top_bar(self) -> QWidget:
         bar = TitleBar()
@@ -215,9 +224,30 @@ class MainWindow(QMainWindow):
         super().changeEvent(event)
 
     def event(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.WinIdChange and self.backdrop:
+            # Qt rebuilds the native window when the web view first needs it;
+            # the new one has none of the backdrop settings.
+            QTimer.singleShot(0, lambda: backdrop.apply(self))
         if event.type() == QEvent.Type.WindowActivate:
             self.galleries_panel.on_window_activated()
         return super().event(event)
+
+    def nativeEvent(self, event_type, message):  # noqa: N802 (Qt API)
+        if self.backdrop:
+            handled = backdrop.native_event(message)
+            if handled is not None:
+                return handled
+        return super().nativeEvent(event_type, message)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (Qt API)
+        if self.backdrop:  # tone the Acrylic down where nothing else paints
+            painter = QPainter(self)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+            painter.fillRect(
+                self.rect(), backdrop.tint(self.palette().window().color())
+            )
+            painter.end()
+        super().paintEvent(event)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if not self.ctx.can_leave():

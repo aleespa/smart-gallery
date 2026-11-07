@@ -220,6 +220,14 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   `gui/titlebar.py:TitleBar` (drag to move, double-click to maximize) with
   `WindowButtons` at the right, and a `ResizeFrame` margin resizes it. Moving
   and resizing use `startSystemMove`/`startSystemResize`, so snapping works.
+- **Acrylic backdrop (Windows 11).** When `gui/backdrop.py:supported()` (not
+  offscreen, not Windows 10, not `SG_NO_BACKDROP=1`), `MainWindow` instead
+  keeps a real frame whose system title bar `nativeEvent` hides, is
+  translucent, and gets Acrylic before its first show and again on every
+  `WinIdChange` (Qt rebuilds the native window for the web view; missing
+  that makes the window flash fully transparent). `paintEvent` tones it down
+  with `colors.BACKDROP_TINT_ALPHA`. Tests run offscreen, so they see the
+  frameless window unless they patch `backdrop.supported`.
 - **Sync options button.** `gui/mirror/` (`menu.py`, `dialogs.py`) is the
   Library header's Sync options menu (`MirrorButton`, a QPushButton): sync (preview dialog with per-class file lists), free
   up, bring back, pair. It acts only on its own dry run, reads that dry run's

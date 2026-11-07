@@ -20,7 +20,8 @@ from __future__ import annotations
 import os
 import sys
 
-from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtGui import QColor, QGuiApplication, QPainter
 
 from smart_gallery import colors
 
@@ -64,8 +65,16 @@ def frame_inset(maximized: bool, border: int) -> int:
     return border if maximized else 0
 
 
-def apply(window) -> bool:
-    """Give ``window`` the Acrylic backdrop; True when Windows reports it on."""
+def caption_style(style: int, own_title_bar: bool) -> int:
+    """The window style to set: without WS_SYSMENU when the window draws its
+    own title bar (else Windows draws its caption buttons over the app's);
+    unchanged for a window that keeps the Windows title bar and its buttons."""
+    return style & ~WS_SYSMENU if own_title_bar else style
+
+
+def apply(window, keep_caption: bool = False) -> bool:
+    """Give ``window`` the Acrylic backdrop; True when Windows reports it on.
+    ``keep_caption``: the window keeps the Windows title bar and buttons."""
     import ctypes
     from ctypes import byref, c_int, wintypes
 
@@ -78,7 +87,8 @@ def apply(window) -> bool:
         user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
         hwnd = wintypes.HWND(int(window.winId()))
         style = user32.GetWindowLongPtrW(hwnd, GWL_STYLE)
-        user32.SetWindowLongPtrW(hwnd, GWL_STYLE, ctypes.c_ssize_t(style & ~WS_SYSMENU))
+        new_style = caption_style(style, own_title_bar=not keep_caption)
+        user32.SetWindowLongPtrW(hwnd, GWL_STYLE, ctypes.c_ssize_t(new_style))
         user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FRAMECHANGED_ONLY)
         dwm.DwmExtendFrameIntoClientArea(hwnd, byref(MARGINS(-1, -1, -1, -1)))
         dark = window.palette().window().color().lightness() < 128
@@ -117,3 +127,55 @@ def native_event(message) -> tuple[bool, int] | None:
         rect.right -= inset
         rect.bottom -= inset
     return True, 0
+
+
+class BackdropMixin:
+    """Acrylic for a top-level window. Put it first in the bases; call
+    ``init_backdrop`` early in ``__init__`` and ``finish_backdrop`` once the
+    window is built (before it is shown). ``own_title_bar``: the window draws
+    its own title bar and buttons, so the Windows one is hidden."""
+
+    backdrop = False
+    _own_title_bar = False
+
+    def init_backdrop(self, *, own_title_bar: bool) -> bool:
+        self._own_title_bar = own_title_bar
+        # Looked up on the module so tests can stand in for the system.
+        self.backdrop = _module().supported()
+        if self.backdrop:
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        return self.backdrop
+
+    def finish_backdrop(self) -> None:
+        if self.backdrop:
+            self.winId()  # the native window now, so the backdrop is set
+            self._apply_backdrop()  # before it is first shown (no flash)
+
+    def _apply_backdrop(self) -> None:
+        _module().apply(self, keep_caption=not self._own_title_bar)
+
+    def event(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.WinIdChange and self.backdrop:
+            # A rebuilt native window (Qt makes one when a web view first
+            # needs it) has none of the backdrop settings.
+            QTimer.singleShot(0, self._apply_backdrop)
+        return super().event(event)
+
+    def nativeEvent(self, event_type, message):  # noqa: N802 (Qt API)
+        if self.backdrop and self._own_title_bar:
+            handled = _module().native_event(message)
+            if handled is not None:
+                return handled
+        return super().nativeEvent(event_type, message)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (Qt API)
+        if self.backdrop:  # tone the Acrylic down where nothing else paints
+            painter = QPainter(self)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+            painter.fillRect(self.rect(), tint(self.palette().window().color()))
+            painter.end()
+        super().paintEvent(event)
+
+
+def _module():
+    return sys.modules[__name__]

@@ -226,8 +226,11 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   translucent, and gets Acrylic before its first show and again on every
   `WinIdChange` (Qt rebuilds the native window for the web view; missing
   that makes the window flash fully transparent). `paintEvent` tones it down
-  with `colors.BACKDROP_TINT_ALPHA`. Tests run offscreen, so they see the
-  frameless window unless they patch `backdrop.supported`.
+  with `colors.BACKDROP_TINT_ALPHA`. Both live in `backdrop.BackdropMixin`,
+  which the photo viewer uses too (`own_title_bar=False`: it keeps the
+  Windows title bar and close button; only its top bar and info panel show
+  the backdrop, the stage and filmstrip stay solid). Tests run offscreen,
+  so they see no backdrop unless they patch `backdrop.supported`.
 - **Sync options button.** `gui/mirror/` (`menu.py`, `dialogs.py`) is the
   Library header's Sync options menu (`MirrorButton`, a QPushButton): sync (preview dialog with per-class file lists), free
   up, bring back, pair. It acts only on its own dry run, reads that dry run's

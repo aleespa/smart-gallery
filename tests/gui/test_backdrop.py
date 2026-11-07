@@ -41,12 +41,20 @@ def test_frame_inset_only_when_maximized():
 @pytest.fixture
 def fake_backdrop(monkeypatch):
     """Pretend the system supports Acrylic; record each apply."""
-    calls = []
+
+    class Calls(list):
+        pass
+
+    calls = Calls()
     monkeypatch.setattr(backdrop, "supported", lambda *a, **k: True)
 
-    def record(window):
+    def record(window, keep_caption=False):
         calls.append(window.isVisible())
+        captions.append(keep_caption)
         return True
+
+    captions = []
+    calls.captions = captions  # type: ignore[attr-defined]
 
     monkeypatch.setattr(backdrop, "apply", record)
     return calls
@@ -96,3 +104,77 @@ def test_tint_painted_where_nothing_else_paints(qtbot, fake_backdrop):
     qtbot.waitExposed(win)
     corner = win.grab().toImage().pixelColor(1, 1)  # inside the resize margin
     assert corner.alpha() == colors.BACKDROP_TINT_ALPHA
+
+
+def test_caption_style_drops_the_system_menu_only_for_own_title_bars():
+    style = 0x00CF0000  # WS_OVERLAPPEDWINDOW, which includes WS_SYSMENU
+    assert not backdrop.caption_style(style, own_title_bar=True) & backdrop.WS_SYSMENU
+    assert backdrop.caption_style(style, own_title_bar=False) == style
+
+
+def test_main_window_hides_windows_caption_buttons(qtbot, fake_backdrop):
+    from smart_gallery.gui.app import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    assert fake_backdrop.captions == [False]  # its own buttons: no system ones
+
+
+def _viewer(qtbot, repo, make_item, tmp_path, monkeypatch):
+    from PIL import Image
+
+    from smart_gallery.gui.context import AppContext
+    from smart_gallery.gui.galleries.store import Gallery
+    from smart_gallery.gui.library.model import LibraryRow
+    from smart_gallery.gui.viewer.window import MediaViewer
+
+    monkeypatch.setenv("SG_APP_DATA", str(tmp_path / "appdata"))
+    path = repo.drive_root / "a.jpg"
+    Image.new("RGB", (900, 600), (200, 30, 30)).save(path, "JPEG")
+    repo.upsert_many([make_item("a.jpg", width=900, height=600)])
+    r = repo.conn.execute(
+        "SELECT id, relpath, media_type, ext, mtime_ns FROM media_items"
+    ).fetchone()
+    ctx = AppContext()
+    ctx.set_gallery(Gallery("u", str(repo.db_path), "t"))
+    viewer = MediaViewer(ctx, repo.drive_root, [LibraryRow(*r)], 0)
+    qtbot.addWidget(viewer)
+    return viewer
+
+
+def test_viewer_without_backdrop_is_unchanged(
+    qtbot, repo, make_item, tmp_path, monkeypatch
+):
+    viewer = _viewer(qtbot, repo, make_item, tmp_path, monkeypatch)
+    assert not viewer.backdrop
+    assert not viewer.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+
+def test_viewer_with_backdrop_keeps_its_windows_title_bar(
+    qtbot, repo, make_item, tmp_path, monkeypatch, fake_backdrop
+):
+    viewer = _viewer(qtbot, repo, make_item, tmp_path, monkeypatch)
+    assert viewer.backdrop
+    assert viewer.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    assert not viewer.windowFlags() & Qt.WindowType.FramelessWindowHint
+    assert fake_backdrop == [False]  # set before the window is shown
+    assert fake_backdrop.captions == [True]  # the system close button stays
+
+
+def test_viewer_backdrop_behind_the_chrome_not_the_photo(
+    qtbot, repo, make_item, tmp_path, monkeypatch, fake_backdrop
+):
+    from PySide6.QtCore import QPoint
+
+    viewer = _viewer(qtbot, repo, make_item, tmp_path, monkeypatch)
+    viewer.resize(1000, 700)
+    viewer.show()
+    qtbot.waitExposed(viewer)
+    qtbot.waitUntil(viewer.has_preview)
+    image = viewer.grab().toImage()
+    bar = viewer.top_bar.mapTo(viewer, QPoint(viewer.top_bar.width() // 2, 4))
+    assert image.pixelColor(bar).alpha() == colors.BACKDROP_TINT_ALPHA
+    panel = viewer.info_panel.mapTo(viewer, QPoint(5, viewer.info_panel.height() - 5))
+    assert image.pixelColor(panel).alpha() == colors.BACKDROP_TINT_ALPHA
+    stage = viewer.stage.mapTo(viewer, QPoint(3, 3))
+    assert image.pixelColor(stage) == QColor(colors.VIEWER_STAGE)  # solid

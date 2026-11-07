@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 
 from smart_gallery.config import to_abspath
 from smart_gallery.gui import paths, theme
+from smart_gallery.gui.backdrop import BackdropMixin
 from smart_gallery.gui.library.model import LibraryRow
 from smart_gallery.gui.repo_query import RepoQuery
 from smart_gallery.gui.thumbs.cache import thumb_path
@@ -146,7 +147,7 @@ class FlowLayout(QLayout):
         return y + line - rect.y()
 
 
-class MediaViewer(QWidget):
+class MediaViewer(BackdropMixin, QWidget):
     closed = Signal()  # the window was closed
 
     def __init__(
@@ -160,6 +161,9 @@ class MediaViewer(QWidget):
         holder: Callable[[LibraryRow], str | None] | None = None,
     ):
         super().__init__(parent, Qt.WindowType.Window)
+        # Acrylic behind the top bar and info panel on Windows 11; the
+        # window keeps its Windows title bar and close button.
+        self.init_backdrop(own_title_bar=False)
         self.ctx = ctx
         self.root = Path(root)
         self.rows = rows
@@ -176,6 +180,10 @@ class MediaViewer(QWidget):
         self._query.failed.connect(self._on_info_failed)
 
         self._build()
+        if self.backdrop:  # let the backdrop show behind the info panel
+            self.info_panel.setStyleSheet("QScrollArea { background: transparent; }")
+            self.info_panel.viewport().setAutoFillBackground(False)
+            self.info_body.setAutoFillBackground(False)  # setWidget turned it on
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setGeometry(place(self._state.geometry, self._home_screen()))
         self._set_info_open(self._state.info_open)
@@ -186,6 +194,7 @@ class MediaViewer(QWidget):
             thumbs.ready.connect(self._on_thumb)
         # The rows belong to the gallery that was open; another has other ids.
         ctx.gallery_changed.connect(self.close)
+        self.finish_backdrop()
         self.show_index(index)
 
     # ── building ────────────────────────────────────────────────────────────

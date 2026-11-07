@@ -38,6 +38,7 @@ from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.library.model import LibraryRow
 from smart_gallery.gui.repo_query import RepoQuery
 from smart_gallery.gui.thumbs.cache import load_preview
+from smart_gallery.gui.viewer.info import format_duration, format_size  # noqa: F401
 from smart_gallery.models import MediaItem
 from smart_gallery.util import format_shutter
 
@@ -62,28 +63,6 @@ DISCONNECTED = "Drive not connected."
 FIT_SCREEN_HEIGHT = 0.8  # of the screen, for the first photo's window
 FIT_SCREEN_MAX = 0.95  # the window never takes more of the screen than this
 MIN_AREA = QSize(200, 200)  # the photo area's smallest size
-
-
-def format_size(num_bytes: int | None) -> str:
-    if num_bytes is None:
-        return EMPTY
-    size = float(num_bytes)
-    for unit in ("B", "KB", "MB", "GB"):
-        if size < 1024:
-            break
-        size /= 1024
-    else:
-        unit = "TB"
-    return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
-
-
-def format_duration(ms: float | None) -> str:
-    if ms is None:
-        return ""
-    seconds = int(round(ms / 1000))
-    hours, rest = divmod(seconds, 3600)
-    minutes, secs = divmod(rest, 60)
-    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
 
 
 def _number(value, fmt: str = "{:g}") -> str:

@@ -43,6 +43,7 @@ CLOSE_HOVER = "#C42B1C"  # the window close button, as the system draws it
 # ── neutrals ────────────────────────────────────────────────────────────────
 NEUTRAL = "#9E9E9E"  # the "Other" category in charts
 TILE_BACK = (128, 128, 128, 50)  # library placeholder tile
+VIEWER_STAGE = "#161616"  # the photo viewer's backdrop, in light and dark themes
 TILE_GLYPH = (128, 128, 128, 170)  # the photo/play glyph on it
 BADGE_BACK = (0, 0, 0, 150)  # video badge over a thumbnail
 BADGE_TEXT = (255, 255, 255, 235)

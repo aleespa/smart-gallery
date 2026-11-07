@@ -63,7 +63,7 @@ QFrame#filterChip QToolButton {{ border: none; background: transparent; }}
 QPushButton#linkButton {{
     border: none;
     background: transparent;
-    color: palette(highlight);
+    color: {theme.ACCENT};
     padding: 0;
 }}
 QPushButton#linkButton:hover {{ text-decoration: underline; }}

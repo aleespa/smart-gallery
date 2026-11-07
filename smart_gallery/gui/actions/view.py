@@ -246,6 +246,7 @@ class ActionsView(QWidget):
         self.preview.setStyleSheet("font-family: Consolas, monospace; padding: 4px;")
         self.copy_button = QPushButton("Copy as CLI command")
         self.run_button = QPushButton("Run")
+        theme.primary(self.run_button)
         self.run_button.setDefault(True)
 
         buttons = QHBoxLayout()

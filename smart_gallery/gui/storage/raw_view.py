@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from smart_gallery import colors
+from smart_gallery.gui import theme
 from smart_gallery.gui.library.model import LibraryRow
 from smart_gallery.gui.library.viewer import MediaViewer
 from smart_gallery.recycle_bin import recycle_bin_capacity
@@ -341,6 +342,7 @@ class RawView(QWidget):
         self.clear_button = QPushButton(CLEAR)
         self.clear_button.clicked.connect(self.clear_picks)
         self.convert_button = QPushButton(CONVERT_NONE)
+        theme.primary(self.convert_button)
         self.convert_button.clicked.connect(self._on_convert)
         foot = QHBoxLayout()
         foot.addWidget(self.footer_label, 1)

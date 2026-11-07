@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QSizePolicy,
     QSplitter,
     QStackedWidget,
@@ -78,6 +79,12 @@ HIDE_FILTERS_TEXT = "«"
 HIDE_FILTERS_TIP = "Hide the filters"
 SHOW_FILTERS_TIP = "Show the filters"
 FILTERS_STRIP_TEXT = "Filters"
+IMPORT_TEXT = "Import…"
+IMPORT_TIP = "Copy new photos and videos in from a card, phone or folder"
+EXPORT_TEXT = "Export…"
+EXPORT_TIP = "Copy the files these filters select to a folder"
+EXPORT_SIZE = (720, 720)
+IMPORT_SIZE = (860, 760)
 STRIP_WIDTH = 28
 
 NO_GALLERY = "Open or create a gallery to browse it here."
@@ -378,6 +385,8 @@ class LibraryView(QWidget):
         super().__init__(parent)
         self.ctx = ctx
         self.viewer: MediaViewer | None = None
+        self.import_window = None  # FormWindow, built on first use
+        self.export_window = None
         self._root: Path | None = None  # drive root of the rows in the grid
         self._folder = ""
         self._building_tree = False
@@ -426,11 +435,20 @@ class LibraryView(QWidget):
         self.filters_strip = CollapsedStrip(FILTERS_STRIP_TEXT)
         self.filters_strip.setToolTip(SHOW_FILTERS_TIP)
         self.filters_strip.setVisible(False)
+        self.export_btn = QPushButton(EXPORT_TEXT)
+        self.export_btn.setToolTip(EXPORT_TIP)
+        theme.primary(self.export_btn)
+        self.filters.bottom_row.addWidget(self.export_btn, 1)
+        self.import_btn = QPushButton(IMPORT_TEXT)
+        self.import_btn.setToolTip(IMPORT_TIP)
+        theme.primary(self.import_btn)
         # The main window moves these to the right of its page header; a view
         # shown on its own keeps them above the grid.
         self.header_controls = QWidget()
         header = QHBoxLayout(self.header_controls)
         header.setContentsMargins(0, 0, 0, 0)
+        header.addWidget(self.import_btn)
+        header.addSpacing(16)
         header.addWidget(self.stats)
         header.addSpacing(16)
         header.addWidget(QLabel("Sort by"))
@@ -439,6 +457,12 @@ class LibraryView(QWidget):
         header.addSpacing(16)
         self.mirror_btn = MirrorButton(ctx)
         header.addWidget(self.mirror_btn)
+        # The primary Import button sets the row's height; the other controls
+        # fill it so the row lines up.
+        for widget in (self.sort, self.mirror_btn):
+            widget.setSizePolicy(
+                widget.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Preferred
+            )
 
         self.grid = GroupedGrid()
         self.grid.setIconSize(QSize(ICON_EDGE, ICON_EDGE))
@@ -480,6 +504,9 @@ class LibraryView(QWidget):
         self.descending.toggled.connect(self.reload_rows)
         self.hide_filters_btn.clicked.connect(lambda: self.set_filters_shown(False))
         self.filters_strip.clicked.connect(lambda: self.set_filters_shown(True))
+        self.export_btn.clicked.connect(self.open_export)
+        self.import_btn.clicked.connect(self.open_import)
+        ctx.open_in_import.connect(self._import_again)
         self.grid.doubleClicked.connect(self.open_viewer)
         self.grid_model.rowsInserted.connect(self._schedule_thumbs)
         self.grid.groups_toggled.connect(self._schedule_thumbs)
@@ -501,6 +528,37 @@ class LibraryView(QWidget):
         """Show the filter panel, or hide it behind the slim Filters strip."""
         self.filters.setVisible(shown)
         self.filters_strip.setVisible(not shown)
+
+    # ── import and export ───────────────────────────────────────────────────
+    def open_export(self) -> None:
+        """Open the Export window for what the filters select now."""
+        self.filters.apply()  # an edit still waiting out the pause counts
+        if not self.filters.valid:
+            return  # the panel already marks the bad box in red
+        if self.export_window is None:
+            from smart_gallery.gui.exports.view import ExportView
+            from smart_gallery.gui.form_window import FormWindow
+
+            self.export_window = FormWindow(
+                "Export", ExportView(self.ctx), self, size=EXPORT_SIZE
+            )
+        self.export_window.present()
+
+    def open_import(self) -> None:
+        """Open the Import window."""
+        if self.import_window is None:
+            from smart_gallery.gui.form_window import FormWindow
+            from smart_gallery.gui.imports.view import ImportView
+
+            self.import_window = FormWindow(
+                "Import", ImportView(self.ctx), self, size=IMPORT_SIZE
+            )
+        self.import_window.present()
+
+    def _import_again(self, profile: str | None) -> None:
+        """History's "Run again" on an import: open Import with its profile."""
+        self.open_import()
+        self.import_window.form.select_profile(profile)
 
     # ── loading ─────────────────────────────────────────────────────────────
     def reload(self, *_args) -> None:

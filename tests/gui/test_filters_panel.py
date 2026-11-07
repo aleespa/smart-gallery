@@ -222,7 +222,7 @@ def test_clear_is_pinned_above_the_scrolling_filters(qtbot, repo, make_item):
     assert not ctx.filters.cameras
 
 
-def test_clear_button_uses_the_accent(qtbot, repo, make_item):
+def test_clear_button_uses_the_accent_fill(qtbot, repo, make_item):
     from PySide6.QtGui import QColor
 
     from smart_gallery.gui import theme
@@ -230,7 +230,7 @@ def test_clear_button_uses_the_accent(qtbot, repo, make_item):
     panel, _ = _shown(qtbot, repo, make_item)
     image = panel.clear_btn.grab().toImage()
     edge = image.pixelColor(6, image.height() // 2)
-    accent = QColor(theme.ACCENT)
+    accent = QColor(theme.ACCENT_FILL)
     assert abs(edge.red() - accent.red()) < 12
     assert abs(edge.green() - accent.green()) < 12
     assert abs(edge.blue() - accent.blue()) < 12

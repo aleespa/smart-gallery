@@ -7,7 +7,6 @@ from smart_gallery.cli import build_filter_query, parse_args
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.exports.view import ExportView
 from smart_gallery.gui.galleries.store import Gallery
-from smart_gallery.gui.imports.page import TransferPage
 from smart_gallery.gui.paths import app_data_dir
 from smart_gallery.gui.state_store import load_json
 from smart_gallery.organize.filters import FilterOptions
@@ -65,8 +64,7 @@ def test_summary_counts_what_the_filters_select(qtbot, repo, make_item, monkeypa
     text = view.summary.text()
     assert "3 JPEGs and videos copied, 1 RAW files converted" in text
     assert "1 other files left out" in text
-    view.filters.cameras.set_selected(("Sony A7",))
-    view.filters.apply()
+    view.ctx.set_filters(FilterOptions(cameras=["Sony A7"]))  # the Library's
     qtbot.waitUntil(lambda: view._summary is not None and view._summary.matched == 1)
 
 
@@ -77,9 +75,12 @@ def test_run_builds_the_export_job(qtbot, repo, make_item, monkeypatch, tmp_path
     view.levels[1].setCurrentIndex(view.levels[1].findData("Model"))
     view.by_media_type.setChecked(False)
     view.jpeg_only.setChecked(True)
-    view.filters.cameras.set_selected(("Canon EOS R8",))
+    ctx.set_filters(FilterOptions(cameras=["Canon EOS R8"]))
     assert view.run_button.isEnabled()
-    view.run_button.click()  # applies the filter edit still waiting to apply
+    ran = []
+    view.ran.connect(lambda: ran.append(True))
+    view.run_button.click()
+    assert ran == [True]
 
     args = _argv(view)
     assert args.drive == repo.drive_root
@@ -89,7 +90,6 @@ def test_run_builds_the_export_job(qtbot, repo, make_item, monkeypatch, tmp_path
     assert args.jpeg_only and not args.mirror and not args.dry_run
     assert build_filter_query(args) == FilterOptions(cameras=["Canon EOS R8"])
     assert ctx.jobs.calls[-1].title == "Export · E"
-    assert ctx.filters == FilterOptions()  # the Library's filters are untouched
 
     saved = load_json(app_data_dir() / "export.json")
     assert saved["jpeg_only"] is True and "dry_run" not in saved
@@ -132,25 +132,6 @@ def test_folder_name_can_be_chosen(qtbot, repo, make_item, monkeypatch, tmp_path
     assert "folder" not in load_json(app_data_dir() / "export.json")
 
 
-def test_library_filters_are_copied_not_shared(qtbot, repo, make_item, monkeypatch):
-    view, ctx = _view(qtbot, repo, make_item, monkeypatch)
-    ctx.set_filters(FilterOptions(cameras=["Sony A7"]))
-    assert view.filters.options == FilterOptions()  # not followed
-    view.use_library.click()
-    assert view.filters.options == FilterOptions(cameras=["Sony A7"])
-    view.filters.clear()
-    assert ctx.filters == FilterOptions(cameras=["Sony A7"])
-
-
-def test_bad_filter_blocks_the_run(qtbot, repo, make_item, monkeypatch, tmp_path):
-    view, _ = _view(qtbot, repo, make_item, monkeypatch)
-    view.dest.setText(str(tmp_path))
-    view.filters.texts["min_iso"].setText("lots")
-    view.filters.apply()
-    assert not view.run_button.isEnabled()
-    assert view.summary.text() == export_view.FIX_FILTERS
-
-
 def test_command_is_collapsed_until_asked_for(
     qtbot, repo, make_item, monkeypatch, tmp_path
 ):
@@ -173,14 +154,49 @@ def test_jpeg_only_needs_exiftool(qtbot, repo, make_item, monkeypatch):
     assert view.jpeg_hint.text() == export_view.NO_EXIFTOOL
 
 
-def test_page_switches_between_import_and_export(qtbot, repo, make_item, monkeypatch):
+def test_library_export_button_opens_the_export_window(
+    qtbot, repo, make_item, monkeypatch, tmp_path
+):
+    from smart_gallery.gui.library.view import LibraryView
+
     monkeypatch.setattr(export_view, "exiftool_available", lambda: True)
     ctx = _ctx(repo, make_item)
-    page = TransferPage(ctx)
-    qtbot.addWidget(page)
-    assert page.stack.currentWidget() is page.import_view
-    assert page.header_controls is not None
-    page.export_button.click()
-    assert page.stack.currentWidget() is page.export_view
-    ctx.open_in_import.emit("Canon SD card")
-    assert page.stack.currentWidget() is page.import_view
+    library = LibraryView(ctx)
+    qtbot.addWidget(library)
+    library.filters.cameras.set_selected(("Sony A7",))  # still waiting to apply
+    library.export_btn.click()
+    window = library.export_window
+    assert window.isVisible() and isinstance(window.form, ExportView)
+    assert ctx.filters == FilterOptions(cameras=["Sony A7"])
+    qtbot.waitUntil(lambda: window.form._summary is not None)
+    assert window.form._summary.matched == 1
+
+    window.form.dest.setText(str(tmp_path))
+    window.form.run_button.click()
+    assert build_filter_query(_argv(window.form)) == FilterOptions(cameras=["Sony A7"])
+    assert not window.isVisible()  # closes once the job starts
+    library.export_btn.click()
+    assert library.export_window is window and window.isVisible()
+
+
+def test_library_export_waits_for_good_filters(qtbot, repo, make_item):
+    from smart_gallery.gui.library.view import LibraryView
+
+    ctx = _ctx(repo, make_item)
+    library = LibraryView(ctx)
+    qtbot.addWidget(library)
+    library.filters.texts["min_iso"].setText("lots")
+    library.export_btn.click()
+    assert library.export_window is None
+
+
+def test_enter_in_a_box_presses_no_button(qtbot, repo, make_item):
+    from PySide6.QtWidgets import QPushButton
+
+    from smart_gallery.gui.library.view import LibraryView
+
+    library = LibraryView(_ctx(repo, make_item))
+    qtbot.addWidget(library)
+    library.export_btn.click()
+    buttons = library.export_window.findChildren(QPushButton)
+    assert buttons and not any(b.autoDefault() or b.isDefault() for b in buttons)

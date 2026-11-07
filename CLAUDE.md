@@ -241,21 +241,31 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   up, bring back, pair. It acts only on its own dry run, reads that dry run's
   `--plan-out` JSON, and passes it to the real run as `--expect-plan`. No new
   area.
-- **Import / Export area.** `gui/imports/page.py:TransferPage` puts an
-  Import | Export switch (`gui/segment.py`) in the header over `ImportView`
-  and `gui/exports/view.py:ExportView`. The Export page runs `export`; its
-  `FilterPanel(shared=False)` keeps its own filters (emits `changed`, never
-  touches `ctx.filters`), and `gui/exports/model.py:filter_argv` turns them
-  back into CLI filter flags (round-trip tested against `build_filter_query`,
-  so a new `FilterOptions` field needs a line there too). `--jpeg-only`
+- **Import and Export windows.** There is no Import/Export area: the Library
+  opens `gui/imports/view.py:ImportView` (its header's **Import…**) and
+  `gui/exports/view.py:ExportView` (**Export…** in the filter panel's
+  `bottom_row`), each inside a modeless `gui/form_window.py:FormWindow` that
+  is kept between openings and closes on the form's `ran` signal. History's
+  "Run again" on an import navigates to `library` and emits
+  `open_in_import`, which the Library answers by opening Import with that
+  profile. Export runs `export` on `ctx.filters` (the Library's filters,
+  followed live); `gui/exports/model.py:filter_argv` turns them back into CLI
+  filter flags (round-trip tested against `build_filter_query`, so a new
+  `FilterOptions` field needs a line there too). `--jpeg-only`
   converts CR2/CR3 by copying each into a staging folder under the
   destination and running `convert_cr3` on the batch; the source drive is
   never written.
 - **Theme** lives in `gui/theme.py`: Segoe UI Variable Text for controls,
-  Georgia (`serif_font`) for headings only, and one accent (`ACCENT`, the
-  first Sunset stop) set as the palette's Highlight/Accent so every
-  selection, checked box and the open tab share it. Style sheets should use
-  `palette(highlight)` rather than a hard-coded colour. The brand name
+  Georgia (`serif_font`) for headings only, and one accent in two shades.
+  `ACCENT` (the first Sunset stop, bright coral) is for text and thin lines
+  on the dark background: the open tab's underline, links, outlines.
+  `ACCENT_FILL` (deeper coral) is for any surface with text on it, always
+  with white `ON_ACCENT` text; it is the palette's Highlight/Accent, so
+  selections, checked boxes and toggled buttons share it. Style sheets should
+  use `palette(highlight)` for a fill and `theme.ACCENT` for a line, never a
+  hard-coded colour; `tests/unit/test_colors.py` checks both contrasts. A
+  page's main action goes through `theme.primary(button)` (white bold text on
+  `ACCENT_FILL`, plain grey while disabled); other buttons stay plain. The brand name
   (`gui/brand.py`) runs along the same `SUNSET` stops.
   The app is **always dark** (no light mode): `apply_theme` asks Qt for the
   dark scheme, and where the platform ignores that (offscreen tests, older

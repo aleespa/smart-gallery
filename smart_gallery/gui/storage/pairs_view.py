@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from smart_gallery import colors
+from smart_gallery.gui import theme
 from smart_gallery.gui.storage.pairs_dialog import PILLS, PairDialog
 from smart_gallery.storage.compare import DIFFERENT, MATCH, UNREADABLE
 from smart_gallery.storage.pairs import (
@@ -350,6 +351,7 @@ class PairsView(QWidget):
         self.clear_button = QPushButton(CLEAR)
         self.clear_button.clicked.connect(self.clear_choices)
         self.move_button = QPushButton(MOVE_NONE)
+        theme.primary(self.move_button)
         self.move_button.clicked.connect(self._on_move)
         foot = QHBoxLayout()
         foot.addLayout(texts, 1)

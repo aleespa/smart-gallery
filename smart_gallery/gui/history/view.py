@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from smart_gallery.gui import theme
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.history.store import JobRecord
 from smart_gallery.gui.imports.model import profile_name_from_title
@@ -90,6 +91,7 @@ class HistoryView(QWidget):
         self.detail.setReadOnly(True)
         self.detail.setStyleSheet("font-family: Consolas, monospace;")
         self.run_button = QPushButton("Run again")
+        theme.primary(self.run_button)
         self.run_button.setEnabled(False)
         self.note = QLabel()
 
@@ -169,10 +171,10 @@ class HistoryView(QWidget):
         self.note.clear()
         if all(argv and argv[0] == "import" for argv in record.argvs):
             # The drive letters in an import may belong to another card or
-            # drive by now, so the Import area asks for them again.
+            # drive by now, so the Library's Import window asks for them again.
             name = profile_name_from_title(record.title)
             if name is not None or len(record.argvs) > 1:
-                self.ctx.navigate.emit("import")
+                self.ctx.navigate.emit("library")
                 self.ctx.open_in_import.emit(name)
                 return
         if len(record.argvs) == 1:

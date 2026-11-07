@@ -279,9 +279,9 @@ smart-gallery export --from E:/ --to F:/Share --people "Ana" \
     --date-start 2025-01-01 --date-end 2025-12-31 --jpeg-only
 ```
 
-The desktop app's **Import / Export** page has an **Export** tab that builds
-this command: its own filters (people included), the destination, the folder
-layout and the JPEG-only switch.
+In the desktop app, **Export…** under the Library's filters opens a window
+that builds this command from those filters (people included), the
+destination, the folder layout and the JPEG-only switch.
 
 ### `convert-raw` — extract JPEG previews from Canon RAW files
 

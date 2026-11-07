@@ -71,7 +71,7 @@ def test_accent_palette_shares_the_sunset_accent():
     palette = theme.accent_palette(QPalette())
     for group in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive):
         for role in (QPalette.ColorRole.Highlight, QPalette.ColorRole.Accent):
-            assert palette.color(group, role).name() == theme.ACCENT.lower()
+            assert palette.color(group, role).name() == theme.ACCENT_FILL.lower()
         text = palette.color(group, QPalette.ColorRole.HighlightedText)
         assert text.name() == theme.ON_ACCENT.lower()
     assert theme.ACCENT == GRADIENT[0].name().upper()
@@ -87,7 +87,7 @@ def test_apply_theme_sets_font_and_accent(qapp):
         theme.apply_theme(qapp)
         assert qapp.font().families()[0] == theme.SANS[0]
         highlight = qapp.palette().color(QPalette.ColorRole.Highlight)
-        assert highlight.name() == theme.ACCENT.lower()
+        assert highlight.name() == theme.ACCENT_FILL.lower()
     finally:
         qapp.setFont(font)
         qapp.setPalette(palette)
@@ -107,7 +107,7 @@ def test_apply_theme_is_always_dark(qapp):
         assert p.color(QPalette.ColorRole.Window).lightness() < 128
         assert p.color(QPalette.ColorRole.Base).lightness() < 128
         assert p.color(QPalette.ColorRole.WindowText).lightness() > 200
-        assert p.color(QPalette.ColorRole.Highlight).name() == theme.ACCENT.lower()
+        assert p.color(QPalette.ColorRole.Highlight).name() == theme.ACCENT_FILL.lower()
     finally:
         qapp.setStyle(style)
         qapp.setFont(font)
@@ -128,3 +128,47 @@ def test_dark_palette_matches_windows_11_dark():
     assert p.color(role.PlaceholderText).alpha() == 128
     disabled = p.color(QPalette.ColorGroup.Disabled, role.Text)
     assert disabled.name() == "#9d9d9d"
+
+
+def test_main_actions_are_primary_buttons(qtbot, repo):
+    """Each page's main action is white bold text on the accent fill."""
+    from smart_gallery.gui import theme
+    from smart_gallery.gui.context import AppContext
+    from smart_gallery.gui.exports.view import ExportView
+    from smart_gallery.gui.galleries.store import Gallery
+    from smart_gallery.gui.history.view import HistoryView
+    from smart_gallery.gui.imports.view import ImportView
+    from smart_gallery.gui.library.view import LibraryView
+
+    ctx = AppContext()
+    ctx.set_gallery(Gallery("uuid", str(repo.db_path), "E"))
+    library = LibraryView(ctx)
+    views = [library, ExportView(ctx), ImportView(ctx), HistoryView(ctx)]
+    for view in views:
+        qtbot.addWidget(view)
+    buttons = [
+        library.filters.clear_btn,
+        library.export_btn,
+        library.import_btn,
+        views[1].run_button,
+        views[2].run_button,
+        views[3].run_button,
+    ]
+    for button in buttons:
+        assert button.objectName() == "primaryButton", button.text()
+        assert button.styleSheet() == theme.PRIMARY_STYLE
+
+
+def test_primary_button_reads_and_greys_out(qtbot):
+    from PySide6.QtWidgets import QPushButton
+
+    from smart_gallery.gui import theme
+
+    button = theme.primary(QPushButton("Run"))
+    qtbot.addWidget(button)
+    button.resize(120, 36)
+    edge = button.grab().toImage().pixelColor(6, 18)
+    assert edge.name() == theme.ACCENT_FILL.lower()
+    button.setEnabled(False)
+    edge = button.grab().toImage().pixelColor(6, 18)
+    assert edge.name() != theme.ACCENT_FILL.lower()

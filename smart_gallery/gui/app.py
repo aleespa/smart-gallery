@@ -59,7 +59,7 @@ QToolButton#areaTab {{
     font-size: {theme.TAB_PT}pt;
 }}
 QToolButton#areaTab:hover {{ border-bottom-color: palette(mid); }}
-QToolButton#areaTab:checked {{ border-bottom-color: palette(highlight); }}
+QToolButton#areaTab:checked {{ border-bottom-color: {theme.ACCENT}; }}
 QGroupBox {{ font-family: "{theme.SERIF[0]}"; font-size: {theme.SECTION_PT}pt; }}
 """
 QUIT_WHILE_RUNNING = "A job is still running. Cancel it and quit?"

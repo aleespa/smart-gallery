@@ -426,7 +426,7 @@ class PhotoStage(QWidget):
                 h = metrics.height() + 4
                 chip = QRectF(r.left(), r.top() - h - 4, w, h)
                 p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(accent)
+                p.setBrush(theme.qcolor(theme.ACCENT_FILL))
                 p.drawRoundedRect(chip, h / 2, h / 2)
                 p.setPen(theme.qcolor(theme.ON_ACCENT))
                 p.drawText(chip, Qt.AlignmentFlag.AlignCenter, box.label)

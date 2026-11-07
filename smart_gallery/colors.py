@@ -5,8 +5,12 @@ figures all read their colours from here, so this module imports neither Qt
 nor a plotting library. To retheme the app, edit the values in this file:
 
 - ``SUNSET`` is the brand: the title-bar name runs from its first stop to its
-  last, and its first stop is the ``ACCENT`` (selections, checked boxes, the
-  open tab, primary buttons).
+  last, and its first stop is the ``ACCENT``: text and thin lines in the
+  accent on the dark background (the open tab's underline, links, outlines).
+- ``ACCENT_FILL`` is the accent wherever it fills a surface with text on it
+  (selections, checked buttons and boxes, primary buttons). The bright coral
+  is too light for either white or dark text to read well on it, so fills use
+  this deeper coral with white ``ON_ACCENT`` text (5.2:1, past WCAG's 4.5:1).
 - ``categorical()`` is the chart colourmap. It is generated from the accent:
   every colour keeps the accent's lightness and colourfulness (in OKLCH, so
   they look equally bright) and only the hue turns, by the golden angle, so
@@ -28,8 +32,9 @@ from functools import lru_cache
 # Sunset: coral to orange.
 SUNSET: tuple[str, ...] = ("#FF5F6D", "#FFA552")
 ACCENT = SUNSET[0]
-# Text on the accent: dark, since white on coral is too faint to read.
-ON_ACCENT = "#1A1A1A"
+# The accent as a fill under text, and the text on it (5.2:1 contrast).
+ACCENT_FILL = "#C93246"
+ON_ACCENT = "#FFFFFF"
 # The brand name's capital letters, over the gradient's lower-case ones.
 BRAND_CAPS = "#FFFFFF"
 

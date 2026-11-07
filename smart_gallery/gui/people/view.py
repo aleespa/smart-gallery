@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from smart_gallery.config import drive_root_of
-from smart_gallery.gui import paths
+from smart_gallery.gui import paths, theme
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.jobspec import JOB_RUNNING, JobSpec
 from smart_gallery.gui.people import model
@@ -97,6 +97,7 @@ class PeopleView(QWidget):
         # Shown on the page header's right (MainWindow takes header_controls).
         self.status = QLabel()
         self.find_button = QPushButton(FIND_BUTTON)
+        theme.primary(self.find_button)
         self.undo_button = QPushButton(UNDO)
         self.undo_button.setEnabled(False)
         self.header_controls = QWidget()

@@ -8,7 +8,6 @@ def test_every_area_is_a_tab(qtbot):
     assert list(win.tabs) == [a.id for a in AREAS]
     assert [t.text() for t in win.tabs.values()] == [
         "Library",
-        "Import / Export",
         "Stats",
         "Storage",
         "People",
@@ -32,12 +31,12 @@ def test_every_area_opens_with_a_header(qtbot):
 def test_tab_click_switches_area(qtbot):
     win = MainWindow()
     qtbot.addWidget(win)
-    win.tabs["import"].click()
-    assert win.current_area == "import"
-    assert win.tabs["import"].isChecked()
+    win.tabs["people"].click()
+    assert win.current_area == "people"
+    assert win.tabs["people"].isChecked()
     assert not win.tabs["library"].isChecked()
-    win.tabs["import"].click()  # clicking the open tab keeps it open
-    assert win.tabs["import"].isChecked()
+    win.tabs["people"].click()  # clicking the open tab keeps it open
+    assert win.tabs["people"].isChecked()
 
 
 def test_header_names_the_open_gallery(qtbot, repo):
@@ -56,7 +55,7 @@ def test_page_header_shows_the_library_controls(qtbot):
     qtbot.addWidget(win)
     library = win.stack.currentWidget()
     assert win.header_controls.currentWidget() is library.header_controls
-    win.show_area("import")
+    win.show_area("people")
     assert win.header_controls.currentWidget() is not library.header_controls
 
 

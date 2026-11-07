@@ -161,8 +161,9 @@ flowchart LR
    friendly name such as *Family Photos*. The name is stored on the drive.
 4. **Browse.** When the scan finishes, the **Library** page shows your
    folders on the left and the photos on the right.
-5. **Import new photos.** Put an SD card in, open the **Import / Export** page, pick
-   the card as the source, tick your gallery, and press **Run import**
+5. **Import new photos.** Put an SD card in, press **Import…** at the top of
+   the **Library** page, pick the card as the source, tick your gallery, and
+   press **Run import**
    ([section 7](#7-import-and-export-bringing-photos-in-and-out)).
 
 > **Already have a gallery?** If the drive already has a
@@ -179,12 +180,12 @@ From top to bottom:
 
 - **Top bar.** The *Smart Gallery* name, the **gallery button** (which
   gallery is open; click it to switch, add or create one), then one **tab per
-  page**: Library, Import / Export, Stats, Storage, People, History, Advanced. The
+  page**: Library, Stats, Storage, People, History, Advanced. The
   buttons at the far right minimise, maximise and close the window. Drag the
   top bar to move the window; double-click it to maximise.
 - **Page header.** The open gallery's name in small capitals, the page title,
-  and on the right the page's own controls (in the Library: item count,
-  **Sort by**, **Sync options**).
+  and on the right the page's own controls (in the Library: **Import…**, item
+  count, **Sort by**, **Sync options**).
 - **The page** itself.
 - **Status bar** at the bottom. While a job runs it shows the job's title,
   its current step, live counts and a **Cancel** button. When nothing runs it
@@ -332,8 +333,10 @@ them. Hover over one to see which drive keeps it.
 
 ## 7. Import and Export: bringing photos in and out
 
-The **Import / Export** page has a switch at the top right: **Import** brings
-photos into a gallery, **Export** copies a selection out of it.
+Both live on the **Library** page. **Import…**, at the top right next to the
+item count, brings photos into a gallery. **Export…**, under the filters,
+copies what the filters select out of it. Each opens its own window, which
+closes when the job starts; the status bar shows its progress.
 
 ### Import
 
@@ -342,7 +345,7 @@ any folder) **into** one or more galleries, sorted into dated folders, and adds
 them to the catalog. It only copies: the source is never changed, so you can
 format the card yourself afterwards.
 
-![The Import page](images/area-import.png)
+![The Import window](images/area-import.png)
 
 1. **Source.** Removable drives (SD cards, USB sticks) appear in the list;
    press **Refresh** after inserting a card, or **Browse folder…** for any
@@ -384,14 +387,14 @@ Export copies a selection of the open gallery **to** a folder: a USB stick, a
 folder to share, a disk for a print shop. It only reads the gallery; nothing
 in it changes, and the copies are not added to the catalog.
 
-![The Export page](images/area-export.png)
+![The Export window](images/area-export.png)
 
-1. **Filters (left).** The same filters as the Library: dates, photos or
-   videos, cameras, lenses, extensions, exposure and, once face recognition has
-   run, **People**. They are the Export page's own: changing them doesn't
-   change the Library, and the other way round. **Use the Library's filters**
-   copies in what the Library shows right now. The line under the title says
-   how many files match.
+1. **Filters.** Set the Library's filters first (dates, photos or videos,
+   cameras, lenses, extensions, exposure and, once face recognition has run,
+   **People**), then press **Export…** under them. The export takes the
+   files those filters select from the whole gallery; the folder picked in the
+   tree on the left does not narrow it. The window follows the filters while
+   it is open, and the line under its title says how many files match.
 2. **Destination.** The folder to copy into; **Browse…** picks one and
    **Open folder** shows it in File Explorer. Each export goes into a new
    folder inside it, named in **Folder name**. Left empty, it is
@@ -426,7 +429,7 @@ in it changes, and the copies are not added to the catalog.
    something is missing (a destination, say), a line above the button says
    what. Click **Command** to unfold the exact command that will run.
 
-The page remembers your destination and choices for next time.
+The window remembers your destination and choices for next time.
 
 ---
 
@@ -742,7 +745,9 @@ from here:
 **History** lists every job the app ran, newest first: its title, when it
 started, how long it took, how it ended (*ok*, *failed*, *cancelled*) and a
 one-line summary. Select a job to read the end of its log below. **Run again**
-repeats it with the same options.
+repeats it with the same options. For an import it opens the Library's
+Import window with the same profile instead, since the card's drive letter
+may have changed.
 
 ---
 

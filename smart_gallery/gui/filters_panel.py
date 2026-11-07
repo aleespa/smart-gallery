@@ -6,9 +6,8 @@ button. Every panel also follows ``filters_changed``, so two panels never
 show different filters. "Clear all filters" is pinned above the column, so
 it stays in view while the filters scroll.
 
-A panel made with ``shared=False`` (the Export page) keeps its own filters
-instead: it neither publishes nor follows ``ctx.filters``, and emits
-``changed`` with its query (``valid`` is False while a box holds an error).
+``valid`` is False while a box holds an error; ``ctx.filters`` then keeps
+the last query that parsed.
 
 Each range (dates, aperture, ISO, shutter) is one line: lower bound, then
 upper. The date boxes open a calendar. Cameras, lenses, extensions and people
@@ -19,8 +18,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from PySide6.QtCore import QTimer, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -53,19 +51,6 @@ DEBOUNCE_MS = 300
 PANEL_WIDTH = 300
 CLEAR_TEXT = "Clear all filters"
 PEOPLE_MATCH = (("any", "Any of them"), ("all", "All of them"))
-_HOVER = QColor(theme.ACCENT).lighter(112).name()
-_PRESSED = QColor(theme.ACCENT).darker(112).name()
-CLEAR_STYLE = f"""
-QPushButton#accentButton {{
-    background: {theme.ACCENT};
-    color: {theme.ON_ACCENT};
-    border: none;
-    border-radius: 4px;
-    padding: 6px 16px;
-}}
-QPushButton#accentButton:hover {{ background: {_HOVER}; }}
-QPushButton#accentButton:pressed {{ background: {_PRESSED}; }}
-"""
 FILE_TYPES = (("image", "Photos"), ("video", "Videos"), ("other", "Other files"))
 DATE_HINT = "A date like 2026-06-30, or pick one from the calendar."
 ERROR_STYLE = theme.ERROR_FIELD_STYLE
@@ -100,15 +85,9 @@ _LISTS = tuple(name for name, _, _ in _PICKERS)
 
 
 class FilterPanel(QWidget):
-    changed = Signal(object)  # FilterOptions; only a panel with shared=False
-
-    def __init__(
-        self, ctx: AppContext, parent: QWidget | None = None, *, shared: bool = True
-    ):
+    def __init__(self, ctx: AppContext, parent: QWidget | None = None):
         super().__init__(parent)
         self.ctx = ctx
-        self.shared = shared
-        self.options = FilterOptions()  # the query a shared=False panel holds
         self.valid = True
         self._syncing = False  # widgets are being set from code, not edited
         self._choices = RepoQuery(ctx, self)
@@ -171,8 +150,7 @@ class FilterPanel(QWidget):
         self.people_box.setVisible(False)
         body.addStretch(1)
         self.clear_btn = QPushButton(CLEAR_TEXT)
-        self.clear_btn.setObjectName("accentButton")
-        self.clear_btn.setStyleSheet(CLEAR_STYLE)  # on the button: nothing can undo it
+        theme.primary(self.clear_btn)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -192,18 +170,22 @@ class FilterPanel(QWidget):
         layout.addLayout(self.top_row)
         layout.addWidget(self.scroll, 1)
         layout.addWidget(self.errors)
+        # Below the scroll, also always in view: a page's own buttons (the
+        # Library's Export).
+        self.bottom_row = QHBoxLayout()
+        self.bottom_row.setContentsMargins(10, 10, 10, 6)
+        layout.addLayout(self.bottom_row)
         self.setMinimumWidth(PANEL_WIDTH)
 
         self._timer.timeout.connect(self.apply)
         self.clear_btn.clicked.connect(self.clear)
         self._choices.finished.connect(self._set_choices)
         self._choices.failed.connect(lambda _error: self._set_choices({}))
-        if shared:
-            ctx.filters_changed.connect(self._follow)
+        ctx.filters_changed.connect(self._follow)
         ctx.gallery_changed.connect(self.reload_choices)
         ctx.catalog_updated.connect(self.reload_choices)
 
-        self.set_values(from_filter_options(ctx.filters if shared else None))
+        self.set_values(from_filter_options(ctx.filters))
         self.reload_choices()
 
     def _dates_box(self) -> QGroupBox:
@@ -251,6 +233,7 @@ class FilterPanel(QWidget):
             )
             self._sync_people_match()
             self._show_errors({})
+            self.valid = True
         finally:
             self._syncing = False
 
@@ -267,16 +250,7 @@ class FilterPanel(QWidget):
         self._timer.stop()
         options, errors = to_filter_options(self.values())
         self._show_errors(errors)
-        if not self.shared:
-            changed = bool(errors) != (not self.valid)
-            self.valid = not errors
-            if not errors:
-                options = options or FilterOptions()
-                changed = changed or options != self.options
-                self.options = options
-            if changed:
-                self.changed.emit(self.options)
-            return
+        self.valid = not errors
         if errors:
             return
         options = options or FilterOptions()

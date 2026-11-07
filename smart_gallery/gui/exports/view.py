@@ -1,19 +1,19 @@
-"""Export page: copy a filtered part of the open gallery to a folder.
+"""Export form: copy the files the Library's filters select to a folder.
 
-The left column is a filter panel with its own filters (not the Library's;
-"Use the Library's filters" copies those in). The right column picks the
-destination and the new folder made in it (by default "Export <date> <time>"),
-how files are sorted into folders, and whether the export is
-JPEG only (CR2/CR3 converted, videos kept, other files left out). It runs
-the ``export`` command as a job; the gallery is only read. The command itself
-sits in a section that starts collapsed.
+It shows in the Library's Export window (``exports/dialog.py``) and follows
+``ctx.filters``, so what it exports is what the Library's filters show. It
+picks the destination and the new folder made in it (by default
+"Export <date> <time>"), how files are sorted into folders, and whether the
+export is JPEG only (CR2/CR3 converted, videos kept, other files left out).
+It runs the ``export`` command as a job; the gallery is only read. The command
+itself sits in a section that starts collapsed.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QDir, Qt, QTimer, QUrl
+from PySide6.QtCore import QDir, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -45,8 +45,6 @@ from smart_gallery.gui.exports.model import (
     example_path,
     export_summary,
 )
-from smart_gallery.gui.filters_model import from_filter_options
-from smart_gallery.gui.filters_panel import FilterPanel
 from smart_gallery.gui.galleries.store import is_connected
 from smart_gallery.gui.paths import app_data_dir, exiftool_available
 from smart_gallery.gui.repo_query import RepoQuery
@@ -61,14 +59,12 @@ NO_LEVEL = "—"
 FROM = "Exporting from {label}"
 NO_GALLERY = "Open a gallery to export from it."
 DISCONNECTED = "{label} is not connected."
-USE_LIBRARY = "Use the Library's filters"
 COUNTING = "Counting…"
 MATCHED = "{n:,} files match ({size})."
 MATCHED_JPEG = (
     "{n:,} files match: {as_is:,} JPEGs and videos copied, {raws:,} RAW files "
     "converted to JPEG, {left_out:,} other files left out."
 )
-FIX_FILTERS = "Fix the filters marked in red."
 EXAMPLE = "For example: {path}"
 JPEG_ONLY = "JPEG only: convert CR2/CR3 photos to JPEG (videos are kept)"
 JPEG_HINT = (
@@ -83,14 +79,13 @@ ON_EXIST = (("rename", "Keep both (add _1, _2…)"), ("skip", "Skip it"))
 
 
 class ExportView(QWidget):
+    ran = Signal()  # the export job was started
+
     def __init__(self, ctx: AppContext):
         super().__init__()
         self.ctx = ctx
         self._summary: ExportSummary | None = None
         self._counter = RepoQuery(ctx, self)
-
-        self.filters = FilterPanel(ctx, shared=False)
-        self.use_library = QPushButton(USE_LIBRARY)
 
         self.source = QLabel()
         self.source.setFont(theme.serif_font(theme.HEADER_PT))
@@ -143,6 +138,7 @@ class ExportView(QWidget):
         self.problem.setWordWrap(True)
         self.dry_run = QCheckBox("Dry run (plan only, copy nothing)")
         self.run_button = QPushButton("Run export")
+        theme.primary(self.run_button)
 
         self._build_layout()
         self._load_settings()
@@ -151,8 +147,7 @@ class ExportView(QWidget):
             self.jpeg_only.setEnabled(False)
             self.jpeg_hint.setText(NO_EXIFTOOL)
 
-        self.filters.changed.connect(lambda _f: self._recount())
-        self.use_library.clicked.connect(self.use_library_filters)
+        ctx.filters_changed.connect(lambda _f: self._recount())
         self.browse_button.clicked.connect(self._browse)
         self.open_button.clicked.connect(self._open_dest)
         self.dest.textChanged.connect(lambda _t: self._update())
@@ -177,11 +172,6 @@ class ExportView(QWidget):
         self._recount()
 
     def _build_layout(self) -> None:
-        left = QVBoxLayout()
-        left.setContentsMargins(0, 0, 0, 0)
-        left.addWidget(self.use_library)
-        left.addWidget(self.filters, 1)
-
         dest_box = QGroupBox("Destination")
         dest_layout = QVBoxLayout(dest_box)
         dest_row = QHBoxLayout()
@@ -239,9 +229,9 @@ class ExportView(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setWidget(form)
 
-        layout = QHBoxLayout(self)
-        layout.addLayout(left)
-        layout.addWidget(scroll, 1)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(scroll)
 
     # ── settings ────────────────────────────────────────────────────────────
     def settings(self) -> ExportSettings:
@@ -301,17 +291,13 @@ class ExportView(QWidget):
             pass  # remembering the choices is a convenience
 
     # ── filters and summary ─────────────────────────────────────────────────
-    def use_library_filters(self) -> None:
-        self.filters.set_values(from_filter_options(self.ctx.filters))
-        self.filters.apply()
-
     def _recount(self, *_args) -> None:
         self._summary = None
         gallery = self.ctx.current
-        if gallery is None or not is_connected(gallery) or not self.filters.valid:
+        if gallery is None or not is_connected(gallery):
             self._counter.cancel()
         else:
-            options = self.filters.options
+            options = self.ctx.filters
             self._counter.run(lambda repo: export_summary(repo, options))
         self._update()
 
@@ -320,8 +306,6 @@ class ExportView(QWidget):
         self._update()
 
     def _summary_text(self, settings: ExportSettings) -> str:
-        if not self.filters.valid:
-            return FIX_FILTERS
         s = self._summary
         if s is None:
             return COUNTING if self.ctx.current is not None else ""
@@ -349,7 +333,7 @@ class ExportView(QWidget):
         self.example.setText(EXAMPLE.format(path=example_path(settings)))
         self.open_button.setEnabled(Path(settings.dest.strip() or ".").is_dir())
         try:
-            spec = build_export_job(gallery, settings, self.filters.options)
+            spec = build_export_job(gallery, settings, self.ctx.filters)
         except ValueError as error:
             self.preview.setPlainText(str(error))
             self.problem.setText(str(error))
@@ -359,8 +343,7 @@ class ExportView(QWidget):
         self.preview.setPlainText(format_command(list(spec.argvs[0])))
         self.problem.setVisible(False)
         jobs = self.ctx.jobs
-        ready = self.filters.valid and jobs is not None and not jobs.running
-        self.run_button.setEnabled(ready)
+        self.run_button.setEnabled(jobs is not None and not jobs.running)
 
     def _show_command(self, shown: bool) -> None:
         self.preview.setVisible(shown)
@@ -378,15 +361,13 @@ class ExportView(QWidget):
         QDesktopServices.openUrl(QUrl.fromLocalFile(self.dest.text().strip()))
 
     def _run(self) -> None:
-        self.filters.apply()  # an edit still waiting out the pause counts
-        if self.ctx.jobs is None or not self.filters.valid:
+        if self.ctx.jobs is None:
             return
         try:
-            spec = build_export_job(
-                self.ctx.current, self.settings(), self.filters.options
-            )
+            spec = build_export_job(self.ctx.current, self.settings(), self.ctx.filters)
         except ValueError as error:
             self.preview.setPlainText(str(error))
             return
         self._save_settings()
-        self.ctx.jobs.start(spec)
+        if self.ctx.jobs.start(spec) is not False:
+            self.ran.emit()

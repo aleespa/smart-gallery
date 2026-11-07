@@ -68,15 +68,8 @@ def _storage(ctx: AppContext) -> QWidget:
     return StorageView(ctx)
 
 
-def _import(ctx: AppContext) -> QWidget:
-    from smart_gallery.gui.imports.page import TransferPage
-
-    return TransferPage(ctx)
-
-
 AREAS: list[Area] = [
     Area("library", "Library", "image", _library),
-    Area("import", "Import / Export", "download", _import),
     Area("dashboard", "Stats", "chart", _dashboard),
     Area("storage", "Storage", "drive", _storage),
     Area("people", "People", "people", _people),

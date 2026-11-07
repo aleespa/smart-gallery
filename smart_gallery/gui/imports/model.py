@@ -1,4 +1,4 @@
-"""What the Import area needs that isn't widgets. No Qt here."""
+"""What the Import window needs that isn't widgets. No Qt here."""
 
 from __future__ import annotations
 

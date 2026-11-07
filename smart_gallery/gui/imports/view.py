@@ -1,8 +1,11 @@
-"""Import area: pick a source, a saved profile and target galleries, then run."""
+"""Import form: pick a source, a saved profile and target galleries, then run.
+
+It shows in the Library's Import window; History's "Run again" on an import
+opens that window with the profile preselected (``select_profile``)."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QDir, Qt
+from PySide6.QtCore import QDir, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -19,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from smart_gallery.forms import format_command
+from smart_gallery.gui import theme
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.galleries.store import is_connected
 from smart_gallery.gui.imports.editor import ProfileEditor
@@ -38,6 +42,8 @@ PICK_AGAIN = (
 
 
 class ImportView(QWidget):
+    ran = Signal()  # the import job was started
+
     def __init__(self, ctx: AppContext):
         super().__init__()
         self.ctx = ctx
@@ -59,6 +65,7 @@ class ImportView(QWidget):
         self.preview.setReadOnly(True)
         self.dry_run_box = QCheckBox("Dry run (plan only, copy nothing)")
         self.run_button = QPushButton("Run import")
+        theme.primary(self.run_button)
         self.note = QLabel()
         self.note.setWordWrap(True)
 
@@ -95,7 +102,6 @@ class ImportView(QWidget):
         self.dry_run_box.toggled.connect(lambda _on: self._update())
         self.run_button.clicked.connect(self._run)
         ctx.gallery_changed.connect(lambda _g: self.refresh_galleries())
-        ctx.open_in_import.connect(self.select_profile)
         if ctx.jobs is not None:
             ctx.jobs.started.connect(lambda _s: self._update())
             ctx.jobs.finished.connect(lambda _r: self._update())
@@ -263,4 +269,5 @@ class ImportView(QWidget):
             self.preview.setPlainText(str(error))
             return
         self.note.clear()
-        self.ctx.jobs.start(spec)
+        if self.ctx.jobs.start(spec) is not False:
+            self.ran.emit()

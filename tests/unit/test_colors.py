@@ -58,3 +58,27 @@ def test_no_colour_literals_outside_the_colour_module():
         if literal.search(line)
     ]
     assert offenders == [], "put these colours in smart_gallery/colors.py"
+
+
+def _luminance(color: str) -> float:
+    def channel(c: int) -> float:
+        c /= 255
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (int(color[i : i + 2], 16) for i in (1, 3, 5))
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+
+def _contrast(a: str, b: str) -> float:
+    low, high = sorted((_luminance(a), _luminance(b)))
+    return (high + 0.05) / (low + 0.05)
+
+
+def test_text_on_the_accent_fill_is_readable():
+    """WCAG AA for normal text: buttons and selections on the accent fill."""
+    assert _contrast(colors.ACCENT_FILL, colors.ON_ACCENT) >= 4.5
+
+
+def test_accent_text_reads_on_the_dark_window():
+    """Links and outlines use the bright accent straight on the background."""
+    assert _contrast(colors.ACCENT, colors.DARK_PALETTE["Window"]) >= 4.5

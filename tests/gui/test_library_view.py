@@ -351,6 +351,7 @@ def test_sort_direction_button_matches_sort_box_height(qtbot, repo):
     view.show()
     qtbot.waitExposed(view)
     assert view.descending.height() == view.sort.height()
+    assert view.sort.height() == view.import_btn.height()
 
 
 def test_folder_tree_indent_clears_the_selection_bar(qtbot, repo):

@@ -16,8 +16,10 @@ from pathlib import Path
 from PySide6.QtCore import (
     QAbstractListModel,
     QEvent,
+    QItemSelection,
     QItemSelectionModel,
     QModelIndex,
+    QPersistentModelIndex,
     QPointF,
     QRectF,
     QSize,
@@ -25,7 +27,7 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -42,6 +44,8 @@ from PySide6.QtWidgets import (
 )
 
 from smart_gallery.gui import theme
+from smart_gallery.gui.library.model import LibraryRow
+from smart_gallery.gui.library.viewer import MediaViewer
 from smart_gallery.gui.people.model import FaceTile, PeopleList, PersonRow
 from smart_gallery.services.label_faces import LabelEntry
 
@@ -244,6 +248,65 @@ class _TickDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+BOX_WIDTH = 1 / 250  # of the photo's longer side, for the face's outline
+
+
+def face_rect(tile: FaceTile, image: QSize) -> QRectF | None:
+    """Where the face is on a preview of its photo ``image`` big, or None
+    when that cannot be told: the scan did not record the size of the image
+    it decoded, or the preview is turned from it (a RAW whose embedded
+    preview is stored sideways, with no way here to know which way)."""
+    if not tile.img_size or not tile.img_size[0] or not tile.img_size[1]:
+        return None
+    img_w, img_h = tile.img_size
+    if image.isEmpty() or (img_w > img_h) != (image.width() > image.height()):
+        return None
+    scale = image.width() / img_w
+    x, y, w, h = (v * scale for v in tile.bbox)
+    rect = QRectF(x, y, w, h)
+    if not QRectF(0, 0, image.width(), image.height()).contains(rect.center()):
+        return None
+    return rect
+
+
+class FaceViewer(MediaViewer):
+    """The photo viewer stepping through faces: each face's whole photo, with
+    the face outlined."""
+
+    def __init__(self, ctx, root: Path, tiles: list[FaceTile], index: int, parent):
+        rows = [LibraryRow(t.media_id, t.relpath, "image", t.ext, None) for t in tiles]
+        self.tiles = tiles
+        super().__init__(ctx, root, rows, index, parent)
+
+    def tile(self) -> FaceTile:
+        return self.tiles[self._index]
+
+    def _decorate(self, image: QImage) -> QImage:
+        rect = face_rect(self.tile(), image.size())
+        if rect is None:
+            return image
+        out = image.convertToFormat(QImage.Format.Format_RGB32)
+        width = max(2.0, max(out.width(), out.height()) * BOX_WIDTH)
+        pad = width
+        painter = QPainter(out)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(theme.qcolor(theme.ACCENT), width))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(
+            rect.adjusted(-pad, -pad, pad, pad), width * 2, width * 2
+        )
+        painter.end()
+        return out
+
+
+_MOUSE_EVENTS = (
+    QEvent.Type.MouseButtonPress,
+    QEvent.Type.MouseButtonDblClick,
+    QEvent.Type.MouseMove,
+    QEvent.Type.MouseButtonRelease,
+)
+
+
 class FaceGrid(QListView):
     """Face crops in icon mode with a checkbox each: a click ticks or unticks
     one face and keeps the others; Shift+click ticks a range."""
@@ -255,12 +318,16 @@ class FaceGrid(QListView):
         self.ctx = ctx
         self.root: Path | None = None
         self._dismissed: set[int] = set()  # removed since the last set_tiles
+        self.viewer: FaceViewer | None = None
+        self._toggled = QPersistentModelIndex()  # the face the last click ticked
+        self._anchor = QPersistentModelIndex()  # where a Shift+click range starts
         self.setViewMode(QListView.ViewMode.IconMode)
         self.setResizeMode(QListView.ResizeMode.Adjust)
         self.setMovement(QListView.Movement.Static)
         self.setUniformItemSizes(True)
         self.setWrapping(True)
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.setSelectionRectVisible(False)  # dragging selects nothing
         self.setIconSize(QSize(TILE_EDGE, TILE_EDGE))
         self.setGridSize(GRID_SIZE)
         self.setItemDelegate(_TickDelegate(self))
@@ -279,17 +346,59 @@ class FaceGrid(QListView):
             crops.ready.connect(self._on_crop)
 
     def selectionCommand(self, index, event=None):  # noqa: N802 (Qt API)
-        """A plain click toggles one face, like ticking its checkbox, instead
-        of replacing the selection; Shift keeps the usual range select."""
+        """Only the checkbox ticks: a click on it toggles that face and keeps
+        the others, Shift+click on it ticks a range. A click or drag on the
+        rest of the tile changes nothing (double-click opens the photo)."""
         flags = QItemSelectionModel.SelectionFlag
+        if event is None or event.type() not in _MOUSE_EVENTS:
+            return super().selectionCommand(index, event)
+        on_box = (
+            event.type() == QEvent.Type.MouseButtonPress
+            and index.isValid()
+            and checkbox_rect(self.visualRect(index)).contains(
+                event.position().toPoint()
+            )
+        )
+        if not on_box:
+            return flags.NoUpdate
         if (
-            index.isValid()
-            and event is not None
-            and event.type() == QEvent.Type.MouseButtonPress
-            and not event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+            event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+            and self._anchor.isValid()
         ):
-            return flags.Toggle | flags.Rows
-        return super().selectionCommand(index, event)
+            # From the last checkbox clicked, not from Qt's current item
+            # (which a click on a face moves).
+            first, last = sorted((self._anchor.row(), index.row()))
+            model = self.model()
+            span = QItemSelection(model.index(first), model.index(last))
+            self.selectionModel().select(span, flags.Select | flags.Rows)
+            self._toggled = QPersistentModelIndex()
+            return flags.NoUpdate
+        self._toggled = self._anchor = QPersistentModelIndex(index)
+        return flags.Toggle | flags.Rows
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 (Qt API)
+        """Open the face's whole photo. When the click before it was on the
+        checkbox, the tick it toggled is undone, so looking changes nothing."""
+        index = self.indexAt(event.position().toPoint())
+        if not index.isValid() or event.button() != Qt.MouseButton.LeftButton:
+            super().mouseDoubleClickEvent(event)
+            return
+        if self._toggled == QPersistentModelIndex(index):
+            flags = QItemSelectionModel.SelectionFlag
+            self.selectionModel().select(index, flags.Toggle | flags.Rows)
+        self._toggled = QPersistentModelIndex()
+        event.accept()
+        self.open_viewer(index.row())
+
+    def open_viewer(self, row: int) -> FaceViewer | None:
+        if self.root is None or not 0 <= row < len(self._model.tiles):
+            return None
+        if self.viewer is not None:
+            self.viewer.close()
+            self.viewer.deleteLater()
+        self.viewer = FaceViewer(self.ctx, self.root, self.tiles(), row, self)
+        self.viewer.show()
+        return self.viewer
 
     # ── tiles ───────────────────────────────────────────────────────────────
     def set_tiles(self, tiles: list[FaceTile], root: Path | None = None) -> None:

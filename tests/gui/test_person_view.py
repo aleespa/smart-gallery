@@ -515,8 +515,8 @@ def test_face_grid_shows_crops_when_ready(qtbot, repo, cat, tmp_path):
     assert [t.face_id for t in grid.tiles()] == [mine]
 
 
-def test_face_grid_clicks_tick_faces_like_checkboxes(qtbot, repo, cat):
-    from PySide6.QtCore import Qt
+def test_face_grid_only_the_checkbox_ticks(qtbot, repo, cat):
+    from PySide6.QtCore import QPoint, Qt
     from PySide6.QtTest import QTest
 
     from smart_gallery.gui.people.faces_grid import FaceGrid, checkbox_rect
@@ -536,13 +536,21 @@ def test_face_grid_clicks_tick_faces_like_checkboxes(qtbot, repo, cat):
         point = checkbox_rect(rect).center().toPoint() if on_box else rect.center()
         QTest.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton, modifier, point)
 
+    click(1)  # a click on the face itself ticks nothing
+    assert grid.selected_face_ids() == []
     click(0, on_box=True)
-    click(2)  # a plain click adds to the selection instead of replacing it
+    click(2, on_box=True)  # a second checkbox adds to the selection
     assert grid.selected_face_ids() == [order[0], order[2]]
-    click(0)  # and a second click unticks
+    click(1)  # and a click on a face keeps it
+    assert grid.selected_face_ids() == [order[0], order[2]]
+    click(0, on_box=True)  # a second click on a checkbox unticks
     assert grid.selected_face_ids() == [order[2]]
-    click(2, Qt.KeyboardModifier.ShiftModifier)  # Shift still selects a range
+    # Shift: from the last checkbox clicked (face 0) to this one.
+    click(2, Qt.KeyboardModifier.ShiftModifier, on_box=True)
     assert sorted(grid.selected_face_ids()) == sorted(faces)
+    corner = grid.viewport().rect().bottomRight() - QPoint(2, 2)
+    QTest.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton, pos=corner)
+    assert sorted(grid.selected_face_ids()) == sorted(faces)  # empty space too
     grid.grab()  # paints the outline and the ticked checkboxes without errors
 
 
@@ -670,3 +678,70 @@ def test_find_more_failure_shows_message(qtbot, repo, cat, monkeypatch):
     qtbot.waitUntil(lambda: "bad blob" in page.review_title.text())
     assert page.review_title.text() == "Couldn't search for more faces: bad blob"
     assert page.review_grid.tiles() == []
+
+
+def test_double_click_face_opens_its_photo(qtbot, repo, cat):
+    from PySide6.QtCore import Qt
+
+    view, page, alice, hi, lo = _find_more(qtbot, repo, cat)
+    view.resize(1000, 700)
+    view.show()
+    qtbot.waitExposed(view)
+    grid = page.review_grid
+    _pick(grid, lo)
+    row = _grid_ids(grid).index(hi)
+    point = grid.visualRect(grid.model().index(row)).center()
+    # A real double-click is a click and then the double-click itself.
+    qtbot.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    assert grid.selected_face_ids() == [lo]
+    qtbot.mouseDClick(grid.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    assert grid.viewer is not None and grid.viewer.isVisible()
+    assert grid.viewer.tile().face_id == hi
+    assert grid.selected_face_ids() == [lo]  # looking ticks nothing
+    grid.viewer.show_next()  # steps through the grid's faces
+    assert grid.viewer.tile().face_id == lo
+    grid.viewer.close()
+    # On the checkbox, the tick its first click made is undone.
+    from smart_gallery.gui.people.faces_grid import checkbox_rect
+
+    box = checkbox_rect(grid.visualRect(grid.model().index(row))).center().toPoint()
+    qtbot.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton, pos=box)
+    assert sorted(grid.selected_face_ids()) == sorted([hi, lo])
+    qtbot.mouseDClick(grid.viewport(), Qt.MouseButton.LeftButton, pos=box)
+    assert grid.selected_face_ids() == [lo]
+    grid.viewer.close()
+
+
+def test_face_rect_scales_to_the_preview():
+    from PySide6.QtCore import QSize
+
+    from smart_gallery.gui.people.faces_grid import face_rect
+    from smart_gallery.gui.people.model import FaceTile
+
+    tile = FaceTile(1, 1, "a.jpg", ".jpg", "auto", None, (10, 20, 30, 40), (200, 100))
+    rect = face_rect(tile, QSize(400, 200))
+    assert (rect.x(), rect.y(), rect.width(), rect.height()) == (20, 40, 60, 80)
+    old_scan = FaceTile(1, 1, "a.jpg", ".jpg", "auto", None, (10, 20, 30, 40), None)
+    assert face_rect(old_scan, QSize(400, 200)) is None
+    # A preview turned from the image the scan decoded: no box, not a wrong one.
+    assert face_rect(tile, QSize(200, 400)) is None
+
+
+def test_face_viewer_outlines_the_face(qtbot, repo, cat):
+    from PySide6.QtGui import QColor, QImage
+
+    from smart_gallery.gui.people.faces_grid import FaceViewer
+    from smart_gallery.gui.people.model import FaceTile
+
+    media = cat.photo()
+    tile = FaceTile(
+        9, media, "p1.jpg", ".jpg", "auto", None, (50, 50, 40, 40), (200, 200)
+    )
+    viewer = FaceViewer(_ctx(repo), drive_root_of(repo.db_path), [tile], 0, None)
+    qtbot.addWidget(viewer)
+    image = QImage(400, 400, QImage.Format.Format_RGB888)
+    image.fill(QColor("white"))
+    out = viewer._decorate(image)
+    assert out.pixelColor(140, 98) != QColor("white")  # the top edge
+    assert out.pixelColor(140, 140) == QColor("white")  # inside the face
+    assert out.pixelColor(10, 10) == QColor("white")  # elsewhere

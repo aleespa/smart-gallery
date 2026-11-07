@@ -524,7 +524,9 @@ flowchart LR
    and the remaining faces are sorted again so the suggestions improve.
    **Find more** (beside **Show in Library**) searches the faces nobody has
    sorted yet for ones that look like this person, best match first; confirm
-   or reject them like suggestions. **Undo** (or Ctrl+Z) reverses the last
+   or reject them like suggestions. Double-click any face to see its whole
+   photo with the face outlined (**Previous**/**Next** step through the
+   faces); this does not tick it. **Undo** (or Ctrl+Z) reverses the last
    batch of face corrections. Undo refuses, changing nothing, once Find new
    faces, a merge or a rescan has changed those faces; the message then offers
    **Forget this undo step**, after which older steps can be undone.

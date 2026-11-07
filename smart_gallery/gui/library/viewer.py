@@ -266,8 +266,13 @@ class MediaViewer(QDialog):
         if image is None:
             self._set_pixmap(QPixmap(), NO_PREVIEW)
         else:
+            image = self._decorate(image)
             self._fit_to(image.size())
             self._set_pixmap(QPixmap.fromImage(image), "")
+
+    def _decorate(self, image: QImage) -> QImage:
+        """The preview as shown; a subclass may draw on it."""
+        return image
 
     def _on_failed(self, error) -> None:
         text = DISCONNECTED if isinstance(error, FileNotFoundError) else str(error)

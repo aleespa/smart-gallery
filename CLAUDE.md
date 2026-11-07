@@ -241,6 +241,11 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   selection, checked box and the open tab share it. Style sheets should use
   `palette(highlight)` rather than a hard-coded colour. The brand name
   (`gui/brand.py`) runs along the same `SUNSET` stops.
+- **Photo viewer.** `gui/viewer/` is the one viewer every page opens
+  (Library, person photos, `FaceViewer`, the RAW picker); `window.py`
+  composes `stage.py` (fit/zoom/boxes), `previews.py`, `filmstrip.py` and the
+  Qt-free `info.py`. It never resizes itself; keys go through
+  `MediaViewer.keyPressEvent`, so focusable children must not eat arrows.
 - **GUI tests** live in `tests/gui` (marker `gui`, headless via
   `QT_QPA_PLATFORM=offscreen`) and are skipped when PySide6 is missing.
 

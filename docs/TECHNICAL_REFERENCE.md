@@ -1125,7 +1125,26 @@ file that couldn't be thumbnailed, so it isn't retried.
 | Video | A typical frame chosen by ffmpeg if installed, else the embedded thumbnail |
 | Other | No thumbnail (grey placeholder) |
 
-The viewer uses the same sources at a larger size.
+The viewer uses the same sources at a larger size (2048 px; when zoomed,
+the file itself or, for RAW, the full-size `JpgFromRaw` first).
+
+### 12.4 The photo viewer
+
+`gui/viewer/` is the one photo viewer every page opens (`MediaViewer`, re-exported
+from `gui/library/viewer.py`):
+
+| Module | Role |
+|---|---|
+| `info.py` | Qt-free: the info panel's sections (`build_info`) and the faces in a photo (`photo_people`) |
+| `state.py` | The remembered window and panels (`viewer.json` in the app data folder) |
+| `stage.py` | The backdrop: fitted photo, fixed arrows, zoom/pan, face boxes, messages, spinner |
+| `previews.py` | Previews decoded off the GUI thread, a 6-entry cache, neighbours prefetched |
+| `filmstrip.py` | The thumbnail strip (visible thumbnails only, via `ctx.thumbs`) |
+| `window.py` | The window: top bar, keys, info panel, wiring |
+
+The window never resizes itself, so its controls stay put between photos.
+Subclasses (`FaceViewer`, the RAW picker) add behaviour through `boxes()`,
+`on_shown()` and `status_label`.
 
 ### 12.4 The Storage page
 

@@ -260,11 +260,35 @@ example *87 items · 159.6 MB*).
 
 ### Viewing a photo
 
-Double-click a tile to open the **viewer**: a large preview beside a card
-with the file's information (path, date taken, camera, lens, focal length,
-aperture, ISO, shutter, dimensions, duration for videos, and size).
-Use the **Left** and **Right** arrow keys to step through the items on
-screen. **Show in Explorer** opens the file's folder with the file selected.
+Double-click a tile to open the **viewer**. It keeps the size you give it
+(and remembers it): each photo is fitted on a dark backdrop, so the arrows,
+the top bar and the info panel stay in the same place from one photo to the
+next. The same viewer opens from a person's photos, the face grids and the
+RAW picker.
+
+- **Top bar:** the file name and its position (*12 / 340*), then zoom,
+  faces, **Show in Explorer**, full screen, info and close.
+- **Arrows** on the photo's left and right edges step through the items on
+  screen; they dim at the first and last one.
+- **Info panel** (right): the date, the exposure (*f/2.8 · 1/250 s ·
+  ISO 400 · 50 mm*), camera and lens, the people in the photo, and the file's
+  size, dimensions and path.
+- **Faces** outlines every face in the photo, with the names of the people
+  you named.
+- **Filmstrip:** a row of thumbnails along the bottom, hidden at first; open
+  it with **S** or the small *Filmstrip* tab, and click a thumbnail to jump
+  there.
+- Videos show their thumbnail; **Open** plays them in your default player.
+
+| Key | Action |
+|---|---|
+| ← → or the mouse wheel | Previous / next |
+| Home / End | First / last |
+| I | Show or hide the info panel |
+| S | Show or hide the filmstrip |
+| Z, or double-click the photo | Fit ↔ 100 % (drag to look around; Ctrl + wheel zooms in steps) |
+| F | Full screen |
+| Esc | Leave full screen, then close |
 
 <!-- SCREENSHOT TO ADD: images/viewer.png — the viewer window with a real photo and its info card. -->
 > *Screenshot to add: the viewer window.*

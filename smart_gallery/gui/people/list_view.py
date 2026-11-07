@@ -4,13 +4,17 @@ Rows come from ``model.people_list``. Selection is reported in click order, a
 row dropped onto another asks for a merge, and the context menu asks for the
 person actions. This widget never starts a job itself: it emits a signal and
 ``PeopleView`` turns it into one.
+
+Cover crops are asked for only for the rows on screen (and about a screen
+either side), and the ones that arrive are put on their rows in batches: the
+rows differ in height, so each change re-measures the whole list.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QModelIndex, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QModelIndex, QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -45,6 +49,8 @@ HEADER_PX = 28
 PAD = 6
 BAR_PX = 3  # accent bar on the selected row's left edge
 SELECTED_ALPHA = 56  # strength of the selected row's accent wash, 0-255
+VISIBLE_DEBOUNCE_MS = 30  # scrolling settles before covers are asked for
+APPLY_COVERS_MS = 50  # covers arriving within this become one list update
 
 
 def _round(pixmap: QPixmap, size: int = COVER_PX) -> QPixmap:
@@ -235,7 +241,17 @@ class PeopleList(QWidget):
         self._order: list[int] = []
         self._root = ""
         self._covers: dict[int, QPixmap] = {}  # face id -> round crop
-        self._waiting: dict[int, list[QListWidgetItem]] = {}  # face id -> rows
+        self._rows_by_face: dict[int, list[QListWidgetItem]] = {}  # cover rows
+        self._asked: set[int] = set()  # face ids requested since set_people
+        self._ready: set[int] = set()  # covers made but not on their rows yet
+        self._visible_timer = QTimer(self)
+        self._visible_timer.setSingleShot(True)
+        self._visible_timer.setInterval(VISIBLE_DEBOUNCE_MS)
+        self._visible_timer.timeout.connect(self._request_visible)
+        self._apply_timer = QTimer(self)
+        self._apply_timer.setSingleShot(True)
+        self._apply_timer.setInterval(APPLY_COVERS_MS)
+        self._apply_timer.timeout.connect(self._apply_covers)
 
         self.search = QLineEdit()
         self.search.setPlaceholderText(SEARCH_HINT)
@@ -255,6 +271,10 @@ class PeopleList(QWidget):
         self.list.dropped.connect(self._on_drop)
         self.list.customContextMenuRequested.connect(self._on_menu)
         self.show_hidden.clicked.connect(self.show_hidden_requested)
+        bar = self.list.verticalScrollBar()
+        bar.valueChanged.connect(self._schedule_visible)
+        bar.rangeChanged.connect(self._schedule_visible)
+        self.list.viewport().installEventFilter(self)
         crops = getattr(ctx, "face_crops", None)
         if crops is not None:
             crops.ready.connect(self._on_crop)
@@ -268,7 +288,9 @@ class PeopleList(QWidget):
         if root_str != self._root:
             self._covers.clear()
             self._root = root_str
-        self._waiting.clear()
+        self._rows_by_face.clear()
+        self._asked.clear()
+        self._ready.clear()
         before = list(self._order)
         self.list.blockSignals(True)
         try:
@@ -313,38 +335,77 @@ class PeopleList(QWidget):
         item.setToolTip(tip)
         self.list.addItem(item)
         if row.cover is not None:
-            self._ask_cover(item, row.cover)
+            face_id = row.cover.face_id
+            self._rows_by_face.setdefault(face_id, []).append(item)
+            cached = self._covers.get(face_id)
+            if cached is not None:
+                item.setData(COVER_ROLE, cached)
         return item
 
-    def _ask_cover(self, item: QListWidgetItem, tile: model.FaceTile) -> None:
-        cached = self._covers.get(tile.face_id)
-        if cached is not None:
-            item.setData(COVER_ROLE, cached)
-            return
+    # ── covers ──────────────────────────────────────────────────────────────
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt API)
+        if watched is self.list.viewport() and event.type() in (
+            QEvent.Type.Resize,
+            QEvent.Type.Show,
+        ):
+            self._schedule_visible()
+        return super().eventFilter(watched, event)
+
+    def _schedule_visible(self, *_args) -> None:
+        self._visible_timer.start()
+
+    def _request_visible(self) -> None:
+        """Ask for the covers of the rows on screen and a screen either side."""
         crops = getattr(self.ctx, "face_crops", None)
-        if crops is None or not self._root:
+        if crops is None or not self._root or not self.list.isVisible():
             return
-        self._waiting.setdefault(tile.face_id, []).append(item)
-        crops.request(
-            Path(self._root),
-            tile.face_id,
-            tile.relpath,
-            tile.ext,
-            tile.bbox,
-            tile.img_size,
+        view = self.list.viewport().rect()
+        area = view.adjusted(0, -view.height(), 0, view.height())
+        top = self.list.indexAt(QPoint(view.left() + 1, view.top()))
+        first = max(
+            0, (top.row() if top.isValid() else 0) - view.height() // ROW_PX - 1
         )
+        for i in range(first, self.list.count()):
+            if self.list.isRowHidden(i):
+                continue
+            item = self.list.item(i)
+            rect = self.list.visualItemRect(item)
+            if rect.top() > area.bottom():
+                break
+            row = item.data(PERSON_ROLE)
+            if row is None or row.cover is None or not rect.intersects(area):
+                continue
+            tile = row.cover
+            if tile.face_id in self._covers or tile.face_id in self._asked:
+                continue
+            self._asked.add(tile.face_id)
+            crops.request(
+                Path(self._root),
+                tile.face_id,
+                tile.relpath,
+                tile.ext,
+                tile.bbox,
+                tile.img_size,
+            )
 
     def _on_crop(self, root: str, face_id: int, path: str) -> None:
-        if root != self._root or face_id not in self._waiting:
+        if root != self._root or face_id not in self._rows_by_face:
             return
-        items = self._waiting.pop(face_id)
         pixmap = QPixmap(path) if path else QPixmap()
         if pixmap.isNull():
             return
-        cover = _round(pixmap)
-        self._covers[face_id] = cover
-        for item in items:
-            item.setData(COVER_ROLE, cover)
+        self._covers[face_id] = _round(pixmap)
+        self._ready.add(face_id)
+        if not self._apply_timer.isActive():
+            self._apply_timer.start()
+
+    def _apply_covers(self) -> None:
+        """Put the covers that arrived since the last batch on their rows."""
+        ready, self._ready = self._ready, set()
+        for face_id in ready:
+            cover = self._covers.get(face_id)
+            for item in self._rows_by_face.get(face_id, ()):
+                item.setData(COVER_ROLE, cover)
 
     # ── search ──────────────────────────────────────────────────────────────
     def _apply_search(self, *_args) -> None:
@@ -364,6 +425,7 @@ class PeopleList(QWidget):
             shown_in_section = shown_in_section or match
         if header_row is not None:
             self.list.setRowHidden(header_row, not shown_in_section)
+        self._schedule_visible()  # other rows may be on screen now
 
     # ── selection ───────────────────────────────────────────────────────────
     def selected_ids(self) -> list[int]:

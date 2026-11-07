@@ -393,41 +393,93 @@ def test_pending_count_in_header(qtbot, repo, cat, make_item):
     assert view.header_controls.isAncestorOf(view.find_button)
 
 
-def test_cover_crops_requested(qtbot, repo, cat, tmp_path):
-    from PySide6.QtCore import QObject, Signal
+class _Crops(QObject):
+    ready = Signal(str, int, str)
+
+    def __init__(self):
+        super().__init__()
+        self.ids = []
+
+    def request(self, root, face_id, *_args):
+        self.ids.append(face_id)
+
+
+def _with_cover(repo, cat, name=None):
+    pid = cat.person(name)
+    face = repo.conn.execute("SELECT id FROM faces WHERE person_id=?", (pid,))
+    face_id = face.fetchone()[0]
+    repo.conn.execute("UPDATE persons SET cover_face_id=? WHERE id=?", (face_id, pid))
+    repo.conn.commit()
+    return pid, face_id
+
+
+def _crop_file(tmp_path):
     from PySide6.QtGui import QPixmap
 
-    from smart_gallery.gui.people.list_view import COVER_ROLE
-
-    class Crops(QObject):
-        ready = Signal(str, int, str)
-
-        def __init__(self):
-            super().__init__()
-            self.ids = []
-
-        def request(self, root, face_id, *_args):
-            self.ids.append(face_id)
-
-    a = cat.person("Alice")
-    face = repo.conn.execute("SELECT id FROM faces WHERE person_id=?", (a,)).fetchone()
-    repo.conn.execute("UPDATE persons SET cover_face_id=? WHERE id=?", (face[0], a))
-    repo.conn.commit()
-    ctx = _ctx(repo)
-    ctx.face_crops = Crops()
-    view = _view(qtbot, ctx)
-    assert ctx.face_crops.ids == [face[0]]
     crop = tmp_path / "crop.png"
     pixmap = QPixmap(40, 60)
     pixmap.fill()
     assert pixmap.save(str(crop))
-    ctx.face_crops.ready.emit(_root(repo), face[0], str(crop))
+    return str(crop)
+
+
+def _shown(qtbot, ctx, height=600):
+    view = _view(qtbot, ctx)
+    view.resize(900, height)
+    view.show()
+    qtbot.waitExposed(view)
+    return view
+
+
+def test_cover_crops_requested(qtbot, repo, cat, tmp_path):
+    from smart_gallery.gui.people.list_view import COVER_ROLE
+
+    a, face = _with_cover(repo, cat, "Alice")
+    ctx = _ctx(repo)
+    ctx.face_crops = _Crops()
+    view = _shown(qtbot, ctx)
+    qtbot.waitUntil(lambda: ctx.face_crops.ids == [face])
+    ctx.face_crops.ready.emit(_root(repo), face, _crop_file(tmp_path))
+    qtbot.waitUntil(lambda: _item(view, a).data(COVER_ROLE) is not None)
     cover = _item(view, a).data(COVER_ROLE)
     assert cover.width() == cover.height() == 32
     # A reload reuses the round crop instead of asking again.
     _reload(qtbot, view, ctx.catalog_updated.emit)
-    assert ctx.face_crops.ids == [face[0]]
+    qtbot.wait(100)
+    assert ctx.face_crops.ids == [face]
     assert not _item(view, a).data(COVER_ROLE).isNull()
+
+
+def test_covers_asked_only_near_the_screen(qtbot, repo, cat):
+    faces = [_with_cover(repo, cat)[1] for _ in range(80)]
+    ctx = _ctx(repo)
+    ctx.face_crops = _Crops()
+    view = _shown(qtbot, ctx, height=300)
+    qtbot.waitUntil(lambda: len(ctx.face_crops.ids) > 0)
+    qtbot.wait(100)
+    first = list(ctx.face_crops.ids)
+    assert len(first) < len(faces)  # not every row up front
+    bar = view.list.list.verticalScrollBar()
+    bar.setValue(bar.maximum())
+    qtbot.waitUntil(lambda: len(ctx.face_crops.ids) > len(first))
+    asked = ctx.face_crops.ids
+    assert len(asked) == len(set(asked))  # never the same face twice
+
+
+def test_covers_put_on_rows_in_one_batch(qtbot, repo, cat, tmp_path):
+    from smart_gallery.gui.people.list_view import COVER_ROLE
+
+    people = [_with_cover(repo, cat) for _ in range(5)]
+    ctx = _ctx(repo)
+    ctx.face_crops = _Crops()
+    view = _shown(qtbot, ctx)
+    qtbot.waitUntil(lambda: len(ctx.face_crops.ids) == len(people))
+    crop = _crop_file(tmp_path)
+    for _, face in people:
+        ctx.face_crops.ready.emit(_root(repo), face, crop)
+    # Nothing lands row by row: each change would re-measure the whole list.
+    assert all(_item(view, pid).data(COVER_ROLE) is None for pid, _ in people)
+    qtbot.waitUntil(lambda: all(_item(view, pid).data(COVER_ROLE) for pid, _ in people))
 
 
 def test_gallery_change_drops_selection(qtbot, repo, cat):

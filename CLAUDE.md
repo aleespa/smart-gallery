@@ -227,9 +227,14 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   `WinIdChange` (Qt rebuilds the native window for the web view; missing
   that makes the window flash fully transparent). `paintEvent` tones it down
   with `colors.BACKDROP_TINT_ALPHA`. Both live in `backdrop.BackdropMixin`,
-  which the photo viewer uses too (`own_title_bar=False`: it keeps the
-  Windows title bar and close button; only its top bar and info panel show
-  the backdrop, the stage and filmstrip stay solid). Tests run offscreen,
+  which the photo viewer uses too: like the main window it has its own
+  title bar (its top bar is a `TitleBar` with `WindowButtons`, tools centred,
+  a `ResizeFrame` margin; frameless without a backdrop), and only its top bar
+  and info panel show the backdrop, the stage and filmstrip stay solid. The viewer is parented
+  inside the main window, so it sets its backdrop on first show
+  (`finish_backdrop(before_show=False)`) and closes by hiding: creating its
+  translucent native window early, or Qt destroying it on close, painted a
+  grey patch over the main window's top-left corner. Tests run offscreen,
   so they see no backdrop unless they patch `backdrop.supported`.
 - **Sync options button.** `gui/mirror/` (`menu.py`, `dialogs.py`) is the
   Library header's Sync options menu (`MirrorButton`, a QPushButton): sync (preview dialog with per-class file lists), free

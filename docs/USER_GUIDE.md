@@ -266,8 +266,10 @@ the top bar and the info panel stay in the same place from one photo to the
 next. The same viewer opens from a person's photos, the face grids and the
 RAW picker.
 
-- **Top bar:** the file name and its position (*12 / 340*), then zoom,
-  faces, **Show in Explorer**, full screen and info (the window's own ✕, or Esc, closes it).
+- **Top bar:** works like the main window's: drag it to move the viewer,
+  double-click it to maximise. The file name and its position (*12 / 340*)
+  sit on the left; zoom, faces, **Show in Explorer**, full screen and info in
+  the middle; minimise, maximise and close on the right (Esc closes too).
 - **Arrows** on the photo's left and right edges step through the items on
   screen; they dim at the first and last one.
 - **Info panel** (right): the date, the exposure (*f/2.8 · 1/250 s ·

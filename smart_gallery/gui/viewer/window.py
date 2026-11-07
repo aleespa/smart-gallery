@@ -15,7 +15,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, QUrl, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QUrl, Signal
 from PySide6.QtGui import (
     QDesktopServices,
     QFont,
@@ -39,6 +39,13 @@ from smart_gallery.config import to_abspath
 from smart_gallery.gui import paths, theme
 from smart_gallery.gui.backdrop import BackdropMixin
 from smart_gallery.gui.library.model import LibraryRow
+from smart_gallery.gui.titlebar import (
+    RESIZE_MARGIN,
+    ResizeFrame,
+    TitleBar,
+    WindowButtons,
+    round_corners,
+)
 from smart_gallery.gui.repo_query import RepoQuery
 from smart_gallery.gui.thumbs.cache import thumb_path
 from smart_gallery.gui.viewer import icons
@@ -161,9 +168,11 @@ class MediaViewer(BackdropMixin, QWidget):
         holder: Callable[[LibraryRow], str | None] | None = None,
     ):
         super().__init__(parent, Qt.WindowType.Window)
-        # Acrylic behind the top bar and info panel on Windows 11; the
-        # window keeps its Windows title bar and close button.
-        self.init_backdrop(own_title_bar=False)
+        # The app's own title bar (the top bar), as in the main window:
+        # Acrylic behind it and the info panel on Windows 11 (the Windows
+        # title bar hidden), elsewhere no system frame at all.
+        if not self.init_backdrop(own_title_bar=True):
+            self.setWindowFlag(Qt.WindowType.FramelessWindowHint)
         self.ctx = ctx
         self.root = Path(root)
         self.rows = rows
@@ -194,7 +203,7 @@ class MediaViewer(BackdropMixin, QWidget):
             thumbs.ready.connect(self._on_thumb)
         # The rows belong to the gallery that was open; another has other ids.
         ctx.gallery_changed.connect(self.close)
-        self.finish_backdrop()
+        self.finish_backdrop(before_show=False)  # parented inside the main window
         self.show_index(index)
 
     # ── building ────────────────────────────────────────────────────────────
@@ -211,9 +220,12 @@ class MediaViewer(BackdropMixin, QWidget):
         return button
 
     def _build(self) -> None:
-        self.top_bar = QWidget()
+        self.top_bar = TitleBar()
         self.top_bar.setFixedHeight(TOP_BAR_HEIGHT)
         self.title_label = QLabel()
+        # Its own width, but a long name is cut rather than pushing the
+        # centred tools aside.
+        self.title_label.setMinimumWidth(40)
         bold = QFont(self.title_label.font())
         bold.setBold(True)
         self.title_label.setFont(bold)
@@ -226,13 +238,21 @@ class MediaViewer(BackdropMixin, QWidget):
         self.open_btn = self._tool("open")
         self.full_btn = self._tool("full")
         self.info_btn = self._tool("info", checkable=True)
-        bar = QHBoxLayout(self.top_bar)
-        bar.setContentsMargins(14, 0, 8, 0)
-        bar.setSpacing(10)
-        bar.addWidget(self.title_label)
-        bar.addWidget(self.position_label)
-        bar.addWidget(self.status_label)
-        bar.addStretch(1)
+        # Left: the name and position; middle: the tools, centred in the
+        # window; right: minimize, maximize and close. The two sides stretch
+        # alike, which keeps the middle centred.
+        left = QWidget()
+        left_row = QHBoxLayout(left)
+        left_row.setContentsMargins(14, 0, 0, 0)
+        left_row.setSpacing(10)
+        left_row.addWidget(self.title_label)
+        left_row.addWidget(self.position_label)
+        left_row.addWidget(self.status_label)
+        left_row.addStretch(1)
+        self.tools = QWidget()
+        tool_row = QHBoxLayout(self.tools)
+        tool_row.setContentsMargins(0, 0, 0, 0)
+        tool_row.setSpacing(10)
         for button in (
             self.zoom_btn,
             self.faces_btn,
@@ -241,7 +261,21 @@ class MediaViewer(BackdropMixin, QWidget):
             self.full_btn,
             self.info_btn,
         ):
-            bar.addWidget(button)
+            tool_row.addWidget(button)
+        right = QWidget()
+        right_row = QHBoxLayout(right)
+        right_row.setContentsMargins(0, 0, 0, 0)
+        right_row.addStretch(1)
+        self.window_buttons = WindowButtons(self)
+        right_row.addWidget(self.window_buttons, 0, Qt.AlignmentFlag.AlignTop)
+        for side in (left, right):
+            side.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        bar = QHBoxLayout(self.top_bar)
+        bar.setContentsMargins(0, 0, 0, 0)
+        bar.setSpacing(0)
+        bar.addWidget(left, 1)
+        bar.addWidget(self.tools)
+        bar.addWidget(right, 1)
 
         self.stage = PhotoStage()
         self.prev_btn = self.stage.prev_btn
@@ -266,7 +300,8 @@ class MediaViewer(BackdropMixin, QWidget):
         middle.setSpacing(0)
         middle.addWidget(self.stage, 1)
         middle.addWidget(self.info_panel)
-        self.body = QVBoxLayout(self)
+        content = QWidget()
+        self.body = QVBoxLayout(content)
         self.body.setContentsMargins(0, 0, 0, 0)
         self.body.setSpacing(0)
         self.body.addWidget(self.top_bar)
@@ -274,6 +309,10 @@ class MediaViewer(BackdropMixin, QWidget):
         self.strip = Filmstrip(self.ctx)
         self.strip.set_rows(self.root, self.rows)
         self.body.addWidget(self.strip)
+        self.frame = ResizeFrame(content)  # the edge margin resizes the window
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(self.frame)
 
         self.stage.previous.connect(self.show_previous)
         self.stage.next.connect(self.show_next)
@@ -580,7 +619,22 @@ class MediaViewer(BackdropMixin, QWidget):
         else:
             self.close()
 
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt API)
+        super().showEvent(event)
+        if not self.backdrop:
+            round_corners(self)  # frameless: rounded like any Windows 11 window
+
+    def changeEvent(self, event) -> None:  # noqa: N802 (Qt API)
+        if event.type() == QEvent.Type.WindowStateChange:
+            # No resize border while the window fills the screen.
+            full = self.isMaximized() or self.isFullScreen()
+            self.frame.set_margin(0 if full else RESIZE_MARGIN)
+        super().changeEvent(event)
+
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt API)
+        if not self.isVisible():  # already closed (hidden): nothing to do
+            event.ignore()
+            return
         geometry = self.normalGeometry() if self.isFullScreen() else self.geometry()
         self._state.geometry = (
             geometry.x(),
@@ -590,7 +644,12 @@ class MediaViewer(BackdropMixin, QWidget):
         )
         save_state(self._state_path, self._state)
         self._previews.cancel_pending()
-        super().closeEvent(event)
+        # Hide rather than close: Qt destroys a closed window's native
+        # window, and for this translucent window parented inside the main
+        # window that repainted a grey patch over the main window's corner.
+        # The native window goes when the owner deletes the viewer.
+        event.ignore()
+        self.hide()
         self.closed.emit()
 
     # ── for tests and callers ───────────────────────────────────────────────

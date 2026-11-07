@@ -150,15 +150,24 @@ def test_viewer_without_backdrop_is_unchanged(
     assert not viewer.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
 
-def test_viewer_with_backdrop_keeps_its_windows_title_bar(
+def test_viewer_with_backdrop_uses_its_own_title_bar(
     qtbot, repo, make_item, tmp_path, monkeypatch, fake_backdrop
 ):
     viewer = _viewer(qtbot, repo, make_item, tmp_path, monkeypatch)
     assert viewer.backdrop
     assert viewer.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
     assert not viewer.windowFlags() & Qt.WindowType.FramelessWindowHint
-    assert fake_backdrop == [False]  # set before the window is shown
-    assert fake_backdrop.captions == [True]  # the system close button stays
+    # No native window before it is shown: creating it early, for a
+    # translucent window parented inside the main window, painted a grey
+    # patch over the main window's top-left corner.
+    assert not viewer.testAttribute(Qt.WidgetAttribute.WA_WState_Created)
+    assert fake_backdrop == []
+    viewer.show()
+    assert fake_backdrop == [True]  # set as it is shown, once
+    assert fake_backdrop.captions == [False]  # its own buttons: no system ones
+    viewer.hide()
+    viewer.show()
+    assert fake_backdrop == [True]
 
 
 def test_viewer_backdrop_behind_the_chrome_not_the_photo(
@@ -178,3 +187,22 @@ def test_viewer_backdrop_behind_the_chrome_not_the_photo(
     assert image.pixelColor(panel).alpha() == colors.BACKDROP_TINT_ALPHA
     stage = viewer.stage.mapTo(viewer, QPoint(3, 3))
     assert image.pixelColor(stage) == QColor(colors.VIEWER_STAGE)  # solid
+
+
+def test_closing_the_viewer_keeps_its_native_window(
+    qtbot, repo, make_item, tmp_path, monkeypatch, fake_backdrop
+):
+    """Qt destroys a closed window's native window; for the translucent
+    viewer that repainted the main window's corner (a grey patch). Closing
+    hides it instead; the window goes when its owner deletes the viewer."""
+    viewer = _viewer(qtbot, repo, make_item, tmp_path, monkeypatch)
+    viewer.show()
+    qtbot.waitExposed(viewer)
+    closed = []
+    viewer.closed.connect(lambda: closed.append(True))
+    viewer.close()
+    assert not viewer.isVisible()
+    assert viewer.testAttribute(Qt.WidgetAttribute.WA_WState_Created)
+    assert closed == [True]
+    viewer.close()  # closing a closed viewer again is not a second close
+    assert closed == [True]

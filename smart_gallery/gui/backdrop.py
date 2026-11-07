@@ -146,10 +146,28 @@ class BackdropMixin:
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         return self.backdrop
 
-    def finish_backdrop(self) -> None:
-        if self.backdrop:
+    _apply_on_show = False
+
+    def finish_backdrop(self, *, before_show: bool = True) -> None:
+        """Set the backdrop up now (``before_show``: the native window is
+        made at once so it never shows transparent), or as the window is
+        first shown. A window parented inside another must wait for its
+        show: creating its translucent native window early painted a grey
+        patch over the main window's top-left corner."""
+        if not self.backdrop:
+            return
+        if before_show:
             self.winId()  # the native window now, so the backdrop is set
             self._apply_backdrop()  # before it is first shown (no flash)
+        else:
+            self._apply_on_show = True
+
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt API)
+        if self._apply_on_show:
+            # Created, not yet on screen: no transparent flash either.
+            self._apply_on_show = False
+            self._apply_backdrop()
+        super().showEvent(event)
 
     def _apply_backdrop(self) -> None:
         _module().apply(self, keep_caption=not self._own_title_bar)

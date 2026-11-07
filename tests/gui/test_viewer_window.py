@@ -364,12 +364,69 @@ def test_reopens_on_the_monitor_it_was_left_on(
     )
 
 
-def test_top_bar_has_no_second_close_button(qtbot, repo, make_item):
-    """The window has the system frame and its close button; the top bar
-    does not repeat it (Esc still closes)."""
+def test_viewer_has_the_apps_own_title_bar(qtbot, repo, make_item):
+    """Like the main window: no system frame; the top bar moves the window
+    and carries minimize, maximize and close."""
     from PySide6.QtWidgets import QToolButton
+
+    from smart_gallery.gui.titlebar import TitleBar
 
     _photo(repo, make_item, "a/1.jpg")
     viewer, _ = _open(qtbot, repo)
+    assert viewer.windowFlags() & Qt.WindowType.FramelessWindowHint
+    assert isinstance(viewer.top_bar, TitleBar)
+    assert viewer.top_bar.isAncestorOf(viewer.window_buttons)
     tips = [b.toolTip() for b in viewer.top_bar.findChildren(QToolButton)]
-    assert not any(t.startswith("Close") for t in tips), tips
+    assert tips.count("Close") == 1  # one close button, the window's own
+    viewer.window_buttons.maximize_btn.click()
+    qtbot.waitUntil(viewer.isMaximized)
+    assert viewer.frame._margin == 0  # no resize border while maximized
+    viewer.window_buttons.maximize_btn.click()
+    qtbot.waitUntil(lambda: not viewer.isMaximized())
+    assert viewer.frame._margin > 0
+    viewer.window_buttons.close_btn.click()
+    assert not viewer.isVisible()
+
+
+def _centre_x(widget, viewer):
+    return widget.mapTo(viewer, QPoint(widget.width() // 2, 0)).x()
+
+
+def test_tools_are_centred_in_the_top_bar(qtbot, repo, make_item):
+    _photo(repo, make_item, "a/1.jpg")
+    viewer, _ = _open(qtbot, repo)
+    viewer.resize(1100, 700)
+    qtbot.waitUntil(lambda: viewer.width() == 1100)
+    assert abs(_centre_x(viewer.tools, viewer) - _centre_x(viewer.top_bar, viewer)) <= 2
+    QTest.keyClick(viewer, Qt.Key.Key_I)  # the info panel does not shift them
+    assert abs(_centre_x(viewer.tools, viewer) - _centre_x(viewer.top_bar, viewer)) <= 2
+    assert viewer.tools.isAncestorOf(viewer.zoom_btn)
+    assert viewer.tools.isAncestorOf(viewer.info_btn)
+
+
+def test_position_follows_the_name_and_long_names_are_cut(qtbot, repo, make_item):
+    _photo(repo, make_item, "a/short.jpg")
+    long_name = "a/" + "very_long_file_name_" * 12 + ".jpg"
+    _photo(repo, make_item, long_name)
+    viewer, _ = _open(qtbot, repo)
+    viewer.resize(1100, 700)
+    qtbot.waitUntil(lambda: viewer.width() == 1100)
+    while viewer.field("Path") != "a/short.jpg":
+        viewer.show_next()
+    label = viewer.title_label
+    text_end = label.geometry().left() + label.fontMetrics().horizontalAdvance(
+        label.text()
+    )
+    gap = viewer.position_label.geometry().left() - text_end
+    assert 0 < gap <= 16  # right after the name's text, not off by the tools
+    viewer.show_index(
+        next(i for i, r in enumerate(viewer.rows) if r.relpath == long_name)
+    )
+    qtbot.wait(20)
+    tools_left = viewer.tools.mapTo(viewer, QPoint()).x()
+    assert (
+        viewer.position_label.mapTo(viewer, QPoint()).x()
+        + viewer.position_label.width()
+        <= tools_left
+    )
+    assert abs(_centre_x(viewer.tools, viewer) - _centre_x(viewer.top_bar, viewer)) <= 2

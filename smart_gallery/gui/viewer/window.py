@@ -78,7 +78,6 @@ TIPS = {
     "open": "Open in the default app",
     "full": "Full screen (F)",
     "info": "Info (I)",
-    "close": "Close (Esc)",
 }
 
 
@@ -218,7 +217,6 @@ class MediaViewer(QWidget):
         self.open_btn = self._tool("open")
         self.full_btn = self._tool("full")
         self.info_btn = self._tool("info", checkable=True)
-        self.close_btn = self._tool("close")
         bar = QHBoxLayout(self.top_bar)
         bar.setContentsMargins(14, 0, 8, 0)
         bar.setSpacing(10)
@@ -233,7 +231,6 @@ class MediaViewer(QWidget):
             self.open_btn,
             self.full_btn,
             self.info_btn,
-            self.close_btn,
         ):
             bar.addWidget(button)
 
@@ -282,7 +279,6 @@ class MediaViewer(QWidget):
         )
         self.full_btn.clicked.connect(self.toggle_full_screen)
         self.info_btn.toggled.connect(self._set_info_open)
-        self.close_btn.clicked.connect(self.close)
 
     def _key_actions(self) -> dict:
         """Key → action. Handled in ``keyPressEvent``, so they work whatever

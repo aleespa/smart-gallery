@@ -71,7 +71,7 @@ def _open(qtbot, repo, rows=None, index=0, **kw):
 
 
 def _spots(viewer):
-    widgets = (viewer.prev_btn, viewer.next_btn, viewer.info_btn, viewer.close_btn)
+    widgets = (viewer.prev_btn, viewer.next_btn, viewer.info_btn, viewer.full_btn)
     return [w.mapTo(viewer, QPoint()) for w in widgets] + [viewer.size()]
 
 
@@ -362,3 +362,14 @@ def test_reopens_on_the_monitor_it_was_left_on(
         700,
         500,
     )
+
+
+def test_top_bar_has_no_second_close_button(qtbot, repo, make_item):
+    """The window has the system frame and its close button; the top bar
+    does not repeat it (Esc still closes)."""
+    from PySide6.QtWidgets import QToolButton
+
+    _photo(repo, make_item, "a/1.jpg")
+    viewer, _ = _open(qtbot, repo)
+    tips = [b.toolTip() for b in viewer.top_bar.findChildren(QToolButton)]
+    assert not any(t.startswith("Close") for t in tips), tips

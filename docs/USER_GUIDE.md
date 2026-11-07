@@ -267,7 +267,7 @@ next. The same viewer opens from a person's photos, the face grids and the
 RAW picker.
 
 - **Top bar:** the file name and its position (*12 / 340*), then zoom,
-  faces, **Show in Explorer**, full screen, info and close.
+  faces, **Show in Explorer**, full screen and info (the window's own ✕, or Esc, closes it).
 - **Arrows** on the photo's left and right edges step through the items on
   screen; they dim at the first and last one.
 - **Info panel** (right): the date, the exposure (*f/2.8 · 1/250 s ·

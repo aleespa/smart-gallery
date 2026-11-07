@@ -261,7 +261,7 @@ class _PickViewer(MediaViewer):
         self._keys = keys
         super().__init__(ctx, root, rows, index, view)
         view.picks_changed.connect(self._retitle)
-        self.finished.connect(lambda *_: view.picks_changed.disconnect(self._retitle))
+        self.closed.connect(lambda: view.picks_changed.disconnect(self._retitle))
         self.setFocus()  # not a button: Space would press it
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt API)

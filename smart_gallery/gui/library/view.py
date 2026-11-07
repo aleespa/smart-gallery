@@ -695,6 +695,11 @@ class LibraryView(QWidget):
             self.viewer.close()
             self.viewer.deleteLater()
         self.viewer = MediaViewer(
-            self.ctx, self._root, list(self.grid_model.rows), index.row(), self
+            self.ctx,
+            self._root,
+            list(self.grid_model.rows),
+            index.row(),
+            self,
+            holder=lambda row: self.grid_model.holders.get(row.id),
         )
         self.viewer.show()

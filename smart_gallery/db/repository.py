@@ -232,11 +232,6 @@ class GalleryRepository(FaceLabelsMixin, FaceUndoMixin, MirrorStoreMixin):
         ).fetchone()
         return row is not None
 
-    def all_relpaths(self) -> set:
-        return {
-            r["relpath"] for r in self.conn.execute("SELECT relpath FROM media_items")
-        }
-
     # ── reads / queries ─────────────────────────────────────────────────────
     def query(
         self,
@@ -294,13 +289,6 @@ class GalleryRepository(FaceLabelsMixin, FaceUndoMixin, MirrorStoreMixin):
             out[row["media_type"]] = row["n"]
         out["total"] = sum(out.values())
         return out
-
-    def total_size_bytes(self, filters: Optional[FilterOptions] = None) -> int:
-        where, params = build_where(filters) if filters else ("", [])
-        row = self.conn.execute(
-            f"SELECT COALESCE(SUM(size_bytes), 0) AS s FROM media_items{where}", params
-        ).fetchone()
-        return int(row["s"] or 0)
 
     def distinct_values(self, column: str) -> List[str]:
         if column not in DB_COLUMNS:
@@ -850,22 +838,6 @@ class GalleryRepository(FaceLabelsMixin, FaceUndoMixin, MirrorStoreMixin):
         cur = self.conn.execute("DELETE FROM persons WHERE id=?", (person_id,))
         self.conn.commit()
         return cur.rowcount > 0
-
-    def load_face_embeddings_for_person(self, person_id: int):
-        """Return ``(face_ids[int64 N], embeddings[float32 N×D])`` for one person."""
-        import numpy as np
-
-        rows = self.conn.execute(
-            "SELECT id, embedding FROM faces WHERE person_id=? ORDER BY id",
-            (person_id,),
-        ).fetchall()
-        n = len(rows)
-        ids = np.empty(n, dtype=np.int64)
-        embs = np.empty((n, FACE_EMBEDDING_DIM), dtype=np.float32)
-        for i, r in enumerate(rows):
-            ids[i] = r["id"]
-            embs[i] = np.frombuffer(r["embedding"], dtype=np.float32)
-        return ids, embs
 
     def merge_persons(self, dst_id: int, src_ids: Iterable[int]) -> None:
         """Re-point all faces, suggestions and rejections of ``src_ids`` onto

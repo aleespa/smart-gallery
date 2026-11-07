@@ -17,9 +17,6 @@ from smart_gallery.dashboard.data import geotagged, parse_shutter  # noqa: F401
 from smart_gallery.db import GalleryRepository
 from smart_gallery.organize.filters import FilterOptions
 
-STACKED_COLORS = data.PALETTE
-
-
 def load_catalog_df(db_path, filters: Optional[FilterOptions] = None) -> pd.DataFrame:
     """Load the catalog (optionally filtered in SQL) as a DataFrame."""
     with GalleryRepository.open(db_path, read_only=True) as repo:

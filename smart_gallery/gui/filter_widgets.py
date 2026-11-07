@@ -421,7 +421,6 @@ class DateField(QWidget):
         )
         action.setToolTip("Pick a date")
         action.triggered.connect(self.open_calendar)
-        self.calendar_action = action
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(edit)

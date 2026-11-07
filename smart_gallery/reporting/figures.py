@@ -6,7 +6,6 @@ the primary way to explore data; these PNGs are for reports/archives.
 
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 from smart_gallery import colors
@@ -28,21 +27,6 @@ def _save(fig, output_dir: Path, filename: str):
     fig.tight_layout()
     fig.savefig(output_dir / filename, dpi=200, bbox_inches="tight")
     plt.close(fig)
-
-
-def _parse_shutter(s):
-    if pd.isna(s):
-        return None
-    try:
-        if isinstance(s, (int, float)):
-            return float(s)
-        s_str = str(s).rstrip("s")
-        if "/" in s_str:
-            num, den = s_str.split("/")
-            return float(num) / float(den)
-        return float(s_str)
-    except Exception:
-        return None
 
 
 def plot_general_counts(df_images, df_videos, df_others, output_dir):

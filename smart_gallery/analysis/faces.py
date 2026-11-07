@@ -68,7 +68,7 @@ class FaceScannerUnavailable(RuntimeError):
 
 
 class FaceScanner:
-    """Loads the model once, then ``scan_image(path)`` returns its faces."""
+    """Loads the model once; ``decode`` then ``detect`` find an image's faces."""
 
     def __init__(self) -> None:
         try:
@@ -180,7 +180,3 @@ class FaceScanner:
             emb = np.asarray(f.normed_embedding, dtype=np.float32)
             out.append(Detection((x1, y1, x2, y2), score, emb))
         return out
-
-    def scan_image(self, abspath: str) -> List[Detection]:
-        """Convenience: decode + detect one image (used by tests)."""
-        return self.detect(self.decode(abspath))

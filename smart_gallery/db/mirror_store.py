@@ -107,9 +107,6 @@ class MirrorStoreMixin:
     def face_source_uuid(self) -> Optional[str]:
         return self.get_meta(_FACE_SOURCE_KEY)
 
-    def set_face_source_uuid(self, uuid: str) -> None:
-        self.set_meta(_FACE_SOURCE_KEY, uuid)
-
     # -- catalog rows ---------------------------------------------------------
     def mirror_rows(self) -> Dict[str, MirrorRow]:
         return {

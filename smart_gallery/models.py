@@ -322,9 +322,9 @@ FACE_COLUMNS = (
     "match_score",
 )
 
-# How a face relates to a person. "new" = not filed yet (fresh scan or returned
-# to the pool). The filing step never touches USER_STATES.
-FACE_STATES = ("new", "auto", "user", "suggested", "cluster", "hidden", "ignored")
+# How a face relates to a person: new, auto, user, suggested, cluster, hidden
+# or ignored. "new" = not filed yet (fresh scan or returned to the pool). The
+# filing step never touches USER_STATES.
 USER_STATES = frozenset({"user", "ignored"})
 
 PERSON_COLUMNS = (

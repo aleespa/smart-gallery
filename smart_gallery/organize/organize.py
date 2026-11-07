@@ -24,8 +24,6 @@ from smart_gallery.progress import (
     ProgressEvent,
 )
 
-StructurePart = Literal["Year", "Month", "Model", "Lens"]
-
 # Extra "this destination is already in use" check beside the disk (e.g. a
 # catalog row whose file is offloaded to a mirror).
 Taken = Callable[[Path], bool]

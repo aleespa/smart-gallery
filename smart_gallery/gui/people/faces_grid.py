@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
 from smart_gallery.gui import theme
 from smart_gallery.gui.library.model import LibraryRow
 from smart_gallery.gui.library.viewer import MediaViewer
+from smart_gallery.gui.viewer.stage import face_rect
 from smart_gallery.gui.people.model import FaceTile, PeopleList, PersonRow
 from smart_gallery.services.label_faces import LabelEntry
 
@@ -249,24 +250,6 @@ class _TickDelegate(QStyledItemDelegate):
 
 
 BOX_WIDTH = 1 / 250  # of the photo's longer side, for the face's outline
-
-
-def face_rect(tile: FaceTile, image: QSize) -> QRectF | None:
-    """Where the face is on a preview of its photo ``image`` big, or None
-    when that cannot be told: the scan did not record the size of the image
-    it decoded, or the preview is turned from it (a RAW whose embedded
-    preview is stored sideways, with no way here to know which way)."""
-    if not tile.img_size or not tile.img_size[0] or not tile.img_size[1]:
-        return None
-    img_w, img_h = tile.img_size
-    if image.isEmpty() or (img_w > img_h) != (image.width() > image.height()):
-        return None
-    scale = image.width() / img_w
-    x, y, w, h = (v * scale for v in tile.bbox)
-    rect = QRectF(x, y, w, h)
-    if not QRectF(0, 0, image.width(), image.height()).contains(rect.center()):
-        return None
-    return rect
 
 
 class FaceViewer(MediaViewer):

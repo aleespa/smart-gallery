@@ -41,6 +41,7 @@ from smart_gallery.gui.library.model import LibraryRow
 from smart_gallery.gui.repo_query import RepoQuery
 from smart_gallery.gui.thumbs.cache import thumb_path
 from smart_gallery.gui.viewer import icons
+from smart_gallery.gui.viewer.filmstrip import Filmstrip
 from smart_gallery.gui.viewer.info import InfoSection, build_info, photo_people
 from smart_gallery.gui.viewer.previews import PREVIEW_EDGE, ZOOM_EDGE, PreviewLoader
 from smart_gallery.gui.viewer.stage import Box, PhotoStage, face_rect
@@ -177,6 +178,7 @@ class MediaViewer(QWidget):
         screen = (self.screen() or QGuiApplication.primaryScreen()).availableGeometry()
         self.setGeometry(place(self._state.geometry, screen))
         self._set_info_open(self._state.info_open)
+        self._set_strip_open(self._state.strip_open)
 
         thumbs = getattr(ctx, "thumbs", None)
         if thumbs is not None:
@@ -261,10 +263,15 @@ class MediaViewer(QWidget):
         self.body.setSpacing(0)
         self.body.addWidget(self.top_bar)
         self.body.addLayout(middle, 1)
+        self.strip = Filmstrip(self.ctx)
+        self.strip.set_rows(self.root, self.rows)
+        self.body.addWidget(self.strip)
 
         self.stage.previous.connect(self.show_previous)
         self.stage.next.connect(self.show_next)
         self.stage.zoom_changed.connect(self._on_zoom)
+        self.stage.strip_toggle.connect(self.toggle_strip)
+        self.strip.picked.connect(self.show_index)
         self.zoom_btn.clicked.connect(lambda: self.stage.toggle_zoom())
         self.faces_btn.toggled.connect(lambda _on: self._apply_boxes())
         self.folder_btn.clicked.connect(lambda: show_in_explorer(self.abspath()))
@@ -284,6 +291,7 @@ class MediaViewer(QWidget):
             Qt.Key.Key_Home: lambda: self.show_index(0),
             Qt.Key.Key_End: lambda: self.show_index(len(self.rows) - 1),
             Qt.Key.Key_I: self.info_btn.toggle,
+            Qt.Key.Key_S: self.toggle_strip,
             Qt.Key.Key_Z: lambda: self.stage.toggle_zoom(),
             Qt.Key.Key_F: self.toggle_full_screen,
             Qt.Key.Key_Escape: self._escape,
@@ -329,6 +337,7 @@ class MediaViewer(QWidget):
         self.faces_btn.hide()
         self.open_btn.setVisible(row.media_type == "video")
         self.stage.set_nav(index > 0, index < len(self.rows) - 1)
+        self.strip.set_current(index)
         self.stage.set_boxes([])
         self.stage.set_play_glyph(False)
         self._show_sections([])
@@ -509,6 +518,14 @@ class MediaViewer(QWidget):
         if self.info_btn.isChecked() != on:
             self.info_btn.setChecked(on)
         self._state.info_open = on
+
+    def toggle_strip(self) -> None:
+        self._set_strip_open(not self.strip.isVisibleTo(self))
+
+    def _set_strip_open(self, on: bool) -> None:
+        self.strip.setVisible(on)
+        self.stage.set_strip_handle(not on)
+        self._state.strip_open = on
 
     # ── boxes ───────────────────────────────────────────────────────────────
     def boxes(self) -> list[Box]:

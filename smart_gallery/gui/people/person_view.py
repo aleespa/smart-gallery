@@ -212,6 +212,8 @@ class PersonPage(QWidget):
         self._more_query = RepoQuery(ctx, self)
         self._suggestions: list[model.FaceTile] = []
         self.review_mode: Literal["suggestions", "more"] = "suggestions"
+        self._more_shown: int | None = None  # person whose matches the grid has
+        self._refresh = False  # the running Find more merges into the grid
 
         # Header.
         self.cover = QLabel()
@@ -315,7 +317,7 @@ class PersonPage(QWidget):
         self.library_button.clicked.connect(self._show_in_library)
         self.name_edit.returnPressed.connect(self._name_entered)
         self.review_button.clicked.connect(self._review)
-        self.find_more_button.clicked.connect(self.find_more)
+        self.find_more_button.clicked.connect(lambda: self.find_more(fresh=True))
         self.done_button.clicked.connect(self._show_mode)
         self.faces_grid.faces_selected.connect(self.action_bar.set_faces)
         self.action_bar.action.connect(lambda e: self.labels.emit([e]))
@@ -458,13 +460,21 @@ class PersonPage(QWidget):
             self.review_grid.set_tiles(self._suggestions, self.root)
         self.body.setCurrentWidget(self.review_page)
 
-    def find_more(self) -> None:
-        """Faces nobody has classified that look like this person."""
+    def find_more(self, fresh: bool = False) -> None:
+        """Faces nobody has classified that look like this person.
+
+        Run again for the same person (after a job), the new matches are
+        merged into the grid; ``fresh`` starts a new search instead."""
         pid = self.person_id
         if pid is None:
             return
+        refresh = not fresh and self.review_mode == "more" and self._more_shown == pid
         self.review_mode = "more"
-        self.review_title.setText(SEARCHING)
+        self._refresh = refresh
+        if not refresh:
+            # A refresh (after a job) keeps the faces on screen meanwhile.
+            self._more_shown = None
+            self.review_title.setText(SEARCHING)
         self.body.setCurrentWidget(self.review_page)
 
         def load(repo):
@@ -476,7 +486,12 @@ class PersonPage(QWidget):
         root, pid, tiles = result
         if pid != self.person_id or self.review_mode != "more":
             return
-        self.review_grid.set_tiles(tiles, Path(root))
+        if self._refresh and Path(root) == self.review_grid.root:
+            self.review_grid.merge_tiles(tiles)  # keep scroll and selection
+            tiles = self.review_grid.tiles()
+        else:
+            self.review_grid.set_tiles(tiles, Path(root))
+        self._more_shown = pid
         name = self._name()
         self.review_title.setText(
             MORE_TITLE.format(name=name) if tiles else NO_MORE.format(name=name)
@@ -485,6 +500,7 @@ class PersonPage(QWidget):
     def _on_more_failed(self, error) -> None:
         if self.review_mode != "more":
             return
+        self._more_shown = None
         self.review_grid.set_tiles([], self.root)
         self.review_title.setText(MORE_FAILED.format(error=error))
 

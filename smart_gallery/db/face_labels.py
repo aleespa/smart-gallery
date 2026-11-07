@@ -50,7 +50,7 @@ class FaceLabelsMixin:
 
     def load_filing_inputs(self) -> "tuple[list[FaceIn], list[Candidate]]":
         """Faces the filing step may move, and the people they can go to."""
-        from smart_gallery.analysis.filing import Candidate, FaceIn
+        from smart_gallery.analysis.filing import FaceIn
 
         rejected_from: dict[int, set[int]] = defaultdict(set)
         rejected_embs: dict[int, list[np.ndarray]] = defaultdict(list)
@@ -77,17 +77,50 @@ class FaceLabelsMixin:
             )
         ]
 
+        return faces, self._candidates(rejected_embs)
+
+    def filing_candidates(
+        self, person_ids: Iterable[int]
+    ) -> "dict[int, Optional[Candidate]]":
+        """The candidates ``load_filing_inputs`` gives these people, by id;
+        None for a person with no examples or no such person."""
+        ids = sorted({int(p) for p in person_ids})
+        out: dict[int, Optional[Candidate]] = dict.fromkeys(ids)
+        for i in range(0, len(ids), _STASH_CHUNK):
+            chunk = ids[i : i + _STASH_CHUNK]
+            ph = ", ".join("?" for _ in chunk)
+            rejected_embs: dict[int, list[np.ndarray]] = defaultdict(list)
+            for r in self.conn.execute(
+                "SELECT r.person_id, f.embedding FROM face_rejections r "
+                f"JOIN faces f ON f.id = r.face_id WHERE r.person_id IN ({ph})",
+                chunk,
+            ):
+                rejected_embs[r["person_id"]].append(_vec(r["embedding"]))
+            for c in self._candidates(rejected_embs, f"IN ({ph})", chunk):
+                out[c.person_id] = c
+        return out
+
+    def _candidates(
+        self, rejected_embs: dict, ids_sql: str = "", ids: Sequence[int] = ()
+    ) -> "list[Candidate]":
+        """Filing candidates, every person or those whose id is ``ids_sql``."""
+        from smart_gallery.analysis.filing import Candidate
+
+        person_filter = f" AND person_id {ids_sql}" if ids_sql else ""
         user_embs: dict[int, list[np.ndarray]] = defaultdict(list)
         for r in self.conn.execute(
             "SELECT person_id, embedding FROM faces "
-            "WHERE state='user' AND person_id IS NOT NULL"
+            "WHERE state='user' AND person_id IS NOT NULL" + person_filter,
+            tuple(ids),
         ):
             user_embs[r["person_id"]].append(_vec(r["embedding"]))
 
         candidates = []
         for p in self.conn.execute(
-            "SELECT id, name, hidden, centroid, reference_centroid "
-            "FROM persons ORDER BY id"
+            "SELECT id, name, hidden, centroid, reference_centroid FROM persons"
+            + (f" WHERE id {ids_sql}" if ids_sql else "")
+            + " ORDER BY id",
+            tuple(ids),
         ):
             pid = p["id"]
             if p["hidden"]:
@@ -109,7 +142,7 @@ class FaceLabelsMixin:
             candidates.append(
                 Candidate(pid, kind, _stack(ex), _stack(rejected_embs.get(pid, [])))
             )
-        return faces, candidates
+        return candidates
 
     def person_examples(self, person_id: int) -> np.ndarray:
         """The examples ``load_filing_inputs`` gives this person, as an

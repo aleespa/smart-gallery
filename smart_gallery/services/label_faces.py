@@ -17,7 +17,7 @@ from loguru import logger
 
 from smart_gallery.db import GalleryRepository
 from smart_gallery.mirror.faces import ensure_not_mirror
-from smart_gallery.services.file_faces import FileFacesReport, file_faces
+from smart_gallery.services.file_faces import FileFacesReport, refile_after_labels
 
 Action = Literal["confirm", "reject", "move", "new_person", "ignore"]
 ACTIONS: tuple[str, ...] = get_args(Action)
@@ -121,6 +121,24 @@ def describe(entries: Sequence[LabelEntry], names: dict[int, str]) -> str:
     return _phrase(first, sum(len(e.faces) for e in entries), who(first))
 
 
+def _current_people(repo: GalleryRepository, entries) -> set[int]:
+    """The people the corrected faces belong to now."""
+    ids = sorted({int(f) for e in entries for f in e.faces})
+    out: set[int] = set()
+    for i in range(0, len(ids), 500):
+        chunk = ids[i : i + 500]
+        ph = ", ".join("?" for _ in chunk)
+        out.update(
+            r[0]
+            for r in repo.conn.execute(
+                f"SELECT person_id FROM faces WHERE id IN ({ph}) "
+                "AND person_id IS NOT NULL",
+                chunk,
+            )
+        )
+    return out
+
+
 def label_faces(
     repo: GalleryRepository,
     entries: Sequence[LabelEntry],
@@ -170,11 +188,21 @@ def label_faces(
                 ids,
             )
         }
+    if refile:
+        # The people the batch can change, as filing sees them now: the
+        # refile after it then files again only what they can have moved.
+        people = set(wanted - missing) | _current_people(repo, entries)
+        candidates_before = repo.filing_candidates(people)
     before = repo.face_snapshot()
     report = repo.apply_labels(entries)
     report.missing_people = len(missing)
     if refile:
-        report.filed = file_faces(repo, group=False)
+        for e in entries:
+            if e.action == "new_person" and (pid := repo.person_named(e.name)):
+                candidates_before.setdefault(pid, None)
+        report.filed = refile_after_labels(
+            repo, candidates_before, {f for e in entries for f in e.faces}
+        )
     if entries:
         repo.record_undo(describe(entries, names), before)
     return report

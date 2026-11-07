@@ -270,7 +270,11 @@ transfer) and invalidates D's cached face crops when they change.
    into a named person, turns its `cluster` faces into `auto`. `label-faces`
    only records corrections as an undoable batch (`undo-faces` reverses the
    last); the People page sends each batch as one `label-faces --list PATH
-   --refile` job. The person page's **Find more** runs the Qt-free,
+   --refile` job. `--refile` is scoped (`file_faces.refile_after_labels`):
+   it files again only faces linked to a person the batch changed or scoring
+   near one, and `tests/test_refile_scoped.py` checks it matches a full
+   `file_faces(group=False)`, so a new filing rule must keep that test green.
+   The person page's **Find more** runs the Qt-free,
    read-only `gui/people/model.py:find_more` (unclassified faces ranked by
    likeness to the person) and reuses the review grid's confirm/reject.
 4. **Carry-over.** Before `invalidate_faces_by_relpath` (or a rescan / a

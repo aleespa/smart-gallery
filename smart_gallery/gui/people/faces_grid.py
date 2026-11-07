@@ -136,6 +136,27 @@ class _FaceModel(QAbstractListModel):
             self.endRemoveRows()
             row = first - 1
 
+    def merge_tiles(self, tiles: Sequence[FaceTile], skip: set[int]) -> None:
+        """Update to ``tiles`` without a reset, so scroll and selection stay:
+        faces no longer listed go, the rest keep their place (with fresh
+        data), and new ones are added at the end. Faces in ``skip`` are
+        never added back."""
+        fresh = {t.face_id: t for t in tiles}
+        self.remove_ids({t.face_id for t in self.tiles} - fresh.keys())
+        for row, tile in enumerate(self.tiles):
+            new = fresh[tile.face_id]
+            if new != tile:
+                self.tiles[row] = new
+                index = self.index(row)
+                self.dataChanged.emit(index, index)
+        have = {t.face_id for t in self.tiles}
+        added = [t for t in tiles if t.face_id not in have and t.face_id not in skip]
+        if added:
+            first = len(self.tiles)
+            self.beginInsertRows(QModelIndex(), first, first + len(added) - 1)
+            self.tiles.extend(added)
+            self.endInsertRows()
+
     def mark_confirmed(self, ids: set[int]) -> None:
         """Show these faces as confirmed (the tick) without a reload."""
         for row, tile in enumerate(self.tiles):
@@ -233,6 +254,7 @@ class FaceGrid(QListView):
         super().__init__(parent)
         self.ctx = ctx
         self.root: Path | None = None
+        self._dismissed: set[int] = set()  # removed since the last set_tiles
         self.setViewMode(QListView.ViewMode.IconMode)
         self.setResizeMode(QListView.ResizeMode.Adjust)
         self.setMovement(QListView.Movement.Static)
@@ -274,7 +296,15 @@ class FaceGrid(QListView):
         if root is not None and root != self.root:
             self._model.forget_crops()
             self.root = root
+        self._dismissed = set()
         self._model.set_tiles(tiles)
+        self._on_selection()
+        self._schedule()
+
+    def merge_tiles(self, tiles: list[FaceTile]) -> None:
+        """Refresh the faces in place (see ``_FaceModel.merge_tiles``); faces
+        taken out with ``remove_faces`` since ``set_tiles`` stay out."""
+        self._model.merge_tiles(tiles, self._dismissed)
         self._on_selection()
         self._schedule()
 
@@ -289,7 +319,9 @@ class FaceGrid(QListView):
         return [self._model.tiles[r].face_id for r in rows]
 
     def remove_faces(self, ids: Iterable[int]) -> None:
-        self._model.remove_ids(set(ids))
+        ids = set(ids)
+        self._dismissed |= ids
+        self._model.remove_ids(ids)
         self._on_selection()
 
     def mark_confirmed(self, ids: Iterable[int]) -> None:

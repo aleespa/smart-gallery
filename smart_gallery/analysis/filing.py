@@ -165,17 +165,42 @@ def decide(
         chunk = faces[start : start + CHUNK]
         embs = np.stack([f.embedding for f in chunk]).astype(np.float32)
         scores, worse = _block_scores(embs, batches, len(candidates), cfg.k)
-        allowed = ~worse
-        for r, f in enumerate(chunk):
-            for pid in f.rejected_from:
-                j = index.get(pid)
-                if j is not None:
-                    allowed[r, j] = False
+        allowed = _allowed(chunk, worse, index)
         out.extend(_decide_chunk(chunk, candidates, scores, allowed, named, index, cfg))
     return out
 
 
 _NEG = np.float32(-np.inf)
+
+
+def _allowed(chunk, worse, index) -> np.ndarray:
+    allowed = ~worse
+    for r, f in enumerate(chunk):
+        for pid in f.rejected_from:
+            j = index.get(pid)
+            if j is not None:
+                allowed[r, j] = False
+    return allowed
+
+
+def best_allowed(
+    faces: Sequence[FaceIn], candidates: Sequence[Candidate], k: int
+) -> np.ndarray:
+    """Per face, its best score among ``candidates`` it may be filed to (not
+    rejected from them, not closer to their rejected faces), as ``decide``
+    scores them; -inf when there is none."""
+    out = np.full(len(faces), _NEG, dtype=np.float32)
+    if not len(faces) or not candidates:
+        return out
+    batches = _batches(candidates, k)
+    index = {c.person_id: j for j, c in enumerate(candidates)}
+    for start in range(0, len(faces), CHUNK):
+        chunk = faces[start : start + CHUNK]
+        embs = np.stack([f.embedding for f in chunk]).astype(np.float32)
+        scores, worse = _block_scores(embs, batches, len(candidates), k)
+        allowed = _allowed(chunk, worse, index)
+        out[start : start + len(chunk)] = np.where(allowed, scores, _NEG).max(axis=1)
+    return out
 
 
 @dataclass(frozen=True)

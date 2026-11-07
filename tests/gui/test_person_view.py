@@ -607,6 +607,27 @@ def test_find_more_survives_reload(qtbot, repo, cat):
     assert _grid_ids(page.review_grid) == [hi, lo]
 
 
+def test_find_more_refresh_merges_in_place(qtbot, repo, cat):
+    """After a job, the matches are refreshed without a reset: the selection
+    stays, faces sent away stay out and new matches come at the end."""
+    _view_, page, alice, hi, lo = _find_more(qtbot, repo, cat)
+    grid = page.review_grid
+    grid.remove_faces({hi})  # as when confirming it: the job is still pending
+    _pick(grid, lo)
+    mid = cat.face(cat.photo(), None, "new", emb=_vec(0.8))
+    page.loaded = False
+    page.show_person(alice)  # what a finished job does
+    qtbot.waitUntil(lambda: page.loaded)
+    qtbot.waitUntil(lambda: mid in _grid_ids(grid))
+    assert _grid_ids(grid) == [lo, mid]
+    assert grid.selected_face_ids() == [lo]
+    assert page.review_title.text() == "Could this be Alice?"
+    # The button itself starts a new, ranked search.
+    page.find_more_button.click()
+    qtbot.waitUntil(lambda: _grid_ids(grid) == [hi, mid, lo])
+    assert grid.selected_face_ids() == []
+
+
 def test_find_more_empty_message(qtbot, repo, cat):
     alice = cat.person("Alice")
     cat.face(cat.photo(), alice, "user", emb=_vec(1.0))

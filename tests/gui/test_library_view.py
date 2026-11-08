@@ -422,3 +422,21 @@ def test_library_filters_shown_persists(qtbot, repo):
     view.collapsible.hide_btn.click()
     again, _ = _view(qtbot, repo.db_path)
     assert not again.collapsible.shown
+
+
+def test_library_summary_cleared_after_failure_and_gallery_change(
+    qtbot, repo, make_item
+):
+    repo.upsert_many([make_item("a/1.jpg", date_taken="2026-01-01")])
+    view, ctx = _view(qtbot, repo.db_path)
+    emitted = []
+    view.summary_changed.connect(emitted.append)
+    qtbot.waitUntil(lambda: view.summary_text.startswith("1 file"))
+    view.reload()
+    qtbot.waitUntil(lambda: emitted and emitted[-1].startswith("1 file"))
+    view._on_failed(RuntimeError("boom"))
+    assert view.summary_text == "" and emitted[-1] == ""
+    view.reload()
+    qtbot.waitUntil(lambda: emitted[-1].startswith("1 file"))
+    ctx.set_gallery(None)
+    assert view.summary_text == "" and emitted[-1] == ""

@@ -75,11 +75,11 @@ class CollapsedStrip(QAbstractButton):
 
 class CollapsibleFilters:
     """Wires ``panel`` to a hide button and a ``strip``; the caller adds both
-    to its splitter."""
+    to its splitter. ``state_file`` is the JSON file name under app_data_dir()."""
 
-    def __init__(self, panel: FilterPanel, state_key: str):
+    def __init__(self, panel: FilterPanel, state_file: str):
         self.panel = panel
-        self.state_path = app_data_dir() / state_key
+        self.state_path = app_data_dir() / state_file
         self.hide_btn = QToolButton()
         self.hide_btn.setText(HIDE_FILTERS_TEXT)
         self.hide_btn.setToolTip(HIDE_FILTERS_TIP)

@@ -148,6 +148,7 @@ def test_scope_filters_and_labels(qtbot, loaded, pairs):
     view = loaded
     view.set_scope("a")
     assert view.scope_label.text() == "In a · 2 pairs" and view.show_all.isVisible()
+    assert view.scope_label.isVisible()
     assert view.show_all.text() == "Show all 3 pairs"
     assert [k for _, k in _rows(view)] == [None, pairs[0].key, pairs[1].key]
     view.show_all.click()

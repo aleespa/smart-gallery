@@ -512,7 +512,7 @@ class RawView(QWidget):
             label = SCOPE_ALL.format(**args)
         if self._dropped:
             label += " · " + DROPPED.format(n=self._dropped)
-        self.scope_label.setText(label)
+        self.header.set_subtitle(label)
 
     def _update_footer(self) -> None:
         picked = self._picked()

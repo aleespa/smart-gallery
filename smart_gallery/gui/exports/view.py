@@ -308,14 +308,14 @@ class ExportView(QWidget):
     def _update(self) -> None:
         gallery = self.ctx.current
         if gallery is None:
-            self.source.setText(NO_GALLERY)
+            self.heading.set_title(NO_GALLERY)
         elif not is_connected(gallery):
-            self.source.setText(DISCONNECTED.format(label=gallery.label))
+            self.heading.set_title(DISCONNECTED.format(label=gallery.label))
         else:
-            self.source.setText(FROM.format(label=gallery.label))
+            self.heading.set_title(FROM.format(label=gallery.label))
         settings = self.settings()
         self.folder.setPlaceholderText(default_folder_name())
-        self.summary.setText(self._summary_text(settings))
+        self.heading.set_subtitle(self._summary_text(settings))
         for combo in self.levels:
             combo.setEnabled(not settings.keep_folders)
         self.by_media_type.setEnabled(not settings.keep_folders)

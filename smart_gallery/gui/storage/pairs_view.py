@@ -528,7 +528,7 @@ class PairsView(QWidget):
             self.show_all.setText(SHOW_ALL.format(n=len(self._pairs)))
         else:
             label = SCOPE_ALL.format(n=len(shown))
-        self.scope_label.setText(label)
+        self.header.set_subtitle(label)
         self.show_all.setVisible(bool(self._scope))
 
         if not self._pairs:

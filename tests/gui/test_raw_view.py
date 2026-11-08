@@ -88,6 +88,8 @@ def _center(view, key):
 
 def test_grid_shows_scope_only(view):
     assert view.model.rowCount() == 5
+    view.show()
+    assert view.scope_label.isVisible()
     assert view.scope_label.text() == SCOPE_ALL.format(
         n=5, size=format_bytes(sum(c.size_bytes for c in _cands()))
     )

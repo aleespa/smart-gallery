@@ -60,6 +60,7 @@ def _argv(view):
 def test_summary_counts_what_the_filters_select(qtbot, repo, make_item, monkeypatch):
     view, _ = _view(qtbot, repo, make_item, monkeypatch)
     assert view.summary.text() == "5 files match (180 B)."
+    assert view.summary.isVisible() and view.source.text() == "Exporting from E"
     view.jpeg_only.setChecked(True)
     text = view.summary.text()
     assert "3 JPEGs and videos copied, 1 RAW files converted" in text

@@ -241,10 +241,12 @@ def test_heading_sections_and_command_disclosure(qtbot, tmp_path):
     titles = {b.title() for b in view.findChildren(QGroupBox)}
     assert {"Source", "Import into"} <= titles
     view.set_source("F:\\")
+    view.reload_profiles()
     view.profile_combo.setCurrentIndex(0)
     name = view.profile_combo.currentText()
-    if name:
-        assert view.heading.subtitle.text() == f"{name} · F:\\"
+    assert name
+    assert view.heading.subtitle.isVisible()
+    assert view.heading.subtitle.text() == f"{name} · F:\\"
     assert not view.command.opened and not view.preview.isVisible()
     view.command.button.click()
     assert view.preview.isVisible()

@@ -60,6 +60,8 @@ def test_rows_largest_first_and_scoped(view):
     view.set_scope("b")
     assert [b.folder for b in view.bursts_in_scope()] == ["b/x"]
     assert view.scope_label.text().startswith("In b · 1 bursts · 2 photos · ")
+    view.show()
+    assert view.scope_label.isVisible()
 
 
 def test_all_shots_start_kept(view):

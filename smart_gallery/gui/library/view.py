@@ -59,6 +59,7 @@ from smart_gallery.gui.library.model import (
     library_rows,
     library_stats,
 )
+from smart_gallery.format import format_count
 from smart_gallery.gui.library.viewer import MediaViewer, format_duration, format_size
 from smart_gallery.gui.mirror.menu import MirrorButton, peer_label
 from smart_gallery.mirror.types import key as relpath_key
@@ -668,8 +669,7 @@ class LibraryView(QWidget):
         self._root = Path(root)
         self.grid.set_groups(group_rows(rows, sort))
         self.grid_model.set_rows(rows, self._holder_labels(rows, holders))
-        noun = "item" if count == 1 else "items"
-        self.stats.setText(f"{count:,} {noun} · {format_size(size)}")
+        self.stats.setText(f"{format_count(count, 'file')} · {format_size(size)}")
         if rows:
             self.stack.setCurrentWidget(self.grid)
         else:

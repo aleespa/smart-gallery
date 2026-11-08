@@ -11,7 +11,7 @@ def test_size_three_significant_figures():
 
 
 def test_size_rounding_never_shows_four_digits():
-    assert format_size(int(999.5 * 2**20)) == "1000 MB"
+    assert format_size(int(999.5 * 2**20)) == "0.98 GB"
     assert format_size(1024**2 - 1) == "1.00 MB"
 
 

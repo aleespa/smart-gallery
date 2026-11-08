@@ -13,8 +13,8 @@ def format_size(num_bytes: int) -> str:
         value /= 1024
         unit += 1
     decimals = 2 if value < 10 else 1 if value < 100 else 0
-    if round(value, decimals) >= 1024 and unit < len(_UNITS) - 1:
-        value /= 1024  # 1023.9 KB rounds up to 1024: show 1.00 MB instead
+    if round(value, decimals) >= 1000 and unit < len(_UNITS) - 1:
+        value /= 1024  # 999.5 MB would print four digits: roll to 0.98 GB
         unit += 1
         decimals = 2
     return f"{value:.{decimals}f} {_UNITS[unit]}"

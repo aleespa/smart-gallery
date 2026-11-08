@@ -49,7 +49,7 @@ def test_library_shows_rows_for_folder(qtbot, repo, make_item):
     )
     view, _ = _view(qtbot, repo.db_path)
     qtbot.waitUntil(lambda: len(view.grid_model.rows) == 3)
-    assert view.stats.text().startswith("3 items")
+    assert view.stats.text().startswith("3 files")
 
     view.select_folder("a")
     # Newest first by default.
@@ -57,7 +57,7 @@ def test_library_shows_rows_for_folder(qtbot, repo, make_item):
 
     view.subfolders.setChecked(False)
     qtbot.waitUntil(lambda: _relpaths(view) == ["a/1.jpg"])
-    assert view.stats.text().startswith("1 item")
+    assert view.stats.text().startswith("1 file")
     assert view.stack.currentWidget() is view.grid
 
 

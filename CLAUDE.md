@@ -322,7 +322,10 @@ transfer) and invalidates D's cached face crops when they change.
    `cluster-faces --rebuild` regroups them). Naming a group, or merging it
    into a named person, turns its `cluster` faces into `auto`. `label-faces`
    only records corrections as an undoable batch (`undo-faces` reverses the
-   last); the People page sends each batch as one `label-faces --list PATH
+   last; `--step` pins which one). History's **Undo** on a *Fix faces* job
+   (`gui/history/undo.py`) reads the `Saved undo step N (time)` line the job
+   logged and is enabled only while that step is the catalog's newest; the
+   People page itself keeps only Ctrl+Z. The People page sends each batch as one `label-faces --list PATH
    --refile` job. `--refile` is scoped (`file_faces.refile_after_labels`):
    it files again only faces linked to a person the batch changed or scoring
    near one, and `tests/test_refile_scoped.py` checks it matches a full

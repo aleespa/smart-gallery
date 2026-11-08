@@ -198,3 +198,47 @@ def test_undo_refuses_when_restored_person_was_deleted(cat, repo):
         repo.undo_last()
     assert repo.face_snapshot() == current
     assert repo.last_undo() is not None
+
+
+def _two_steps(cat, repo):
+    f = cat.face(_unit(0), "new")
+    g = cat.face(_unit(1), "new")
+    snap = repo.face_snapshot()
+    _set_state(repo, f, "ignored")
+    first = repo.record_undo("first", snap)
+    snap = repo.face_snapshot()
+    _set_state(repo, g, "ignored")
+    second = repo.record_undo("second", snap)
+    return first, second
+
+
+def test_undo_with_expected_step_refuses_an_older_one(cat, repo):
+    first, second = _two_steps(cat, repo)
+    before = repo.face_snapshot()
+    with pytest.raises(ValueError, match="newer face change"):
+        repo.undo_last(first)
+    with pytest.raises(ValueError, match="newer face change"):
+        repo.forget_last_undo(first)
+    assert repo.face_snapshot() == before
+    assert repo.last_undo().batch_id == second
+    assert repo.undo_last(second)[0].summary == "second"
+    assert repo.forget_last_undo(first).summary == "first"
+
+
+def test_undo_step_finds_any_kept_batch(cat, repo):
+    first, second = _two_steps(cat, repo)
+    assert repo.undo_step(first).summary == "first"
+    assert repo.undo_step(second).summary == "second"
+    assert repo.undo_step(second + 1) is None
+    for t in UNDO_TABLES:
+        repo.conn.execute(f"DROP TABLE {t}")
+    assert repo.undo_step(first) is None
+
+
+def test_undo_step_text_round_trips():
+    from smart_gallery.db.face_undo import UndoInfo, parse_undo_step, undo_step_text
+
+    info = UndoInfo(12, "x", "2026-11-08 17:04:11")
+    lines = ["Updated 3 face(s)", f"Saved {undo_step_text(info)}.", "done"]
+    assert parse_undo_step(lines) == (12, "2026-11-08 17:04:11")
+    assert parse_undo_step(["nothing here"]) is None

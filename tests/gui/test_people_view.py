@@ -416,14 +416,13 @@ def test_no_stray_button_while_loading(qtbot, repo):
     assert not view.message_action.isVisible()
 
 
-def test_header_controls_order_and_undo_icon(qtbot):
-    view = PeopleView(AppContext())
+def test_header_has_no_undo_button(qtbot):
+    view = PeopleView(AppContext())  # Undo lives on History's jobs now
     qtbot.addWidget(view)
     lay = view.header_controls.layout()
     items = [lay.itemAt(i).widget() for i in range(lay.count())]
-    assert items == [view.undo_button, view.find_button]
-    assert not view.undo_button.icon().isNull()
-    assert view.undo_button.text() == "Undo"
+    assert items == [view.find_button]
+    assert not hasattr(view, "undo_button")
 
 
 def test_show_hidden_in_panel_footer(qtbot):
@@ -593,15 +592,16 @@ def _record(repo, summary="Confirmed 2 faces as Alice"):
     assert repo.record_undo(summary, snap) is not None
 
 
-def test_undo_button_reflects_last_batch(qtbot, repo, cat):
+def test_ctrl_z_does_nothing_without_a_step(qtbot, repo, cat):
     cat.person("Alice")
-    view = _view(qtbot, _ctx(repo, _Jobs()))
-    assert not view.undo_button.isEnabled()
-    assert view.undo_button.toolTip() == ""
+    ctx = _ctx(repo, _Jobs())
+    view = _view(qtbot, ctx)
+    view.undo()
+    assert ctx.jobs.specs == []
     _record(repo)
     _reload(qtbot, view, view.reload)
-    assert view.undo_button.isEnabled()
-    assert view.undo_button.toolTip() == "Undo: Confirmed 2 faces as Alice"
+    view.undo()
+    assert ctx.jobs.specs == [JobSpec("Undo", (("undo-faces", _root(repo)),))]
 
 
 def test_undo_starts_job(qtbot, repo, cat):
@@ -835,7 +835,7 @@ class _Box:
 
             Icon = type("Icon", (), {"Warning": 0})
 
-        monkeypatch.setattr("smart_gallery.gui.people.view.QMessageBox", Fake)
+        monkeypatch.setattr("smart_gallery.gui.undo_box.QMessageBox", Fake)
 
 
 def test_failed_undo_offers_forget(qtbot, repo, cat, monkeypatch):

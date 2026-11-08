@@ -435,3 +435,39 @@ def test_cli_label_faces_refile_logs_sorted_line(cat, repo, drive):
     finally:
         logger.remove(sink)
     assert any("Sorted faces:" in m and "left." in m for m in lines)
+
+
+def test_report_names_the_undo_step_it_saved(cat, repo):
+    alice = cat.person("Alice")
+    f = cat.face(_unit(0), "suggested", None, suggested=alice)
+    report = label_faces(repo, [LabelEntry("confirm", (f,), person_id=alice)])
+    assert report.undo == repo.last_undo() and report.undo is not None
+    again = label_faces(repo, [LabelEntry("confirm", (f,), person_id=alice)])
+    assert again.undo is None  # nothing changed, nothing saved
+
+
+def test_cli_label_and_undo_with_step(cat, repo, tmp_path, capfd, monkeypatch):
+    import json
+
+    from smart_gallery import cli
+    from smart_gallery.db.face_undo import parse_undo_step
+
+    monkeypatch.chdir(tmp_path)  # label-faces writes a detail log under ./logs
+    alice = cat.person("Alice")
+    f = cat.face(_unit(0), "suggested", None, suggested=alice)
+    root = str(repo.db_path.parent.parent)
+    labels = tmp_path / "labels.json"
+    labels.write_text(
+        json.dumps([{"action": "confirm", "faces": [f], "person_id": alice}]),
+        encoding="utf-8",
+    )
+    assert cli.main(["label-faces", root, "--list", str(labels)]) in (0, None)
+    out = capfd.readouterr()
+    step = parse_undo_step((out.out + out.err).splitlines())
+    assert step is not None
+    with pytest.raises(SystemExit) as refused:
+        cli.main(["undo-faces", root, "--step", str(step[0] + 1)])
+    assert refused.value.code == 1
+    assert cat.row(f)["state"] == "user"
+    assert cli.main(["undo-faces", root, "--step", str(step[0])]) in (0, None)
+    assert cat.row(f)["state"] == "suggested"

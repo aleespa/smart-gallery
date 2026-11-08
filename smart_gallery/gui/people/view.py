@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from smart_gallery.config import drive_root_of
-from smart_gallery.gui import icons, paths, theme
+from smart_gallery.gui import paths, theme
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.jobspec import JOB_RUNNING, JobSpec
 from smart_gallery.gui.people import model
@@ -42,6 +42,7 @@ from smart_gallery.gui.people.person_view import (
 from smart_gallery.gui.repo_query import RepoQuery
 from smart_gallery.gui.ui.metrics import SIDEBAR_WIDTH
 from smart_gallery.gui.ui.widgets import EmptyState
+from smart_gallery.gui.undo_box import ask_forget
 from smart_gallery.services.label_faces import LabelEntry, write_label_list
 
 FIND_TITLE = "Find faces"
@@ -66,11 +67,7 @@ UNHIDE_TITLE = "Show group"
 DELETE_TITLE = "Delete person"
 DELETE_ASK = "Delete {name}? Their faces become unassigned."
 FIX_TITLE = "Fix faces"
-UNDO = "Undo"
 UNDO_TITLE = "Undo"
-UNDO_TIP = "Undo: {summary}"
-UNDO_FAILED = "Could not undo.\n\n{error}"
-FORGET = "Forget this undo step"
 SEND_DELAY_MS = 400  # a burst of clicks becomes one job
 LABELS_DIR = "face-labels"
 LEAVE_ASK = "Send the face corrections you made before leaving?"
@@ -99,15 +96,11 @@ class PeopleView(QWidget):
         # Shown on the page header's right (MainWindow takes header_controls).
         self.find_button = QPushButton(FIND_BUTTON)
         theme.primary(self.find_button)
-        self.undo_button = QPushButton(UNDO)
-        self.undo_button.setIcon(
-            icons.icon("undo", self.palette().buttonText().color(), 18)
-        )
-        self.undo_button.setEnabled(False)
+        # Undo has a button on History's face-correction jobs; here only Ctrl+Z.
+        self._last_undo: str | None = None  # summary of the step Ctrl+Z reverts
         self.header_controls = QWidget()
         header = QHBoxLayout(self.header_controls)
         header.setContentsMargins(0, 0, 0, 0)
-        header.addWidget(self.undo_button)
         header.addWidget(self.find_button)
 
         self.list = PeopleList(ctx)
@@ -137,7 +130,6 @@ class PeopleView(QWidget):
         root.addWidget(self.splitter)
 
         self.find_button.clicked.connect(self.find_faces)
-        self.undo_button.clicked.connect(self.undo)
         self._undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
         self._undo_shortcut.activated.connect(self.undo)
         self.list.selection_changed.connect(self._on_selection)
@@ -191,10 +183,7 @@ class PeopleView(QWidget):
         self._set_undo(None)
 
     def _set_undo(self, summary: str | None) -> None:
-        self.undo_button.setEnabled(summary is not None)
-        self.undo_button.setToolTip(
-            UNDO_TIP.format(summary=summary) if summary is not None else ""
-        )
+        self._last_undo = summary
 
     def _on_data(self, result: model.PeopleList) -> None:
         self.data = result
@@ -393,7 +382,7 @@ class PeopleView(QWidget):
             if pid is not None:
                 self.person_page.show_person(pid)  # the hidden tiles return
             return
-        if self.undo_button.isEnabled():
+        if self._last_undo is not None:
             self._start(UNDO_TITLE, ("undo-faces", str(self._root)))
 
     def _on_undo_finished(self, record) -> None:
@@ -403,14 +392,8 @@ class PeopleView(QWidget):
             a and a[0] == "undo-faces" and "--forget" not in a for a in record.argvs
         ):
             return
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Warning)
-        box.setWindowTitle(UNDO_TITLE)
-        box.setText(UNDO_FAILED.format(error=record.summary or record.status))
-        forget = box.addButton(FORGET, QMessageBox.ButtonRole.ActionRole)
-        box.addButton(QMessageBox.StandardButton.Close)
-        box.exec()
-        if box.clickedButton() is forget and self._root is not None:
+        error = record.summary or record.status
+        if ask_forget(self, UNDO_TITLE, error) and self._root is not None:
             self._start(UNDO_TITLE, ("undo-faces", str(self._root), "--forget"))
 
     def find_faces(self) -> None:

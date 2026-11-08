@@ -103,6 +103,9 @@ than a full `file-faces`. Whole-person fixes: `merge-persons E:/ 1 7 9` merges 7
 re-sorting (`--refile`) moved. It refuses, changing nothing, if those faces
 changed since (find faces, merge, rescan...). `undo-faces E:/ --forget` then
 drops that last step without changing any faces, so older steps can be undone.
+`label-faces` logs the step it saved (`Saved undo step 12 (...)`); `--step 12`
+makes `undo-faces` (and `--forget`) refuse unless step 12 is still the newest.
+The desktop app's History page uses this for its **Undo** button.
 
 **4. Filter by person.** In the Library, the people filter selects photos with
 a person; with several people it offers *any* (at least one) or *all* (every

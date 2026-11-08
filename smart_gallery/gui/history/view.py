@@ -23,11 +23,13 @@ from PySide6.QtWidgets import (
 )
 
 from smart_gallery.format import format_duration as _format_seconds
-from smart_gallery.gui import theme
+from smart_gallery.gui import icons, theme
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.history.store import JobRecord
+from smart_gallery.gui.history.undo import UNDO_JOB, check_undo, undo_target
 from smart_gallery.gui.imports.model import profile_name_from_title
 from smart_gallery.gui.jobs import JobSpec
+from smart_gallery.gui.undo_box import ask_forget
 from smart_gallery.gui.ui.widgets import (
     ActionBar,
     EmptyState,
@@ -135,7 +137,15 @@ class HistoryView(QWidget):
         self.run_button = QPushButton("Run again")
         theme.primary(self.run_button)
         self.run_button.setEnabled(False)
+        # Only shown for a job that saved an undo step (a face correction).
+        self.undo_button = QPushButton("Undo")
+        self.undo_button.setIcon(
+            icons.icon("undo", self.palette().buttonText().color(), 18)
+        )
+        self.undo_button.hide()
+        self._undo_started = False  # an undo this page started is running
         self.footer = ActionBar()
+        self.footer.add_right(self.undo_button)
         self.footer.add_right(self.run_button)
 
         split = QSplitter(Qt.Orientation.Vertical)
@@ -150,11 +160,12 @@ class HistoryView(QWidget):
 
         self.table.itemSelectionChanged.connect(self._selection_changed)
         self.run_button.clicked.connect(self._run_again)
+        self.undo_button.clicked.connect(self._undo)
         if ctx.jobs is not None:
             ctx.jobs.started.connect(
-                lambda _spec: self._update_run_button(self._selected())
+                lambda _spec: self._update_buttons(self._selected())
             )
-            ctx.jobs.finished.connect(lambda _record: self.refresh())
+            ctx.jobs.finished.connect(self._on_finished)
         self.refresh()
 
     # ── list ─────────────────────────────────────────────────────────────────
@@ -199,12 +210,48 @@ class HistoryView(QWidget):
                 text if text is not None else "\n".join(record.output_tail)
             )
             self.detail.setCurrentWidget(self.log)
-        self._update_run_button(record)
+        self._update_buttons(record)
 
-    def _update_run_button(self, record: JobRecord | None) -> None:
+    def _update_buttons(self, record: JobRecord | None) -> None:
         busy = bool(self.ctx.jobs is not None and self.ctx.jobs.running)
         self.run_button.setEnabled(bool(record and record.argvs) and not busy)
         self.run_button.setToolTip(JOB_RUNNING if busy else "")
+        target = undo_target(record)
+        self.undo_button.setVisible(target is not None)
+        if target is None:
+            self.footer.set_note("")
+            return
+        check = check_undo(target)
+        self.undo_button.setEnabled(check.can_undo and not busy)
+        self.undo_button.setToolTip(JOB_RUNNING if busy else check.reason)
+        self.footer.set_note("" if check.can_undo else check.reason)
+
+    def _on_finished(self, record) -> None:
+        mine = self._undo_started and getattr(record, "title", None) == UNDO_JOB
+        if mine:
+            self._undo_started = False
+        self.refresh()
+        if not mine or record.status != "failed":
+            return
+        argv = next((a for a in record.argvs if a and a[0] == "undo-faces"), None)
+        if argv is None or "--forget" in argv:
+            return
+        if ask_forget(self, UNDO_JOB, record.summary or record.status):
+            self._start_undo((*argv, "--forget"))
+
+    # ── undo ─────────────────────────────────────────────────────────────────
+    def _undo(self) -> None:
+        target = undo_target(self._selected())
+        if target is not None and check_undo(target).can_undo:
+            self._start_undo(target.argv())
+
+    def _start_undo(self, argv: tuple[str, ...]) -> None:
+        if self.ctx.jobs is None:
+            return
+        if self.ctx.jobs.start(JobSpec(UNDO_JOB, (tuple(argv),))):
+            self._undo_started = True
+        else:
+            self.footer.set_note(JOB_RUNNING)
 
     # ── run again ────────────────────────────────────────────────────────────
     def _run_again(self) -> None:

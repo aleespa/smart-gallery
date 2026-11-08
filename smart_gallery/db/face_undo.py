@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 MAX_UNDO_BATCHES = 20
@@ -12,6 +14,9 @@ _BLANK = (None, None, None, None)
 
 class UndoConflict(ValueError):
     """The catalog changed since the batch was recorded, so it can't be undone."""
+
+
+NOT_NEWEST = "A newer face change must be undone first. Nothing was changed."
 
 
 @dataclass(frozen=True)
@@ -28,6 +33,24 @@ class UndoInfo:
     batch_id: int
     summary: str
     created_at: str
+
+
+_STEP_LINE = re.compile(r"undo step (\d+) \(([^)]+)\)")
+
+
+def undo_step_text(info: UndoInfo) -> str:
+    """``undo step 12 (2026-11-08 17:04:11)``. The time tells a step apart from
+    a later one that reused its id (ids are plain rowids)."""
+    return f"undo step {info.batch_id} ({info.created_at})"
+
+
+def parse_undo_step(lines: Iterable[str]) -> tuple[int, str] | None:
+    """The ``(id, created_at)`` of the last undo step named in ``lines``."""
+    found = None
+    for line in lines:
+        if m := _STEP_LINE.search(line):
+            found = (int(m.group(1)), m.group(2))
+    return found
 
 
 class FaceUndoMixin:
@@ -115,18 +138,41 @@ class FaceUndoMixin:
             return None
         return UndoInfo(row[0], row[1], row[2]) if row else None
 
-    def forget_last_undo(self) -> UndoInfo | None:
-        """Drop the newest batch without touching any face; ``None`` if none."""
+    def undo_step(self, batch_id: int) -> UndoInfo | None:
+        """The batch with this id, if it is still kept (any position)."""
+        try:
+            row = self.conn.execute(
+                "SELECT id, summary, created_at FROM face_undo_batches WHERE id=?",
+                (batch_id,),
+            ).fetchone()
+        except sqlite3.OperationalError as e:
+            if "no such table" not in str(e):
+                raise
+            return None
+        return UndoInfo(row[0], row[1], row[2]) if row else None
+
+    def _newest(self, expect: int | None) -> UndoInfo | None:
         info = self.last_undo()
+        if info is not None and expect is not None and info.batch_id != expect:
+            raise ValueError(NOT_NEWEST)
+        return info
+
+    def forget_last_undo(self, expect: int | None = None) -> UndoInfo | None:
+        """Drop the newest batch without touching any face; ``None`` if none.
+
+        With ``expect``, refuse unless the newest batch has that id."""
+        info = self._newest(expect)
         if info is None:
             return None
         self.conn.execute("DELETE FROM face_undo_batches WHERE id=?", (info.batch_id,))
         self.conn.commit()
         return info
 
-    def undo_last(self) -> tuple[UndoInfo, int]:
-        """Revert the newest batch; returns it and how many faces were restored."""
-        info = self.last_undo()
+    def undo_last(self, expect: int | None = None) -> tuple[UndoInfo, int]:
+        """Revert the newest batch; returns it and how many faces were restored.
+
+        With ``expect``, refuse unless the newest batch has that id."""
+        info = self._newest(expect)
         if info is None:
             raise ValueError("Nothing to undo.")
         c = self.conn

@@ -411,3 +411,148 @@ def test_detail_empty_until_selected(qtbot, tmp_path):
     assert view.detail.currentWidget() is view.log
     assert "hello" in view.log.toPlainText()
     assert isinstance(view.footer, ActionBar)
+
+
+# ── undo on face-correction jobs ─────────────────────────────────────────────
+from smart_gallery.config import drive_root_of  # noqa: E402
+from smart_gallery.db.face_undo import undo_step_text  # noqa: E402
+from smart_gallery.gui.jobspec import JOB_RUNNING  # noqa: E402
+from smart_gallery.gui.history.undo import (  # noqa: E402
+    GONE,
+    NEWER_FIRST,
+    NO_GALLERY,
+    UNDO_JOB,
+)
+
+
+def _step(repo, summary):
+    """Save an undo step in ``repo`` (a new person is enough of a change)."""
+    snap = repo.face_snapshot()
+    repo.conn.execute("INSERT INTO persons (name) VALUES (?)", (summary,))
+    repo.conn.commit()
+    assert repo.record_undo(summary, snap) is not None
+    return repo.last_undo()
+
+
+def _fix_job(root, info, started="2026-10-17T10:00:00+00:00", **kwargs):
+    tail = ["Updated 1 face(s)"]
+    if info is not None:
+        tail.insert(0, f"Saved {undo_step_text(info)}.")
+    return _record(
+        "Fix faces",
+        started,
+        argvs=[["label-faces", str(root), "--list", "x.json", "--refile"]],
+        output_tail=tail,
+        **kwargs,
+    )
+
+
+def _select(view, row):
+    view.table.selectRow(row)
+
+
+def test_undo_hidden_for_jobs_without_a_step(qtbot, tmp_path, repo):
+    root = drive_root_of(repo.db_path)
+    view, _ctx, _store = _view(
+        qtbot,
+        tmp_path,
+        _record("Sync"),
+        _fix_job(root, None, "2026-10-18T10:00:00+00:00"),
+        _fix_job(root, _step(repo, "a"), "2026-10-19T10:00:00+00:00", status="failed"),
+    )
+    for row in range(3):
+        _select(view, row)
+        assert view.undo_button.isHidden()
+        assert view.footer.note.text() == ""
+
+
+def test_newest_step_can_be_undone(qtbot, tmp_path, repo):
+    root = drive_root_of(repo.db_path)
+    first = _step(repo, "Named 1 person")
+    second = _step(repo, "Moved 2 faces to Alice")
+    view, ctx, _store = _view(
+        qtbot,
+        tmp_path,
+        _fix_job(root, first),
+        _fix_job(root, second, "2026-10-18T10:00:00+00:00"),
+    )
+    _select(view, 0)  # newest job: its step is the newest one
+    assert not view.undo_button.isHidden() and view.undo_button.isEnabled()
+    assert view.undo_button.toolTip() == "Undo: Moved 2 faces to Alice"
+    assert not view.undo_button.icon().isNull()
+    _select(view, 1)
+    assert not view.undo_button.isEnabled()
+    assert view.footer.note.text() == NEWER_FIRST
+
+    _select(view, 0)
+    view.undo_button.click()
+    assert ctx.jobs.calls[-1] == JobSpec(
+        UNDO_JOB, (("undo-faces", str(root), "--step", str(second.batch_id)),)
+    )
+
+    repo.undo_last()  # what that job does; the older job becomes undoable
+    ctx.jobs.finished.emit(_record(UNDO_JOB))
+    _select(view, 0)
+    assert not view.undo_button.isEnabled() and view.footer.note.text() == GONE
+    _select(view, 1)
+    assert view.undo_button.isEnabled()
+    assert view.undo_button.toolTip() == "Undo: Named 1 person"
+
+
+def test_reused_step_id_is_not_mistaken_for_the_old_one(qtbot, tmp_path, repo):
+    root = drive_root_of(repo.db_path)
+    old = _step(repo, "old")
+    repo.undo_last()
+    repo.conn.execute(
+        "INSERT INTO face_undo_batches (id, created_at, summary) VALUES (?, ?, ?)",
+        (old.batch_id, "2099-01-01 00:00:00", "new"),
+    )
+    repo.conn.commit()
+    view, _ctx, _store = _view(qtbot, tmp_path, _fix_job(root, old))
+    _select(view, 0)
+    assert not view.undo_button.isEnabled() and view.footer.note.text() == GONE
+
+
+def test_missing_gallery_disables_undo(qtbot, tmp_path, repo):
+    info = _step(repo, "a")
+    view, _ctx, _store = _view(qtbot, tmp_path, _fix_job(tmp_path / "gone", info))
+    _select(view, 0)
+    assert not view.undo_button.isEnabled()
+    assert view.footer.note.text() == NO_GALLERY
+
+
+def test_undo_disabled_while_a_job_runs(qtbot, tmp_path, repo):
+    root = drive_root_of(repo.db_path)
+    view, ctx, _store = _view(qtbot, tmp_path, _fix_job(root, _step(repo, "a")))
+    ctx.jobs.running = True
+    _select(view, 0)
+    assert not view.undo_button.isEnabled()
+    assert view.undo_button.toolTip() == JOB_RUNNING
+
+
+def _failed_undo(argv):
+    return _record(
+        UNDO_JOB, argvs=[list(argv)], status="failed", summary="changed since"
+    )
+
+
+def test_failed_undo_offers_to_forget_the_step(qtbot, tmp_path, repo, monkeypatch):
+    root = drive_root_of(repo.db_path)
+    info = _step(repo, "a")
+    view, ctx, _store = _view(qtbot, tmp_path, _fix_job(root, info))
+    asked = []
+    monkeypatch.setattr(
+        "smart_gallery.gui.history.view.ask_forget",
+        lambda _parent, title, error: asked.append((title, error)) or True,
+    )
+    argv = ("undo-faces", str(root), "--step", str(info.batch_id))
+    ctx.jobs.finished.emit(_failed_undo(argv))
+    assert asked == []  # not started here (People's Ctrl+Z answers its own)
+
+    _select(view, 0)
+    view.undo_button.click()
+    ctx.jobs.finished.emit(_failed_undo(argv))
+    assert asked == [(UNDO_JOB, "changed since")]
+    assert ctx.jobs.calls[-1] == JobSpec(UNDO_JOB, ((*argv, "--forget"),))
+    ctx.jobs.finished.emit(_failed_undo((*argv, "--forget")))
+    assert len(asked) == 1  # a failed forget asks nothing more

@@ -14,17 +14,18 @@ class UndoReport:
     faces_restored: int
 
 
-def undo_faces(repo: GalleryRepository) -> UndoReport:
-    """Undo the last ``label-faces`` batch; raises if its faces changed since."""
+def undo_faces(repo: GalleryRepository, step: int | None = None) -> UndoReport:
+    """Undo the last ``label-faces`` batch; raises if its faces changed since,
+    or, given ``step``, if the newest batch is not that one."""
     ensure_not_mirror(repo)
-    info, restored = repo.undo_last()
+    info, restored = repo.undo_last(step)
     return UndoReport(info.summary, restored)
 
 
-def forget_undo(repo: GalleryRepository) -> str:
+def forget_undo(repo: GalleryRepository, step: int | None = None) -> str:
     """Drop the newest undo step (no face changes); returns its summary."""
     ensure_not_mirror(repo)
-    info = repo.forget_last_undo()
+    info = repo.forget_last_undo(step)
     if info is None:
         raise ValueError("Nothing to undo.")
     return info.summary

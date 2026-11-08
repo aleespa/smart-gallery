@@ -562,10 +562,12 @@ flowchart LR
    sorted yet for ones that look like this person, best match first; confirm
    or reject them like suggestions. Double-click any face to see its whole
    photo with the face outlined (**Previous**/**Next** step through the
-   faces); this does not tick it. **Undo** (or Ctrl+Z) reverses the last
-   batch of face corrections. Undo refuses, changing nothing, once Find new
-   faces, a merge or a rescan has changed those faces; the message then offers
-   **Forget this undo step**, after which older steps can be undone.
+   faces); this does not tick it. Each batch of corrections is a *Fix faces*
+   job on the [History page](#history), where **Undo** reverses it (Ctrl+Z
+   on the People page reverses the last one). Undo refuses, changing nothing,
+   once Find new faces, a merge or a rescan has changed those faces; the
+   message then offers **Forget this undo step**, after which older steps can
+   be undone.
 4. **Whole groups.** **Merge people** joins several into one, **Split group**
    separates a group that mixes two people, **Delete person** returns its
    faces to the pool.
@@ -757,6 +759,11 @@ the end of its log below. **Run again**
 repeats it with the same options. For an import it opens the Library's
 Import window with the same profile instead, since the card's drive letter
 may have changed.
+
+Face corrections (*Fix faces* jobs) can be undone, newest first: select the
+newest one and press **Undo** beside **Run again**. On an older one the
+button stays greyed out and the bar says why (*Undo the newer face changes
+first*, or *Already undone, or too old to undo*; the last 20 are kept).
 
 ---
 

@@ -18,6 +18,7 @@ from loguru import logger
 
 from smart_gallery.config import resolve_db_path
 from smart_gallery.db import GalleryRepository
+from smart_gallery.db.face_undo import undo_step_text
 from smart_gallery.mirror.faces import ensure_not_mirror
 from smart_gallery.mirror.peers import choose_mirror, find_peer
 from smart_gallery.organize import FilterOptions, Options, normalize_extensions
@@ -741,6 +742,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Drop the last undo step without changing any faces (when it can no longer be undone).",
     )
+    p_undo.add_argument(
+        "--step",
+        type=int,
+        metavar="ID",
+        help="Only act if the newest undo step has this id (label-faces prints it).",
+    )
 
     p_cluster = sub.add_parser(
         "cluster-faces", help="Optionally cluster faces without sample photos."
@@ -1351,6 +1358,9 @@ def _handle_label_faces(args):
         report = label_faces(
             repo, entries, skip_missing=args.list is not None, refile=args.refile
         )
+    if report.undo is not None:
+        # The desktop app's History reads this line to offer Undo on the job.
+        logger.info(f"Saved {undo_step_text(report.undo)}.")
     logger.success(
         f"Updated {report.faces_changed:,} face(s); "
         f"{report.people_created} new person(s); "
@@ -1364,10 +1374,10 @@ def _handle_label_faces(args):
 def _handle_undo_faces(args):
     with GalleryRepository.open(args.drive) as repo:
         if args.forget:
-            summary = forget_undo(repo)
+            summary = forget_undo(repo, args.step)
             logger.success(f"Forgot undo step: {summary}.")
             return
-        r = undo_faces(repo)
+        r = undo_faces(repo, args.step)
     logger.success(f"Undid: {r.summary} ({r.faces_restored:,} faces restored).")
 
 

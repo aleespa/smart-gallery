@@ -16,6 +16,7 @@ from typing import Literal, Optional, Sequence, get_args
 from loguru import logger
 
 from smart_gallery.db import GalleryRepository
+from smart_gallery.db.face_undo import UndoInfo
 from smart_gallery.mirror.faces import ensure_not_mirror
 from smart_gallery.services.file_faces import FileFacesReport, refile_after_labels
 
@@ -39,6 +40,7 @@ class LabelReport:
     missing_faces: int = 0
     missing_people: int = 0  # list mode: people gone, their entries skipped
     filed: FileFacesReport | None = None
+    undo: UndoInfo | None = None  # the undo step this batch saved, if any
 
 
 def _is_int(value) -> bool:
@@ -203,6 +205,6 @@ def label_faces(
         report.filed = refile_after_labels(
             repo, candidates_before, {f for e in entries for f in e.faces}
         )
-    if entries:
-        repo.record_undo(describe(entries, names), before)
+    if entries and repo.record_undo(describe(entries, names), before) is not None:
+        report.undo = repo.last_undo()
     return report

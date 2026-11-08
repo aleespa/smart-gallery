@@ -37,6 +37,7 @@ from smart_gallery.gui import theme
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.filter_widgets import ChipPicker, DateField
 from smart_gallery.gui.ui.metrics import FILTER_WIDTH
+from smart_gallery.gui.ui.widgets import PanelFooter
 from smart_gallery.gui.filters_model import (
     FilterValues,
     filter_choices,
@@ -172,9 +173,9 @@ class FilterPanel(QWidget):
         layout.addWidget(self.errors)
         # Below the scroll, also always in view: a page's own buttons (the
         # Library's Export).
-        self.bottom_row = QHBoxLayout()
-        self.bottom_row.setContentsMargins(10, 10, 10, 6)
-        layout.addLayout(self.bottom_row)
+        self.bottom_footer = PanelFooter()
+        self.bottom_row = self.bottom_footer._row
+        layout.addWidget(self.bottom_footer)
         self.setMinimumWidth(PANEL_WIDTH)
 
         self._timer.timeout.connect(self.apply)

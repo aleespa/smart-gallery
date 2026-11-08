@@ -128,8 +128,7 @@ class ExportView(QWidget):
         self.preview.setReadOnly(True)
         self.preview.setMaximumHeight(90)
         self.command = Disclosure(COMMAND, self.preview)
-        self.problem = QLabel()  # why Run is off, with the command collapsed
-        self.problem.setWordWrap(True)
+        self.problem = self.footer.note  # why Run is off, with the command collapsed
         self.dry_run = QCheckBox("Dry run (plan only, copy nothing)")
         self.run_button = QPushButton("Run export")
         theme.primary(self.run_button)
@@ -213,13 +212,13 @@ class ExportView(QWidget):
         right.addWidget(format_box)
         right.addWidget(extras)
         right.addWidget(self.command)
-        right.addWidget(self.problem)
         right.addStretch(1)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(form)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.heading)
         layout.addWidget(scroll, 1)
         layout.addWidget(self.footer)
@@ -327,12 +326,11 @@ class ExportView(QWidget):
             spec = build_export_job(gallery, settings, self.ctx.filters)
         except ValueError as error:
             self.preview.setPlainText(str(error))
-            self.problem.setText(str(error))
-            self.problem.setVisible(True)
+            self.footer.set_note(str(error))
             self.run_button.setEnabled(False)
             return
         self.preview.setPlainText(format_command(list(spec.argvs[0])))
-        self.problem.setVisible(False)
+        self.footer.set_note("")
         jobs = self.ctx.jobs
         self.run_button.setEnabled(jobs is not None and not jobs.running)
 

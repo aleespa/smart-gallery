@@ -25,3 +25,12 @@ def test_duration():
     assert format_duration(12) == "12s"
     assert format_duration(243) == "4m 3s"
     assert format_duration(57299) == "15h 54m 59s"
+
+
+def test_size_decimals_follow_rounded_value():
+    assert format_size(int(9.996 * 2**20)) == "10.0 MB"
+    assert format_size(int(99.96 * 2**20)) == "100 MB"
+
+
+def test_duration_negative_is_zero():
+    assert format_duration(-7195) == "0s"

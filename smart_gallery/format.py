@@ -13,6 +13,10 @@ def format_size(num_bytes: int) -> str:
         value /= 1024
         unit += 1
     decimals = 2 if value < 10 else 1 if value < 100 else 0
+    if decimals == 2 and round(value, 2) >= 10:
+        decimals = 1
+    if decimals == 1 and round(value, 1) >= 100:
+        decimals = 0
     if round(value, decimals) >= 1000 and unit < len(_UNITS) - 1:
         value /= 1024  # 999.5 MB would print four digits: roll to 0.98 GB
         unit += 1
@@ -28,7 +32,7 @@ def format_count(n: int, noun: str, plural: str | None = None) -> str:
 
 def format_duration(seconds: float) -> str:
     """``12s``, ``4m 3s`` or ``15h 54m 59s``."""
-    total = int(seconds)
+    total = max(0, int(seconds))
     hours, rest = divmod(total, 3600)
     minutes, secs = divmod(rest, 60)
     if hours:

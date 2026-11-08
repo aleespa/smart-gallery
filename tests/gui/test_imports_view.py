@@ -214,7 +214,6 @@ def test_select_profile_preselects_and_asks_to_pick_again(qtbot, tmp_path):
 
     view, ctx, galleries = _view(qtbot, tmp_path)
     assert view.profile_combo.currentText() == "Canon SD card"
-    assert view.note.text() == ""
     view.select_profile("Pixel dump")
     assert view.profile_combo.currentText() == "Pixel dump"
     assert view.note.text() == PICK_AGAIN

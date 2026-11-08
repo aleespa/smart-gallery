@@ -44,8 +44,8 @@ def format_start(started_at: str, now: datetime | None = None) -> str:
     """``Today 17:01``, ``Yesterday 09:12`` or ``2026-11-01 09:12`` (local time)."""
     try:
         when = datetime.fromisoformat(started_at)
-    except ValueError:
-        return started_at
+    except (TypeError, ValueError):
+        return str(started_at or "")
     if when.tzinfo is not None:
         when = when.astimezone().replace(tzinfo=None)
     today = (now or datetime.now()).date()

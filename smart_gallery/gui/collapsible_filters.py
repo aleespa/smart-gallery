@@ -107,5 +107,9 @@ class CollapsibleFilters:
             logger.warning("Could not save %s: %s", self.state_path, exc)
 
     def _apply(self) -> None:
-        self.panel.setVisible(self.shown)
+        if self.shown:
+            if not self.panel.isWindow():
+                self.panel.setVisible(True)
+        else:
+            self.panel.setVisible(False)
         self.strip.setVisible(not self.shown)

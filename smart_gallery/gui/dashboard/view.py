@@ -151,6 +151,10 @@ class Panel(QFrame):
         self.title.setCursor(Qt.CursorShape.PointingHandCursor)
         self.header = SectionHeader(title)
         self.title.clicked.connect(lambda: self.set_collapsed(not self._collapsed))
+        self.header.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.header.installEventFilter(self)
+        for child in self.header.findChildren(QWidget):
+            child.installEventFilter(self)
         self._refresh_title()
         self.body: QWidget | None = None
         self._layout = QVBoxLayout(self)
@@ -158,6 +162,16 @@ class Panel(QFrame):
         head.addWidget(self.title)
         head.addWidget(self.header, 1)
         self._layout.addLayout(head)
+
+    def eventFilter(self, obj, event) -> bool:
+        if (
+            event.type() == QEvent.Type.MouseButtonPress
+            and event.button() == Qt.MouseButton.LeftButton
+            and (obj is self.header or self.header.isAncestorOf(obj))
+        ):
+            self.set_collapsed(not self._collapsed)
+            return True
+        return super().eventFilter(obj, event)
 
     @property
     def collapsed(self) -> bool:

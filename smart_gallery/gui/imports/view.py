@@ -280,8 +280,10 @@ class ImportView(QWidget):
             spec = self._spec()
         except ValueError as error:
             self.preview.setPlainText(str(error))
+            self.footer.set_note(str(error))
             self.run_button.setEnabled(False)
             return
+        self.footer.set_note("")
         lines = [format_command(list(argv)) for argv in spec.argvs]
         self.preview.setPlainText("\n".join(lines))
         self.run_button.setEnabled(jobs is not None and not jobs.running)
@@ -293,6 +295,7 @@ class ImportView(QWidget):
             spec = self._spec()
         except ValueError as error:
             self.preview.setPlainText(str(error))
+            self.footer.set_note(str(error))
             return
         self.footer.set_note("")
         if self.ctx.jobs.start(spec) is not False:

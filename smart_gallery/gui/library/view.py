@@ -529,7 +529,7 @@ class LibraryView(QWidget):
         self.reload()
 
     def _on_tree(self, node: FolderNode) -> None:
-        label = getattr(self.ctx.current, "label", "") or "All items"
+        label = getattr(self.ctx.current, "label", "") or "All files"
         self._building_tree = True
         try:
             self.tree_model.clear()

@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from smart_gallery import colors
 from smart_gallery.config import to_abspath
 from smart_gallery.gui.library.viewer import _to_qimage
+from smart_gallery.gui.segment import segment
 from smart_gallery.gui.storage.bursts_view import KEEP_ONE, KEEPING, BurstsView
 from smart_gallery.gui.thumbs.cache import load_preview
 from smart_gallery.storage.bursts import Burst, Shot, ShotKey
@@ -184,17 +185,16 @@ class BurstReview(QWidget):
         self.image_label.installEventFilter(self)
 
         self.details = QLabel("")
-        self.keep_button = QPushButton(KEEP_BUTTON)
-        self.remove_button = QPushButton(REMOVE_BUTTON)
+        self.verdict, _group, (self.keep_button, self.remove_button) = segment(
+            KEEP_BUTTON, REMOVE_BUTTON
+        )
         for button in (self.keep_button, self.remove_button):
-            button.setCheckable(True)
             button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.keep_button.clicked.connect(lambda: self._set_marked(False))
         self.remove_button.clicked.connect(lambda: self._set_marked(True))
         info = QHBoxLayout()
         info.addWidget(self.details, 1)
-        info.addWidget(self.keep_button)
-        info.addWidget(self.remove_button)
+        info.addWidget(self.verdict)
 
         self.film = _Film(self)
         self.film.picked.connect(self._go)

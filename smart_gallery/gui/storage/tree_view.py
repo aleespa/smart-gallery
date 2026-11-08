@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from smart_gallery.gui import theme
+from smart_gallery.gui.segment import segment
 from smart_gallery.gui.library.viewer import open_folder
 from smart_gallery.storage.tree import TYPE, StorageNode, StorageTree, format_bytes
 
@@ -79,14 +80,13 @@ class StorageTreeView(QWidget):
 
         self.buttons: dict[str, QPushButton] = {}
         bar = QHBoxLayout()
-        for key, label in GROUPING_LABELS.items():
-            btn = QPushButton(label)
-            btn.setCheckable(True)
-            btn.setAutoExclusive(True)
+        box, _group, seg_buttons = segment(*GROUPING_LABELS.values())
+        self._segment = box
+        for (key, _label), btn in zip(GROUPING_LABELS.items(), seg_buttons):
             btn.setChecked(key == self._grouping)
             btn.clicked.connect(lambda _=False, k=key: self.set_grouping(k))
             self.buttons[key] = btn
-            bar.addWidget(btn)
+        bar.addWidget(box)
         bar.addStretch(1)
 
         self.tree = QTreeView()

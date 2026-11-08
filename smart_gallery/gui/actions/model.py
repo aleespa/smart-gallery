@@ -34,7 +34,7 @@ COMMAND_GROUPS: dict[str, dict[str, str]] = {
         "export": "Export",
         "report": "Report",
         "compare": "Compare catalogs",
-        "rename": "Rename files",
+        "rename": "Rename gallery",
     },
     "Mirror": {
         "pair": "Pair drives",

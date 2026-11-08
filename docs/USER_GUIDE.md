@@ -257,7 +257,7 @@ Click a heading's triangle to fold a group; right-click a heading for
 it flips between newest/largest first and oldest/smallest first.
 
 The header shows how many items are on screen and their total size (for
-example *87 items · 159.6 MB*).
+example *87 files · 159.6 MB*).
 
 ### Viewing a photo
 
@@ -306,7 +306,7 @@ it brings the panel back.
 
 | Filter | Meaning |
 |---|---|
-| **Date taken** | Only items taken between two dates (either end can be left empty). |
+| **Date taken** | Only files taken between two dates (either end can be left empty). |
 | **Type** | Photos, Videos, Other files. None ticked means all. |
 | **People** | (with face recognition) photos with *any* or *all* of the selected people. |
 | **Cameras**, **Lenses** | Tick one or more; the search box narrows long lists. |
@@ -744,14 +744,14 @@ from here:
 | **Report** | Write an Excel workbook listing the files (optionally with charts). |
 | **Compare catalogs** | Compare two catalogs. |
 | **Convert RAW** | Extract the full-size JPEG stored inside Canon RAW files. |
-| **Rename files** | Rename a gallery. |
+| **Rename gallery** | Rename a gallery. |
 
 ### History
 
 ![The History page](images/area-history.png)
 
 **History** lists every job the app ran, newest first: its title, when it
-started, how long it took, how it ended (a coloured status pill: *ok*, *failed*, *cancelled*) and a
+started, how long it took, how it ended (a coloured status pill: *done*, *failed*, *cancelled*) and a
 one-line summary. Start times read like *Today 17:01*. Select a job to read
 the end of its log below. **Run again**
 repeats it with the same options. For an import it opens the Library's
@@ -832,7 +832,7 @@ They are being made; give it a moment. A file the program cannot read (an
 unusual format, a damaged file) keeps the grey placeholder.
 
 **An import copied nothing.**
-Check the **Commands** box: the profile's extensions must match your files
+Open the collapsed **Command** section: the profile's extensions must match your files
 (for example `.cr3` for Canon RAW). With *On a name clash: Skip*, files whose
 names already exist in the target folder are skipped. Run with **Dry run** to
 see what would happen.

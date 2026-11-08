@@ -61,7 +61,7 @@ PRIMARY_STYLE = f"""
 QPushButton#primaryButton {{
     background: {ACCENT_FILL};
     color: {ON_ACCENT};
-    border: none;
+    border: 1px solid transparent;
     border-radius: 4px;
     padding: 7px 20px;
     font-weight: bold;
@@ -98,7 +98,7 @@ QPushButton#dangerButton:pressed {{ background: {ERROR}; color: {ON_ACCENT}; }}
 QPushButton#dangerButton:disabled {{
     background: {DARK_PALETTE["Button"]};
     color: {DARK_DISABLED_TEXT};
-    border: none;
+    border: 1px solid transparent;
 }}
 """
 
@@ -110,6 +110,26 @@ def danger(button: QPushButton) -> QPushButton:
     return button
 
 
+# Group boxes are cards: a raised panel with a serif title inside its top edge.
+CARD_STYLE = f"""
+QGroupBox {{
+    background: palette(base);
+    border: 1px solid palette(mid);
+    border-radius: 6px;
+    margin-top: 0;
+    padding: 28px 10px 10px 10px;
+    font-family: "{SERIF[0]}";
+    font-size: {SECTION_PT}pt;
+}}
+QGroupBox::title {{
+    subcontrol-origin: padding;
+    subcontrol-position: top left;
+    left: 10px;
+    top: 6px;
+}}
+"""
+
+
 def qcolor(color: str | tuple[int, ...]) -> QColor:
     """A ``colors`` value as a QColor: ``#RRGGBB`` or an ``(r, g, b, a)`` tuple."""
     return QColor(*color) if isinstance(color, tuple) else QColor(color)
@@ -119,6 +139,7 @@ _FILL = QColor(ACCENT_FILL)
 # A checked segment is tinted with an accent underline, not filled, so a
 # segmented switch never reads as a primary button.
 SEGMENT_STYLE = f"""
+QWidget#segment QPushButton {{ border-bottom: 2px solid transparent; }}
 QWidget#segment QPushButton:checked {{
     background: rgba({_FILL.red()}, {_FILL.green()}, {_FILL.blue()}, 60);
     border-bottom: 2px solid {ACCENT};

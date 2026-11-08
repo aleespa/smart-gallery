@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QDialog, QPushButton, QVBoxLayout, QWidget
 
+from smart_gallery.gui import theme
+
 DEFAULT_SIZE = (860, 800)
 
 
@@ -25,6 +27,7 @@ class FormWindow(QDialog):
         self.form = form
         self.setWindowTitle(title)
         self.setModal(False)
+        self.setStyleSheet(theme.CARD_STYLE)
         self.resize(*size)
         layout = QVBoxLayout(self)
         layout.addWidget(form)

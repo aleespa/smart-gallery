@@ -1,0 +1,11 @@
+"""Layout constants shared by every page (no Qt)."""
+
+SPACE = (4, 8, 12, 16, 24)
+PAGE_MARGIN = 24
+PAGE_TOP = 12
+PAGE_BOTTOM = 16
+SIDEBAR_WIDTH = 260
+FILTER_WIDTH = 320
+WIDE_SIDEBAR_WIDTH = 420
+RADIUS = 6
+FOOTER_HEIGHT = 40

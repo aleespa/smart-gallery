@@ -60,8 +60,7 @@ QToolButton#areaTab {{
 }}
 QToolButton#areaTab:hover {{ border-bottom-color: palette(mid); }}
 QToolButton#areaTab:checked {{ border-bottom-color: {theme.ACCENT}; }}
-QGroupBox {{ font-family: "{theme.SERIF[0]}"; font-size: {theme.SECTION_PT}pt; }}
-"""
+""" + theme.CARD_STYLE
 QUIT_WHILE_RUNNING = "A job is still running. Cancel it and quit?"
 EXIFTOOL_BANNER = (
     "ExifTool not found. Install it from https://exiftool.org to read metadata."

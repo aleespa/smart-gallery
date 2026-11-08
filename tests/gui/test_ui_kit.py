@@ -92,3 +92,14 @@ def test_segment_size_stable_when_checked(qtbot):
     box.show()
     assert a.isChecked() and not b.isChecked()
     assert _hint(a) == _hint(b)
+
+
+def test_action_bar_set_note_hides_when_empty(qtbot):
+    bar = ActionBar()
+    qtbot.addWidget(bar)
+    bar.show()
+    assert bar.note.isHidden()
+    bar.set_note("Careful")
+    assert not bar.note.isHidden() and bar.note.text() == "Careful"
+    bar.set_note("")
+    assert bar.note.isHidden()

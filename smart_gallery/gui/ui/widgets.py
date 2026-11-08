@@ -36,6 +36,9 @@ def _muted(label: QLabel) -> QLabel:
     return label
 
 
+muted = _muted  # public name for other pages
+
+
 class SectionHeader(QWidget):
     def __init__(self, title: str, subtitle: str = ""):
         super().__init__()
@@ -128,6 +131,11 @@ class ActionBar(QWidget):
         self.note.setWordWrap(True)
         outer.addLayout(row)
         outer.addWidget(self.note)
+        self.note.hide()
+
+    def set_note(self, text: str) -> None:
+        self.note.setText(text)
+        self.note.setHidden(not text)
 
     def add_left(self, widget: QWidget) -> None:
         self._left.addWidget(widget)

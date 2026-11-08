@@ -10,9 +10,9 @@ from smart_gallery.gui.galleries.store import Gallery
 from smart_gallery.gui.paths import app_data_dir
 from smart_gallery.gui.state_store import load_json
 from smart_gallery.gui.storage.pairs_view import PAIR_ROLE
+from smart_gallery.gui.ui.metrics import WIDE_SIDEBAR_WIDTH
 from smart_gallery.gui.storage.tree_view import NODE_ROLE
 from smart_gallery.gui.storage.view import (
-    CAPTION,
     JOB_RUNNING,
     JOB_TITLE,
     LISTS_DIR,
@@ -105,9 +105,6 @@ def test_load_storage_includes_shots(repo, make_item):
 def test_page_shows_both_columns(qtbot, repo, make_item, drive):
     _fill(repo, make_item)
     view = _view(qtbot, _ctx(repo))
-    assert view.caption.text() == CAPTION.format(
-        root=drive.name, size=format_bytes(8010), files=5
-    )
     model = view.tree_view.tree.model()
     assert model.index(0, 0).data(NODE_ROLE).relpath == ""
     assert len(view.pairs_view.choices()) == 0
@@ -119,7 +116,7 @@ def test_no_gallery_shows_message(qtbot):
     view = StorageView(AppContext())
     qtbot.addWidget(view)
     assert view.stack.currentWidget() is view.message
-    assert view.message.text() == NO_GALLERY
+    assert view.message.text.text() == NO_GALLERY
 
 
 def test_folder_click_scopes_pairs(qtbot, repo, make_item):
@@ -228,7 +225,7 @@ def test_grouping_and_split_remembered(qtbot, repo, make_item):
     view = _view(qtbot, _ctx(repo))
     view.resize(1000, 600)
     view.show()
-    assert abs(view.splitter.sizes()[0] - view.splitter.sizes()[1]) <= 2
+    assert view.splitter.sizes()[0] == WIDE_SIDEBAR_WIDTH
     view.tree_view.set_grouping("type")
     view.splitter.setSizes([300, 690])
     view.splitter.splitterMoved.emit(300, 1)
@@ -257,7 +254,7 @@ def test_bad_state_is_ignored(qtbot, repo, make_item, state):
     view.resize(1000, 600)
     view.show()
     assert view.tree_view.grouping() == "folder"
-    assert abs(view.splitter.sizes()[0] - view.splitter.sizes()[1]) <= 2
+    assert view.splitter.sizes()[0] == WIDE_SIDEBAR_WIDTH
 
 
 def test_same_gallery_again_keeps_choices_and_scope(qtbot, repo, make_item):
@@ -282,7 +279,7 @@ def test_disconnected_same_gallery_keeps_choices(qtbot, repo, make_item, tmp_pat
     gone = Gallery("uuid", str(tmp_path / "missing" / "gallery.db"), "test")
     ctx.set_gallery(gone)
     qtbot.waitUntil(lambda: view.stack.currentWidget() is view.message)
-    assert view.message.text().startswith("Drive not connected.")
+    assert view.message.text.text().startswith("Drive not connected.")
     assert view.pairs_view.choices() == {p1.key: KEEP_RAW}
     _reload(qtbot, view, lambda: ctx.set_gallery(_ctx(repo).current))
     assert view.pairs_view.choices() == {p1.key: KEEP_RAW}
@@ -656,7 +653,7 @@ def test_leave_guard_counts_pair_choices_and_burst_marks(
     monkeypatch.setattr(QMessageBox, "question", answer)
     assert not ctx.can_leave()
     assert ctx.can_leave()
-    assert asked == ["You have 2 unapplied choices. Discard them?"] * 2
+    assert asked == ["You have 2 selections not applied yet. Discard them?"] * 2
     assert view.pairs_view.choices() == {} and view.bursts_view.marks() == set()
 
 
@@ -886,7 +883,7 @@ def test_leave_guard_counts_raw_picks(qtbot, repo, make_item, monkeypatch):
 
     monkeypatch.setattr(QMessageBox, "question", answer)
     assert ctx.can_leave()
-    assert asked == ["You have 2 unapplied choices. Discard them?"]
+    assert asked == ["You have 2 selections not applied yet. Discard them?"]
     assert view.raw_view.picks() == set()
 
 
@@ -923,3 +920,57 @@ def test_gallery_change_clears_picks(qtbot, repo, make_item, tmp_path):
     ctx.set_gallery(Gallery("u2", str(path), "other"))
     _loaded(qtbot, view)
     assert view.raw_view.picks() == set()
+
+
+def test_summary_and_splitter_default(qtbot, repo, make_item, monkeypatch):
+    _fill(repo, make_item)
+    ctx = _ctx(repo)
+    view = StorageView(ctx)
+    qtbot.addWidget(view)
+    seen = []
+    view.summary_changed.connect(seen.append)
+    _loaded(qtbot, view)
+    assert seen == ["5 files · " + format_bytes(8010)]
+    assert not hasattr(view, "caption")
+    view.resize(1400, 700)
+    view.show()
+    assert view.splitter.sizes()[0] == WIDE_SIDEBAR_WIDTH
+
+
+def test_summary_empty_without_gallery(qtbot):
+    view = StorageView(AppContext())
+    qtbot.addWidget(view)
+    from smart_gallery.gui.ui.widgets import EmptyState
+
+    assert isinstance(view.message, EmptyState)
+    assert view.message.text.text() == NO_GALLERY
+
+
+def test_tree_notice_shows_in_footer_and_clears(qtbot, repo, make_item):
+    _fill(repo, make_item)
+    view = _view(qtbot, _ctx(repo))
+    view.tree_view.message.emit("Gone")
+    assert view.notice.text() == "Gone"
+    view.tree_view.tree.setCurrentIndex(_child(view, "a"))
+    assert view.notice.text() == ""
+
+
+def test_gallery_switch_with_selection_asks_with_new_text(
+    qtbot, repo, make_item, monkeypatch
+):
+    from smart_gallery.gui.storage.pairs_view import LEAVE, LEAVE_TITLE
+
+    _fill(repo, make_item)
+    ctx = _ctx(repo)
+    view = _view(qtbot, ctx)
+    view.pairs_view.choose(view.data.pairs[0].key, KEEP_RAW)
+    asked = []
+
+    def question(parent, title, text, *rest):
+        asked.append((title, text))
+        return QMessageBox.StandardButton.No
+
+    monkeypatch.setattr(QMessageBox, "question", question)
+    assert not ctx.can_leave()
+    assert asked == [(LEAVE_TITLE, LEAVE.format(n=1))]
+    assert LEAVE_TITLE == "Selections not applied"

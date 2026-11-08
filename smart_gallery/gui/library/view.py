@@ -66,6 +66,7 @@ from smart_gallery.format import format_count
 from smart_gallery.gui.library.viewer import MediaViewer, format_duration, format_size
 from smart_gallery.gui.mirror.menu import MirrorButton, peer_label
 from smart_gallery.mirror.types import key as relpath_key
+from smart_gallery.gui.thumbs.placeholder import placeholder_for
 from smart_gallery.gui.repo_query import RepoQuery
 from smart_gallery.organize.filters import is_query_empty
 
@@ -97,52 +98,6 @@ NOTHING = "Nothing matches this folder and the current filters."
 READ_ERROR = "Could not read the catalog: {error}"
 OFFLOADED_TIP = "On {label} only"
 OFFLOADED_OPACITY = 0.35
-
-_TILE_BG = theme.qcolor(theme.TILE_BACK)
-_TILE_FG = theme.qcolor(theme.TILE_GLYPH)
-_placeholders: dict[tuple[str, str], QPixmap] = {}
-
-
-def _placeholder(kind: str, text: str = "") -> QPixmap:
-    """Tile shown until a thumbnail arrives: a photo glyph, a play sign with
-    the video's duration, or the file extension."""
-    key = (kind, text)
-    cached = _placeholders.get(key)
-    if cached is not None:
-        return cached
-    edge = ICON_EDGE
-    pixmap = QPixmap(edge, edge)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    p = QPainter(pixmap)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(_TILE_BG)
-    p.drawRoundedRect(QRectF(2, 2, edge - 4, edge - 4), 8, 8)
-    p.setBrush(_TILE_FG)
-    if kind == "photo":
-        p.drawEllipse(QRectF(edge * 0.58, edge * 0.25, edge * 0.14, edge * 0.14))
-        hills = [(0.2, 0.72), (0.42, 0.42), (0.58, 0.6), (0.68, 0.5), (0.82, 0.72)]
-        p.drawPolygon(QPolygonF([QPointF(x * edge, y * edge) for x, y in hills]))
-    elif kind == "video":
-        tri = [(0.4, 0.32), (0.4, 0.68), (0.68, 0.5)]
-        p.drawPolygon(QPolygonF([QPointF(x * edge, y * edge) for x, y in tri]))
-    if text:
-        font = QFont(p.font())
-        font.setPointSize(11 if kind == "video" else 16)
-        font.setBold(True)
-        p.setFont(font)
-        p.setPen(_TILE_FG)
-        if kind == "video":
-            box = QRectF(0, edge * 0.72, edge - 12, edge * 0.2)
-            align = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        else:
-            box = QRectF(0, 0, edge, edge)
-            align = Qt.AlignmentFlag.AlignCenter
-        p.drawText(box, align, text)
-    p.end()
-    _placeholders[key] = pixmap
-    return pixmap
-
 
 _BADGE_BG = theme.qcolor(theme.BADGE_BACK)
 _BADGE_FG = theme.qcolor(theme.BADGE_TEXT)
@@ -192,7 +147,7 @@ _faded: dict[int, QPixmap] = {}
 
 def _faded_placeholder(row: LibraryRow) -> QPixmap:
     """The row's placeholder drawn faint: the file is kept on a mirror only."""
-    tile = _placeholder_for(row)
+    tile = placeholder_for(row)
     cached = _faded.get(tile.cacheKey())
     if cached is not None:
         return cached
@@ -204,14 +159,6 @@ def _faded_placeholder(row: LibraryRow) -> QPixmap:
     p.end()
     _faded[tile.cacheKey()] = faded
     return faded
-
-
-def _placeholder_for(row: LibraryRow) -> QPixmap:
-    if row.media_type == "video":
-        return _placeholder("video", format_duration(row.duration_ms))
-    if row.media_type == "image":
-        return _placeholder("photo")
-    return _placeholder("file", (row.ext or "").lstrip(".").upper()[:5])
 
 
 class LibraryGridModel(QAbstractListModel):
@@ -257,7 +204,7 @@ class LibraryGridModel(QAbstractListModel):
             key = self._key(row)
             pixmap = self._pixmaps.get(key)
             if pixmap is None:
-                return _placeholder_for(row)
+                return placeholder_for(row)
             self._pixmaps.move_to_end(key)
             return pixmap
         return None

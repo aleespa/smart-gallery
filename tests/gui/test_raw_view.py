@@ -120,7 +120,7 @@ def test_click_toggles_and_footer_counts(view, qtbot):
         jpeg=format_bytes(estimate_jpeg_bytes(picked)),
         freed=format_bytes(raw - estimate_jpeg_bytes(picked)),
     )
-    assert view.footer_label.text().startswith("2 picked · 40.0 MB of CR3 → about ")
+    assert view.footer_label.text().startswith("2 selected · 40.0 MB of CR3 → about ")
     assert view.convert_button.text() == "Convert 2 and recycle the CR3s"
     view.toggle(k4)
     assert view.picks() == {k5}
@@ -317,3 +317,37 @@ def test_reload_closes_open_viewer(view, tmp_path):
     view.set_candidates(_cands(), tmp_path)
     assert not viewer.isVisible()
     assert view.viewer is None
+
+
+def test_raw_copy_and_roles(view):
+    from smart_gallery.gui.ui.widgets import ActionBar, EmptyState, SectionHeader
+
+    assert raw_view.FOOTER == (
+        "{n:,} selected · {raw} of CR3 → about {jpeg} of JPEG · frees ~{freed}"
+    )
+    assert raw_view.CLEAR == "Clear selection"
+    assert raw_view.LEAVE_TITLE == "Selections not applied"
+    assert raw_view.LEAVE == (
+        "You have {n:,} selections not applied yet. Discard them?"
+    )
+    assert view.convert_button.objectName() == "dangerButton"
+    assert isinstance(view.header, SectionHeader)
+    assert view.header.subtitle.text() == view.scope_label.text() != ""
+    assert isinstance(view.bar, ActionBar)
+    assert isinstance(view.empty_label, EmptyState)
+
+
+def test_raw_missing_thumbnail_uses_shared_placeholder(view, monkeypatch):
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QPainter, QPixmap
+
+    calls = []
+    real = raw_view.placeholder_pixmap
+    monkeypatch.setattr(
+        raw_view, "placeholder_pixmap", lambda *a: calls.append(a) or real(*a)
+    )
+    canvas = QPixmap(80, 80)
+    painter = QPainter(canvas)
+    view.list.itemDelegate()._draw_thumb(painter, _cands()[0].raw, QRect(0, 0, 50, 50))
+    painter.end()
+    assert calls and calls[0][0] == "image"

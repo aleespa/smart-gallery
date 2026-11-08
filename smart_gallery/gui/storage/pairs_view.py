@@ -40,6 +40,8 @@ from PySide6.QtWidgets import (
 
 from smart_gallery import colors
 from smart_gallery.gui import theme
+from smart_gallery.gui.thumbs.placeholder import placeholder_pixmap
+from smart_gallery.gui.ui.widgets import ActionBar, EmptyState, SectionHeader, muted
 from smart_gallery.gui.storage.pairs_dialog import PILLS, PairDialog
 from smart_gallery.storage.compare import DIFFERENT, MATCH, UNREADABLE
 from smart_gallery.storage.pairs import (
@@ -66,16 +68,16 @@ STATUS = {
     UNREADABLE: "⚠ couldn't compare",
     MATCH: "",
 }
-FOOTER = "{n:,} chosen · frees {size}"
+FOOTER = "{n:,} selected · frees {size}"
 FOOTER_FOLDERS = " (in {k:,} folders)"
-FOOTER_NOTE = "Undecided pairs are left alone"
-CLEAR = "Clear choices"
+FOOTER_NOTE = "Unselected pairs are left alone"
+CLEAR = "Clear selection"
 MOVE = "Move {n:,} files to Recycle Bin"
 MOVE_NONE = "Move files to Recycle Bin"
 MOVE_TITLE = "Move to Recycle Bin"
 CONFIRM = "Move {n:,} files ({size}) to the Recycle Bin?"
-LEAVE_TITLE = "Unapplied choices"
-LEAVE = "You have {n:,} unapplied choices. Discard them?"
+LEAVE_TITLE = "Selections not applied"
+LEAVE = "You have {n:,} selections not applied yet. Discard them?"
 KEY_ROLE, CHOICE_ROLE, VERDICT_ROLE = (Qt.ItemDataRole.UserRole + i for i in (1, 2, 3))
 PAIR_ROLE = Qt.ItemDataRole.UserRole + 4
 
@@ -212,7 +214,7 @@ class PairsDelegate(QStyledItemDelegate):
             box = QRect(x, top, THUMB, THUMB)
             pixmap = self._view._thumb(ref)
             if pixmap is None:
-                painter.fillRect(box, QColor(*colors.TILE_BACK))
+                painter.drawPixmap(box, placeholder_pixmap("image", THUMB))
             else:
                 size = pixmap.size().scaled(
                     box.size(), Qt.AspectRatioMode.KeepAspectRatio
@@ -308,23 +310,18 @@ class PairsView(QWidget):
         self._missing: set[tuple[int, int | None]] = set()
         self._requested: dict[int, tuple[int, int | None]] = {}
 
-        title = QLabel(TITLE)
-        font = title.font()
-        font.setBold(True)
-        title.setFont(font)
-        self.status = QLabel("")
+        self.header = SectionHeader(TITLE)
+        self.scope_label = self.header.subtitle
+        self.status = muted(QLabel(""))  # the picture check's progress
         head = QHBoxLayout()
-        head.addWidget(title)
-        head.addStretch(1)
-        head.addWidget(self.status)
+        head.addWidget(self.header, 1)
+        head.addWidget(self.status, 0, Qt.AlignmentFlag.AlignTop)
 
-        self.scope_label = QLabel("")
         self.show_all = QPushButton("")
         self.show_all.setFlat(True)
         self.show_all.setCursor(Qt.CursorShape.PointingHandCursor)
         self.show_all.clicked.connect(lambda: self.set_scope(None))
         scope = QHBoxLayout()
-        scope.addWidget(self.scope_label)
         scope.addStretch(1)
         scope.addWidget(self.show_all)
 
@@ -335,35 +332,28 @@ class PairsView(QWidget):
         self.list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.list.setMouseTracking(True)
-        self.empty_label = QLabel("")
-        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_label = EmptyState()
         self._stack = QStackedWidget()
         self._stack.addWidget(self.list)
         self._stack.addWidget(self.empty_label)
 
-        self.footer_label = QLabel("")
-        note = QLabel(FOOTER_NOTE)
-        note.setEnabled(False)  # drawn muted
-        texts = QVBoxLayout()
-        texts.setSpacing(0)
-        texts.addWidget(self.footer_label)
-        texts.addWidget(note)
+        self.bar = ActionBar()
+        self.bar.set_note(FOOTER_NOTE)
+        self.footer_label = self.bar.status
         self.clear_button = QPushButton(CLEAR)
         self.clear_button.clicked.connect(self.clear_choices)
         self.move_button = QPushButton(MOVE_NONE)
-        theme.primary(self.move_button)
+        theme.danger(self.move_button)
         self.move_button.clicked.connect(self._on_move)
-        foot = QHBoxLayout()
-        foot.addLayout(texts, 1)
-        foot.addWidget(self.clear_button)
-        foot.addWidget(self.move_button)
+        self.bar.add_right(self.clear_button)
+        self.bar.add_right(self.move_button)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(head)
         layout.addLayout(scope)
         layout.addWidget(self._stack, 1)
-        layout.addLayout(foot)
+        layout.addWidget(self.bar)
 
         # Through a lambda so the slot can be replaced (tests, the page).
         self.pair_activated.connect(lambda key: self._open_dialog(key))
@@ -542,9 +532,9 @@ class PairsView(QWidget):
         self.show_all.setVisible(bool(self._scope))
 
         if not self._pairs:
-            self.empty_label.setText(EMPTY_ALL)
+            self.empty_label.show_text(EMPTY_ALL)
         elif not shown:
-            self.empty_label.setText(EMPTY_FOLDER)
+            self.empty_label.show_text(EMPTY_FOLDER)
         self._stack.setCurrentWidget(self.list if shown else self.empty_label)
         self._update_footer()
         self._update_status()

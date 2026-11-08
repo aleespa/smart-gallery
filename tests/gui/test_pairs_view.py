@@ -158,18 +158,18 @@ def test_scope_filters_and_labels(qtbot, loaded, pairs):
 
 def test_empty_states(qtbot, view, pairs, tmp_path):
     view.set_pairs([], tmp_path)
-    assert view.empty_label.isVisible() and view.empty_label.text() == EMPTY_ALL
+    assert view.empty_label.isVisible() and view.empty_label.text.text() == EMPTY_ALL
     view.set_pairs(pairs, tmp_path)
     assert not view.empty_label.isVisible()
     view.set_scope("C")
-    assert view.empty_label.isVisible() and view.empty_label.text() == EMPTY_FOLDER
+    assert view.empty_label.isVisible() and view.empty_label.text.text() == EMPTY_FOLDER
 
 
 def test_choose_updates_footer(qtbot, loaded, pairs):
     view, p1 = loaded, pairs[0]
     assert view.move_button.text() == MOVE_NONE and not view.move_button.isEnabled()
     view.choose(p1.key, KEEP_RAW)
-    assert view.footer_label.text() == "1 chosen · frees 9.80 MB"
+    assert view.footer_label.text() == "1 selected · frees 9.80 MB"
     assert view.move_button.text() == "Move 1 files to Recycle Bin"
     assert view.move_button.isEnabled()
     assert _row_of(view, p1.key).data(CHOICE_ROLE) == KEEP_RAW
@@ -180,7 +180,7 @@ def test_choose_updates_footer(qtbot, loaded, pairs):
 
 def test_keep_both_counts_as_chosen_but_frees_nothing(qtbot, loaded, pairs):
     loaded.choose(pairs[1].key, KEEP_BOTH)
-    assert loaded.footer_label.text() == "1 chosen · frees 0 B"
+    assert loaded.footer_label.text() == "1 selected · frees 0 B"
     assert loaded.removals() == []
     assert not loaded.move_button.isEnabled()
 
@@ -191,7 +191,7 @@ def test_footer_mentions_other_folders(qtbot, loaded, pairs):
     assert not loaded.footer_label.text().endswith("folders)")
     loaded.set_scope("a")
     assert loaded.footer_label.text().endswith(" (in 2 folders)")
-    assert loaded.footer_label.text().startswith("2 chosen · frees 19.6 MB")
+    assert loaded.footer_label.text().startswith("2 selected · frees 19.6 MB")
 
 
 def test_clear_choices(qtbot, loaded, pairs):
@@ -199,7 +199,7 @@ def test_clear_choices(qtbot, loaded, pairs):
     assert loaded.clear_button.isEnabled()
     loaded.clear_button.click()
     assert loaded.choices() == {}
-    assert loaded.footer_label.text() == "0 chosen · frees 0 B"
+    assert loaded.footer_label.text() == "0 selected · frees 0 B"
     assert not loaded.clear_button.isEnabled()
 
 
@@ -279,7 +279,7 @@ def test_set_pairs_keeps_existing_choices(qtbot, loaded, pairs, tmp_path):
     loaded.choose(p2.key, KEEP_BOTH)
     loaded.set_pairs([p2, p3], tmp_path)
     assert loaded.choices() == {p2.key: KEEP_BOTH}
-    assert loaded.footer_label.text() == "1 chosen · frees 0 B"
+    assert loaded.footer_label.text() == "1 selected · frees 0 B"
 
 
 def test_set_pairs_drops_choices_for_changed_files(qtbot, loaded, pairs, tmp_path):
@@ -292,7 +292,7 @@ def test_set_pairs_drops_choices_for_changed_files(qtbot, loaded, pairs, tmp_pat
     assert changed.key == p2.key
     loaded.set_pairs([p1, changed, p3], tmp_path)
     assert loaded.choices() == {p3.key: KEEP_JPEG}
-    assert loaded.footer_label.text() == "1 chosen · frees 24.0 MB"
+    assert loaded.footer_label.text() == "1 selected · frees 24.0 MB"
 
 
 def test_headings_upper_case_and_root_name(qtbot, view, tmp_path):
@@ -526,3 +526,20 @@ def test_checker_cancel_keeps_a_queued_cache_read(qtbot, tmp_path, monkeypatch, 
     checker.cancel()  # the check only
     assert checker.wait(5000)
     qtbot.waitUntil(lambda: checked == [pairs[0].key])
+
+
+def test_pairs_copy_and_roles(view):
+    from smart_gallery.gui.storage import pairs_view as pv
+    from smart_gallery.gui.ui.widgets import ActionBar, EmptyState, SectionHeader
+
+    assert pv.FOOTER == "{n:,} selected · frees {size}"
+    assert pv.FOOTER_NOTE == "Unselected pairs are left alone"
+    assert pv.CLEAR == "Clear selection"
+    assert pv.LEAVE_TITLE == "Selections not applied"
+    assert pv.LEAVE == "You have {n:,} selections not applied yet. Discard them?"
+    assert view.move_button.objectName() == "dangerButton"
+    assert isinstance(view.header, SectionHeader)
+    assert view.header.subtitle.text() == view.scope_label.text()
+    assert isinstance(view.bar, ActionBar)
+    assert view.bar.note.text() == pv.FOOTER_NOTE
+    assert isinstance(view.empty_label, EmptyState)

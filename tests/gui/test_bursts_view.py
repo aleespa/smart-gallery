@@ -359,3 +359,38 @@ def test_thumbnails_ready_tell_listeners(qtbot, tmp_path):
     assert v.thumbnail(shot.files[0]) is None  # asks for it
     with qtbot.waitSignal(v.thumbs_changed):
         Ctx.thumbs.ready.emit(str(tmp_path), shot.files[0].id, "")
+
+
+def test_bursts_copy_and_roles(view):
+    from smart_gallery.gui.storage import bursts_view as bv
+    from smart_gallery.gui.ui.widgets import ActionBar, EmptyState, SectionHeader
+
+    assert bv.FOOTER == "{n:,} selected · frees {size}"
+    assert bv.FOOTER_NOTE == "Unselected bursts are left alone"
+    assert bv.CLEAR == "Clear selection"
+    assert bv.LEAVE_TITLE == "Selections not applied"
+    assert bv.LEAVE == "You have {n:,} selections not applied yet. Discard them?"
+    assert view.move_button.objectName() == "dangerButton"
+    assert isinstance(view.header, SectionHeader)
+    assert view.header.subtitle.text() == view.scope_label.text() != ""
+    assert isinstance(view.bar, ActionBar)
+    assert isinstance(view.empty_label, EmptyState)
+
+
+def test_bursts_missing_thumbnail_uses_shared_placeholder(view, monkeypatch):
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QPainter, QPixmap
+
+    from smart_gallery.gui.storage import bursts_view as bv
+
+    calls = []
+    real = bv.placeholder_pixmap
+    monkeypatch.setattr(
+        bv, "placeholder_pixmap", lambda *a: calls.append(a) or real(*a)
+    )
+    canvas = QPixmap(80, 80)
+    painter = QPainter(canvas)
+    ref = view.bursts_in_scope()[0].shots[0].files[0]
+    view.list.itemDelegate()._draw_thumb(painter, ref, QRect(0, 0, 50, 50))
+    painter.end()
+    assert calls and calls[0][0] == "image"

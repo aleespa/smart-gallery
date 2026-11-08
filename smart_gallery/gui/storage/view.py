@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QModelIndex, Qt, QTimer
+from PySide6.QtCore import QModelIndex, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from smart_gallery.config import drive_root_of
+from smart_gallery.format import format_count, format_size
 from smart_gallery.db.repository import GalleryRepository
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.jobspec import JOB_RUNNING, JobSpec
@@ -46,6 +47,8 @@ from smart_gallery.gui.storage.tree_view import (
     NODE_ROLE,
     StorageTreeView,
 )
+from smart_gallery.gui.ui.metrics import WIDE_SIDEBAR_WIDTH
+from smart_gallery.gui.ui.widgets import EmptyState, PanelFooter, muted
 from smart_gallery.services.recycle import RecycleEntry, write_list
 from smart_gallery.storage.bursts import (
     DEFAULT_GAP,
@@ -56,12 +59,7 @@ from smart_gallery.storage.bursts import (
 )
 from smart_gallery.storage.pairs import FileRef, Pair, find_pairs
 from smart_gallery.storage.raw_jpeg import RawCandidate, load_raw_candidates
-from smart_gallery.storage.tree import (
-    StorageTree,
-    build_storage,
-    folder_sizes,
-    format_bytes,
-)
+from smart_gallery.storage.tree import StorageTree, build_storage, folder_sizes
 
 # {"grouping": "folder"|"type", "split": [int, int],
 #  "right": "pairs"|"bursts"|"raw", "burst_gap": int}
@@ -70,7 +68,6 @@ RIGHT_LABELS = {"pairs": "RAW + JPEG pairs", "bursts": "Bursts", "raw": "RAW →
 SAVE_DELAY_MS = 300  # a splitter drag is saved once it settles
 CHECKS_DIR = "pair_checks"  # app_data_dir() / CHECKS_DIR / f"{db_uuid}.json"
 LISTS_DIR = "recycle_lists"  # app_data_dir() / LISTS_DIR / f"{timestamp}.tsv"
-CAPTION = "{root} · {size} in {files:,} files"
 JOB_TITLE = "Move to Recycle Bin"
 CONVERT_JOB_TITLE = "Convert to JPEG"
 NO_GALLERY = "Open or create a gallery to see its storage."
@@ -119,7 +116,41 @@ def _valid_gap(value) -> bool:
     )
 
 
+class _NoticeLabel(QLabel):
+    """A muted one-line label that elides its text to the width it gets."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        muted(self)
+        self._full = ""
+        self.setMinimumWidth(0)
+
+    def set_notice(self, text: str) -> None:
+        self._full = text
+        self.setToolTip(text)
+        self._elide()
+
+    def _elide(self) -> None:
+        width = max(self.width(), 1)
+        self.setText(
+            self.fontMetrics().elidedText(
+                self._full, Qt.TextElideMode.ElideMiddle, width
+            )
+            if self._full
+            else ""
+        )
+
+    def full_text(self) -> str:
+        return self._full
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt API)
+        super().resizeEvent(event)
+        self._elide()
+
+
 class StorageView(QWidget):
+    summary_changed = Signal(str)  # "N files · size", "" when nothing is shown
+
     def __init__(self, ctx: AppContext, parent: QWidget | None = None):
         super().__init__(parent)
         self.ctx = ctx
@@ -131,9 +162,7 @@ class StorageView(QWidget):
         self._fresh = True  # next data starts on all folders
         self._query = RepoQuery(ctx, self)
 
-        # Shown on the page header's right (MainWindow takes header_controls).
-        self.caption = QLabel()
-        self.header_controls = self.caption
+        self._summary = ""
 
         self.tree_view = StorageTreeView()
         self.pairs_view = PairsView(ctx)
@@ -159,7 +188,17 @@ class StorageView(QWidget):
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.setChildrenCollapsible(False)
-        self.splitter.addWidget(self.tree_view)
+        # The tree column: the tree above a footer for its notices.
+        self.notice = _NoticeLabel()
+        footer = PanelFooter()
+        footer.add(self.notice)
+        tree_column = QWidget()
+        left = QVBoxLayout(tree_column)
+        left.setContentsMargins(0, 0, 0, 0)
+        left.setSpacing(0)
+        left.addWidget(self.tree_view, 1)
+        left.addWidget(footer)
+        self.splitter.addWidget(tree_column)
         self.splitter.addWidget(self.right_box)
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 1)
@@ -181,9 +220,7 @@ class StorageView(QWidget):
         self._split: list[int] | None = split if _valid_split(split) else None
         self._split_applied = False
 
-        self.message = QLabel()
-        self.message.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.message.setWordWrap(True)
+        self.message = EmptyState()
         self.stack = QStackedWidget()
         self.stack.addWidget(self.splitter)
         self.stack.addWidget(self.message)
@@ -206,7 +243,8 @@ class StorageView(QWidget):
         self.bursts_view.gap_changed.connect(self._save_state)
         self.bursts_view.review_requested.connect(self._open_review)
         self.review.closed.connect(self._close_review)
-        self.tree_view.message.connect(self.caption.setText)
+        self.tree_view.message.connect(self.notice.set_notice)
+        self.tree_view.folder_selected.connect(lambda *_: self.notice.set_notice(""))
         self.tree_view.grouping_changed.connect(self._on_grouping)
         self.pairs_view.show_all.clicked.connect(self._clear_tree_selection)
         self.pairs_view.move_requested.connect(self._on_move)
@@ -291,10 +329,13 @@ class StorageView(QWidget):
             self.splitter.setSizes(self._split)
         else:
             total = sum(self.splitter.sizes()) or self.splitter.width()
-            self.splitter.setSizes([total // 2, total - total // 2])
+            self.splitter.setSizes(
+                [WIDE_SIDEBAR_WIDTH, max(total - WIDE_SIDEBAR_WIDTH, 1)]
+            )
 
     # ── loading ─────────────────────────────────────────────────────────────
     def reload(self, *_args) -> None:
+        self.notice.set_notice("")
         current = self.ctx.current
         if current is None:
             self._query.cancel()
@@ -368,15 +409,16 @@ class StorageView(QWidget):
         self._check_scope()
         if self.stack.currentWidget() is self.review:
             self.review.refresh()
-        self.caption.setText(
-            CAPTION.format(
-                root=result.root_name,
-                size=format_bytes(result.tree.total_bytes),
-                files=result.tree.total_files,
-            )
+        self._set_summary(
+            f"{format_count(result.tree.total_files, 'file')} · "
+            f"{format_size(result.tree.total_bytes)}"
         )
         if self.stack.currentWidget() is not self.review:
             self.stack.setCurrentWidget(self.splitter)
+
+    def _set_summary(self, text: str) -> None:
+        self._summary = text
+        self.summary_changed.emit(text)
 
     def _check_scope(self, *_args) -> None:
         """Check the pictures of the folder in scope, and nothing else."""
@@ -401,8 +443,8 @@ class StorageView(QWidget):
         self._show_message(text)
 
     def _show_message(self, text: str) -> None:
-        self.caption.setText("")
-        self.message.setText(text)
+        self._set_summary("")
+        self.message.show_text(text)
         self.stack.setCurrentWidget(self.message)
 
     def _cache_path(self) -> Path:

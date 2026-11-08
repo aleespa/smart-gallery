@@ -41,6 +41,8 @@ from PySide6.QtWidgets import (
 
 from smart_gallery import colors
 from smart_gallery.gui import theme
+from smart_gallery.gui.thumbs.placeholder import placeholder_pixmap
+from smart_gallery.gui.ui.widgets import ActionBar, EmptyState, SectionHeader
 from smart_gallery.storage.bursts import (
     DEFAULT_GAP,
     MAX_GAP,
@@ -70,16 +72,16 @@ DROPPED = "{n:,} marks cleared because their bursts changed"
 GAP_LABEL = "Gap"
 GAP_TITLE = "Change gap"
 GAP_CONFIRM = "Discard {n:,} marks?"
-FOOTER = "{n:,} marked · frees {size}"
+FOOTER = "{n:,} selected · frees {size}"
 FOOTER_FOLDERS = " (in {k:,} folders)"
-FOOTER_NOTE = "Untouched bursts are left alone"
-CLEAR = "Clear marks"
+FOOTER_NOTE = "Unselected bursts are left alone"
+CLEAR = "Clear selection"
 MOVE = "Move {n:,} files to Recycle Bin"
 MOVE_NONE = "Move files to Recycle Bin"
 MOVE_TITLE = "Move to Recycle Bin"
 CONFIRM = "Move {n:,} files ({size}) to the Recycle Bin?"
-LEAVE_TITLE = "Unapplied choices"
-LEAVE = "You have {n:,} unapplied choices. Discard them?"
+LEAVE_TITLE = "Selections not applied"
+LEAVE = "You have {n:,} selections not applied yet. Discard them?"
 REVIEW = "Review"
 KEEP_TAG = "keep"
 REMOVE_TAG = "remove"
@@ -210,7 +212,7 @@ class BurstsDelegate(QStyledItemDelegate):
     def _draw_thumb(self, painter, ref, box: QRect) -> None:
         pixmap = self._view.thumbnail(ref)
         if pixmap is None:
-            painter.fillRect(box, QColor(*colors.TILE_BACK))
+            painter.drawPixmap(box, placeholder_pixmap("image", box.width()))
             return
         size = pixmap.size()
         if size.width() > box.width() or size.height() > box.height():
@@ -390,10 +392,8 @@ class BurstsView(QWidget):
         self._missing: set[tuple[int, int | None]] = set()
         self._requested: dict[int, tuple[int, int | None]] = {}
 
-        title = QLabel(TITLE)
-        font = title.font()
-        font.setBold(True)
-        title.setFont(font)
+        self.header = SectionHeader(TITLE)
+        self.scope_label = self.header.subtitle
         self.gap_box = QSpinBox()
         self.gap_box.setRange(MIN_GAP, MAX_GAP)
         self.gap_box.setSuffix(" s")
@@ -401,18 +401,15 @@ class BurstsView(QWidget):
         self.gap_box.setKeyboardTracking(False)  # typing "10" never applies 1
         self.gap_box.valueChanged.connect(self.set_gap)
         head = QHBoxLayout()
-        head.addWidget(title)
-        head.addStretch(1)
+        head.addWidget(self.header, 1)
         head.addWidget(QLabel(GAP_LABEL))
         head.addWidget(self.gap_box)
 
-        self.scope_label = QLabel("")
         self.show_all = QPushButton("")
         self.show_all.setFlat(True)
         self.show_all.setCursor(Qt.CursorShape.PointingHandCursor)
         self.show_all.clicked.connect(lambda: self.set_scope(None))
         scope = QHBoxLayout()
-        scope.addWidget(self.scope_label)
         scope.addStretch(1)
         scope.addWidget(self.show_all)
 
@@ -423,35 +420,28 @@ class BurstsView(QWidget):
         self.list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.list.setMouseTracking(True)
-        self.empty_label = QLabel("")
-        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_label = EmptyState()
         self._stack = QStackedWidget()
         self._stack.addWidget(self.list)
         self._stack.addWidget(self.empty_label)
 
-        self.footer_label = QLabel("")
-        note = QLabel(FOOTER_NOTE)
-        note.setEnabled(False)  # drawn muted
-        texts = QVBoxLayout()
-        texts.setSpacing(0)
-        texts.addWidget(self.footer_label)
-        texts.addWidget(note)
+        self.bar = ActionBar()
+        self.bar.set_note(FOOTER_NOTE)
+        self.footer_label = self.bar.status
         self.clear_button = QPushButton(CLEAR)
         self.clear_button.clicked.connect(self.clear_marks)
         self.move_button = QPushButton(MOVE_NONE)
-        theme.primary(self.move_button)
+        theme.danger(self.move_button)
         self.move_button.clicked.connect(self._on_move)
-        foot = QHBoxLayout()
-        foot.addLayout(texts, 1)
-        foot.addWidget(self.clear_button)
-        foot.addWidget(self.move_button)
+        self.bar.add_right(self.clear_button)
+        self.bar.add_right(self.move_button)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(head)
         layout.addLayout(scope)
         layout.addWidget(self._stack, 1)
-        layout.addLayout(foot)
+        layout.addWidget(self.bar)
 
         thumbs = getattr(ctx, "thumbs", None)
         if thumbs is not None:
@@ -631,9 +621,9 @@ class BurstsView(QWidget):
         self.show_all.setText(SHOW_ALL.format(n=len(self._bursts)))
         self.show_all.setVisible(bool(self._scope))
         if not self._bursts:
-            self.empty_label.setText(EMPTY_ALL)
+            self.empty_label.show_text(EMPTY_ALL)
         elif not shown:
-            self.empty_label.setText(EMPTY_FOLDER)
+            self.empty_label.show_text(EMPTY_FOLDER)
         self._stack.setCurrentWidget(self.list if shown else self.empty_label)
         self._update_footer()
 

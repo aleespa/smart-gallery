@@ -22,7 +22,6 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
-    QLabel,
     QListView,
     QMessageBox,
     QPushButton,
@@ -35,6 +34,8 @@ from PySide6.QtWidgets import (
 
 from smart_gallery import colors
 from smart_gallery.gui import theme
+from smart_gallery.gui.thumbs.placeholder import placeholder_pixmap
+from smart_gallery.gui.ui.widgets import ActionBar, EmptyState, SectionHeader
 from smart_gallery.gui.library.model import LibraryRow
 from smart_gallery.gui.library.viewer import MediaViewer
 from smart_gallery.recycle_bin import recycle_bin_capacity
@@ -55,11 +56,13 @@ SHOW_ALL = "Show all {n:,} CR3s"
 DROPPED = "{n:,} picks cleared because their files changed"
 EMPTY_ONE = "No CR3s without a JPEG in this folder"
 EMPTY_ALL = "No CR3s without a JPEG in this gallery"
-FOOTER = "{n:,} picked · {raw} of CR3 → about {jpeg} of JPEG · frees ~{freed}"
+FOOTER = "{n:,} selected · {raw} of CR3 → about {jpeg} of JPEG · frees ~{freed}"
 FOOTER_FOLDERS = " (in {k} folders)"
 CONVERT = "Convert {n:,} and recycle the CR3s"
 CONVERT_NONE = "Convert and recycle"
-CLEAR = "Clear"
+CLEAR = "Clear selection"
+LEAVE_TITLE = "Selections not applied"
+LEAVE = "You have {n:,} selections not applied yet. Discard them?"
 CONFIRM_TITLE = "Convert to JPEG"
 CONFIRM = (
     "Convert {n:,} photos to JPEG and move their CR3s ({size}) to the Recycle Bin?"
@@ -221,7 +224,7 @@ class RawDelegate(QStyledItemDelegate):
     def _draw_thumb(self, painter, ref: FileRef, box: QRect) -> None:
         pixmap = self._view.thumbnail(ref)
         if pixmap is None:
-            painter.fillRect(box, QColor(*colors.TILE_BACK))
+            painter.drawPixmap(box, placeholder_pixmap("image", box.width()))
             return
         size = pixmap.size()
         if size.width() > box.width() or size.height() > box.height():
@@ -301,21 +304,16 @@ class RawView(QWidget):
         self._missing: set[tuple[int, int | None]] = set()
         self._requested: dict[int, tuple[int, int | None]] = {}
 
-        title = QLabel(TITLE)
-        font = title.font()
-        font.setBold(True)
-        title.setFont(font)
+        self.header = SectionHeader(TITLE)
+        self.scope_label = self.header.subtitle
         head = QHBoxLayout()
-        head.addWidget(title)
-        head.addStretch(1)
+        head.addWidget(self.header, 1)
 
-        self.scope_label = QLabel("")
         self.show_all = QPushButton("")
         self.show_all.setFlat(True)
         self.show_all.setCursor(Qt.CursorShape.PointingHandCursor)
         self.show_all.clicked.connect(lambda: self.set_scope(None))
         scope = QHBoxLayout()
-        scope.addWidget(self.scope_label)
         scope.addStretch(1)
         scope.addWidget(self.show_all)
 
@@ -332,29 +330,27 @@ class RawView(QWidget):
         self.list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.list.setMouseTracking(True)
-        self.empty_label = QLabel("")
-        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_label = EmptyState()
         self._stack = QStackedWidget()
         self._stack.addWidget(self.list)
         self._stack.addWidget(self.empty_label)
 
-        self.footer_label = QLabel("")
+        self.bar = ActionBar()
+        self.footer_label = self.bar.status
         self.clear_button = QPushButton(CLEAR)
         self.clear_button.clicked.connect(self.clear_picks)
         self.convert_button = QPushButton(CONVERT_NONE)
-        theme.primary(self.convert_button)
+        theme.danger(self.convert_button)
         self.convert_button.clicked.connect(self._on_convert)
-        foot = QHBoxLayout()
-        foot.addWidget(self.footer_label, 1)
-        foot.addWidget(self.clear_button)
-        foot.addWidget(self.convert_button)
+        self.bar.add_right(self.clear_button)
+        self.bar.add_right(self.convert_button)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(head)
         layout.addLayout(scope)
         layout.addWidget(self._stack, 1)
-        layout.addLayout(foot)
+        layout.addWidget(self.bar)
 
         thumbs = getattr(ctx, "thumbs", None)
         if thumbs is not None:
@@ -501,9 +497,9 @@ class RawView(QWidget):
         self.show_all.setText(SHOW_ALL.format(n=len(self._cands)))
         self.show_all.setVisible(bool(self._scope))
         if not self._cands:
-            self.empty_label.setText(EMPTY_ALL)
+            self.empty_label.show_text(EMPTY_ALL)
         elif not shown:
-            self.empty_label.setText(EMPTY_ONE)
+            self.empty_label.show_text(EMPTY_ONE)
         self._stack.setCurrentWidget(self.list if shown else self.empty_label)
         self._update_footer()
 

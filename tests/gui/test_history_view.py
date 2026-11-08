@@ -202,7 +202,7 @@ def test_log_file_is_shown_when_present(qtbot, tmp_path):
     log.write_text("line one\nline two\n", encoding="utf-8")
     view, _, _ = _view(qtbot, tmp_path, _record("Sync", log_path=str(log)))
     view.table.selectRow(0)
-    assert view.detail.toPlainText() == "line one\nline two\n"
+    assert view.log.toPlainText() == "line one\nline two\n"
 
 
 def test_missing_log_falls_back_to_tail(qtbot, tmp_path):
@@ -211,7 +211,7 @@ def test_missing_log_falls_back_to_tail(qtbot, tmp_path):
     )
     view, _, _ = _view(qtbot, tmp_path, record)
     view.table.selectRow(0)
-    assert view.detail.toPlainText() == "a\nb"
+    assert view.log.toPlainText() == "a\nb"
 
 
 def test_bad_timestamps_do_not_break_the_list(qtbot, tmp_path):
@@ -336,3 +336,59 @@ def test_second_close_while_question_is_open_is_ignored(qtbot, tmp_path, monkeyp
     finally:
         with qtbot.waitSignal(runner.finished, timeout=15000):
             runner.cancel()
+
+
+# ── Task 9: pills, start times, detail stack, action bar ─────────────────────
+from datetime import datetime  # noqa: E402
+
+from PySide6.QtCore import QRectF, Qt  # noqa: E402
+from PySide6.QtGui import QPainter, QPixmap  # noqa: E402
+from PySide6.QtWidgets import QHeaderView  # noqa: E402
+
+from smart_gallery.gui.history.view import format_start  # noqa: E402
+from smart_gallery.gui.ui.widgets import (
+    ActionBar,
+    EmptyState,
+    status_pill,
+)  # noqa: E402
+
+NOW = datetime(2026, 11, 8, 12, 0)
+
+
+def test_start_today_yesterday_else_date():
+    assert format_start("2026-11-08T17:01:00", NOW) == "Today 17:01"
+    assert format_start("2026-11-07T09:12:00", NOW) == "Yesterday 09:12"
+    assert format_start("2026-11-01T09:12:00", NOW) == "2026-11-01 09:12"
+    assert format_start("garbage", NOW) == "garbage"
+
+
+def test_status_pill_paints_onto_a_pixmap(qtbot):
+    pix = QPixmap(80, 24)
+    painter = QPainter(pix)
+    status_pill(painter, QRectF(0, 0, 80, 24), "ok")
+    painter.end()
+
+
+def test_status_column_uses_a_pill_delegate(qtbot, tmp_path):
+    view = _view(qtbot, tmp_path, _record("A", status="weird"))[0]
+    assert view.table.itemDelegateForColumn(3) is not None
+    assert _cell(view, 0, 3) == "weird"
+    pix = QPixmap(view.table.viewport().size())
+    view.table.viewport().render(pix)
+
+
+def test_header_and_resize_modes(qtbot, tmp_path):
+    view = _view(qtbot, tmp_path, _record("A"))[0]
+    header = view.table.horizontalHeader()
+    assert header.defaultAlignment() & Qt.AlignmentFlag.AlignLeft
+    assert header.sectionResizeMode(1) == QHeaderView.ResizeMode.ResizeToContents
+
+
+def test_detail_empty_until_selected(qtbot, tmp_path):
+    view = _view(qtbot, tmp_path, _record("A", output_tail=["hello"]))[0]
+    assert isinstance(view.detail.currentWidget(), EmptyState)
+    assert view.detail.currentWidget().text.text() == "Select a job to see its log"
+    view.table.selectRow(0)
+    assert view.detail.currentWidget() is view.log
+    assert "hello" in view.log.toPlainText()
+    assert isinstance(view.footer, ActionBar)

@@ -5,15 +5,17 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QHBoxLayout,
-    QLabel,
+    QHeaderView,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
+    QStackedWidget,
+    QStyle,
+    QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -26,17 +28,48 @@ from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.history.store import JobRecord
 from smart_gallery.gui.imports.model import profile_name_from_title
 from smart_gallery.gui.jobs import JobSpec
+from smart_gallery.gui.ui.widgets import (
+    ActionBar,
+    EmptyState,
+    pill_style,
+    status_pill,
+)
 
 COLUMNS = ("Job", "Started", "Duration", "Status", "Summary")
 MAX_LOG_BYTES = 1_000_000  # a detail log can hold a line per file
 JOB_RUNNING = "A job is already running."
 
 
-def format_start(started_at: str) -> str:
+def format_start(started_at: str, now: datetime | None = None) -> str:
+    """``Today 17:01``, ``Yesterday 09:12`` or ``2026-11-01 09:12`` (local time)."""
     try:
-        return datetime.fromisoformat(started_at).strftime("%Y-%m-%d %H:%M")
+        when = datetime.fromisoformat(started_at)
     except ValueError:
         return started_at
+    if when.tzinfo is not None:
+        when = when.astimezone().replace(tzinfo=None)
+    today = (now or datetime.now()).date()
+    days = (today - when.date()).days
+    if days == 0:
+        return f"Today {when:%H:%M}"
+    if days == 1:
+        return f"Yesterday {when:%H:%M}"
+    return when.strftime("%Y-%m-%d %H:%M")
+
+
+class _StatusDelegate(QStyledItemDelegate):
+    """Paints the status column as a pill; the item keeps the raw text."""
+
+    def paint(self, painter, option, index) -> None:
+        if option.state & QStyle.StateFlag.State_Selected:
+            painter.fillRect(option.rect, option.palette.highlight())
+        rect = QRectF(option.rect).adjusted(4, 4, -4, -4)
+        status_pill(painter, rect, index.data() or "")
+
+    def sizeHint(self, option, index) -> QSize:
+        label, _ = pill_style(index.data() or "")
+        width = option.fontMetrics.horizontalAdvance(label) + 32
+        return QSize(width, option.fontMetrics.height() + 12)
 
 
 def format_duration(started_at: str, ended_at: str) -> str:
@@ -81,27 +114,39 @@ class HistoryView(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setStretchLastSection(True)
-        self.detail = QPlainTextEdit()
-        self.detail.setReadOnly(True)
-        self.detail.setStyleSheet("font-family: Consolas, monospace;")
+        header = self.table.horizontalHeader()
+        header.setDefaultAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        for column in range(len(COLUMNS) - 1):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(len(COLUMNS) - 1, QHeaderView.ResizeMode.Stretch)
+        self.table.setItemDelegateForColumn(3, _StatusDelegate(self.table))
+
+        self.log = QPlainTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setStyleSheet("font-family: Consolas, monospace;")
+        self._empty = EmptyState()
+        self._empty.show_text("Select a job to see its log")
+        self.detail = QStackedWidget()
+        self.detail.addWidget(self._empty)
+        self.detail.addWidget(self.log)
+
         self.run_button = QPushButton("Run again")
         theme.primary(self.run_button)
         self.run_button.setEnabled(False)
-        self.note = QLabel()
+        self.footer = ActionBar()
+        self.footer.add_right(self.run_button)
 
         split = QSplitter(Qt.Orientation.Vertical)
         split.addWidget(self.table)
         split.addWidget(self.detail)
         split.setStretchFactor(0, 1)
         split.setStretchFactor(1, 1)
-        buttons = QHBoxLayout()
-        buttons.addWidget(self.note, 1)
-        buttons.addWidget(self.run_button)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(split, 1)
-        layout.addLayout(buttons)
+        layout.addWidget(self.footer)
 
         self.table.itemSelectionChanged.connect(self._selection_changed)
         self.run_button.clicked.connect(self._run_again)
@@ -146,12 +191,14 @@ class HistoryView(QWidget):
     def _selection_changed(self) -> None:
         record = self._selected()
         if record is None:
-            self.detail.clear()
+            self.log.clear()
+            self.detail.setCurrentWidget(self._empty)
         else:
             text = read_log(record.log_path) if record.log_path else None
-            self.detail.setPlainText(
+            self.log.setPlainText(
                 text if text is not None else "\n".join(record.output_tail)
             )
+            self.detail.setCurrentWidget(self.log)
         self._update_run_button(record)
 
     def _update_run_button(self, record: JobRecord | None) -> None:
@@ -164,7 +211,7 @@ class HistoryView(QWidget):
         record = self._selected()
         if record is None or not record.argvs:
             return
-        self.note.clear()
+        self.footer.set_note("")
         if all(argv and argv[0] == "import" for argv in record.argvs):
             # The drive letters in an import may belong to another card or
             # drive by now, so the Library's Import window asks for them again.
@@ -189,4 +236,4 @@ class HistoryView(QWidget):
         # Records do not keep writes_catalog, so assume the job changes it.
         spec = JobSpec(record.title, tuple(tuple(argv) for argv in record.argvs), True)
         if not self.ctx.jobs.start(spec):
-            self.note.setText(JOB_RUNNING)
+            self.footer.set_note(JOB_RUNNING)

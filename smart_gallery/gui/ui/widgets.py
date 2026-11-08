@@ -7,6 +7,7 @@ from collections.abc import Callable
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPalette
 from PySide6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -205,6 +206,6 @@ def status_pill(painter: QPainter, rect: QRectF, status: str) -> None:
     painter.setBrush(fill)
     r = QRectF(rect)
     painter.drawRoundedRect(r, r.height() / 2, r.height() / 2)
-    painter.setPen(painter.device().palette().color(QPalette.ColorRole.WindowText))
+    painter.setPen(QApplication.palette().color(QPalette.ColorRole.WindowText))
     painter.drawText(r, Qt.AlignmentFlag.AlignCenter, label)
     painter.restore()

@@ -188,7 +188,9 @@ class StorageView(QWidget):
         self.stack.addWidget(self.splitter)
         self.stack.addWidget(self.message)
         self.stack.addWidget(self.review)
-        QVBoxLayout(self).addWidget(self.stack)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(self.stack)
 
         self.tree_view.folder_selected.connect(self.pairs_view.set_scope)
         self.tree_view.folder_selected.connect(self.bursts_view.set_scope)

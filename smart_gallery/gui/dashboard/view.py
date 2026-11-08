@@ -262,7 +262,9 @@ class DashboardView(QWidget):
         splitter.addWidget(self.stack)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([PANEL_WIDTH, 940])
-        QVBoxLayout(self).addWidget(splitter)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(splitter)
 
         self._query.finished.connect(self._on_data)
         self._query.failed.connect(self._on_failed)

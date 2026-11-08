@@ -36,6 +36,7 @@ from smart_gallery.gui.galleries.view import GalleriesPanel
 from smart_gallery.gui.history.store import HistoryStore
 from smart_gallery.gui.jobs import JobRunner
 from smart_gallery.gui.paths import app_data_dir, exiftool_available
+from smart_gallery.gui.ui.metrics import PAGE_BOTTOM, PAGE_MARGIN, PAGE_TOP
 from smart_gallery.gui.statusbar import JobStatusBar
 from smart_gallery.gui.thumbs.face_crops import FaceCropLoader
 from smart_gallery.gui.thumbs.loader import ThumbnailLoader
@@ -48,7 +49,7 @@ from smart_gallery.gui.titlebar import (
 )
 
 BAR_MARGIN = 12  # px between the window edge and the top bar's contents
-HEADER_MARGIN = 24  # px around the page header
+HEADER_MARGIN = PAGE_MARGIN  # px around the page header
 NO_GALLERY_OPEN = "No gallery open"
 # The tabs underline the open area in the accent colour.
 WINDOW_STYLE = f"""
@@ -89,6 +90,7 @@ class MainWindow(BackdropMixin, QMainWindow):
             self.ctx.face_crops = FaceCropLoader(self)
         self.ctx.jobs.catalog_written.connect(self.ctx.catalog_updated.emit)
         self._pages: dict[str, QWidget] = {}
+        self._summaries: dict[str, str] = {}
         self._controls: dict[str, QWidget] = {}  # area id -> its header controls
         self._area: Area | None = None
         self._closing = False  # waiting for a cancelled job before closing
@@ -109,7 +111,11 @@ class MainWindow(BackdropMixin, QMainWindow):
         outer.addWidget(self._build_page_header())
         outer.addWidget(_rule())
         self.stack = QStackedWidget()
-        outer.addWidget(self.stack, 1)
+        self.stack_container = QWidget()
+        stack_row = QVBoxLayout(self.stack_container)
+        stack_row.setContentsMargins(PAGE_MARGIN, PAGE_TOP, PAGE_MARGIN, PAGE_BOTTOM)
+        stack_row.addWidget(self.stack)
+        outer.addWidget(self.stack_container, 1)
         self.job_bar = JobStatusBar(self.ctx.jobs)
         outer.addWidget(self.job_bar)
         self.frame = ResizeFrame(central)
@@ -117,7 +123,7 @@ class MainWindow(BackdropMixin, QMainWindow):
         self._web_anchor = _web_anchor(central)
 
         self.ctx.navigate.connect(self.show_area)
-        self.ctx.gallery_changed.connect(self._update_header)
+        self.ctx.gallery_changed.connect(self._on_gallery_changed)
         self.resize(1200, 800)
         self.show_area(AREAS[0].id)
         self.finish_backdrop()
@@ -169,10 +175,19 @@ class MainWindow(BackdropMixin, QMainWindow):
         self.eyebrow.setPalette(muted)
         self.title = QLabel()
         self.title.setFont(theme.serif_font(theme.TITLE_PT))
+        self.summary = QLabel()
+        summary_font = QFont(self.summary.font())
+        summary_font.setPointSizeF(10)
+        self.summary.setFont(summary_font)
+        self.summary.setPalette(muted)
         names.addWidget(self.eyebrow)
-        names.addWidget(self.title)
-        row.addLayout(names)
-        row.addStretch(1)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(12)
+        title_row.addWidget(self.title, 0, Qt.AlignmentFlag.AlignBaseline)
+        title_row.addWidget(self.summary, 0, Qt.AlignmentFlag.AlignBaseline)
+        title_row.addStretch(1)
+        names.addLayout(title_row)
+        row.addLayout(names, 1)
         self.header_controls = QStackedWidget()
         row.addWidget(self.header_controls, 0, Qt.AlignmentFlag.AlignBottom)
         return header
@@ -193,6 +208,9 @@ class MainWindow(BackdropMixin, QMainWindow):
             controls = getattr(page, "header_controls", None) or QWidget()
             self._controls[area.id] = controls
             self.header_controls.addWidget(controls)
+            signal = getattr(page, "summary_changed", None)
+            if signal is not None:
+                signal.connect(lambda text, i=area.id: self._set_summary(i, text))
         self.stack.setCurrentWidget(page)
         self.header_controls.setCurrentWidget(self._controls[area.id])
         self._area = area
@@ -200,9 +218,19 @@ class MainWindow(BackdropMixin, QMainWindow):
             tab.setChecked(tab_id == area.id)
         self._update_header()
 
+    def _set_summary(self, area_id: str, text: str) -> None:
+        self._summaries[area_id] = text
+        if self._area is not None and self._area.id == area_id:
+            self.summary.setText(text)
+
+    def _on_gallery_changed(self, *_args) -> None:
+        self._summaries.clear()
+        self._update_header()
+
     def _update_header(self, *_args) -> None:
         if self._area is None:
             return
+        self.summary.setText(self._summaries.get(self._area.id, ""))
         current = self.ctx.current
         self.eyebrow.setText(current.label if current is not None else NO_GALLERY_OPEN)
         self.title.setText(self._area.label)

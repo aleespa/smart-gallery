@@ -99,6 +99,7 @@ class HistoryView(QWidget):
         buttons.addWidget(self.note, 1)
         buttons.addWidget(self.run_button)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(split, 1)
         layout.addLayout(buttons)
 

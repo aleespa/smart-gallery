@@ -259,6 +259,7 @@ class ActionsView(QWidget):
         right.addWidget(self.stack, 1)
         right.addLayout(buttons)
         layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.commands)
         layout.addLayout(right, 1)
 

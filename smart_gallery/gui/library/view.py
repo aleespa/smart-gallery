@@ -493,7 +493,9 @@ class LibraryView(QWidget):
         splitter.setStretchFactor(3, 1)
         splitter.setCollapsible(2, False)  # else the strip shows at width 0
         splitter.setSizes([220, PANEL_WIDTH, 0, 800])
-        QVBoxLayout(self).addWidget(splitter)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(splitter)
 
         self._thumb_timer = QTimer(self)
         self._thumb_timer.setSingleShot(True)

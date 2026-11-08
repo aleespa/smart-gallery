@@ -1,3 +1,5 @@
+import dataclasses
+
 from smart_gallery.gui.app import MainWindow
 from smart_gallery.gui.areas import AREAS
 
@@ -83,3 +85,47 @@ def test_window_holds_web_content_before_it_is_shown(qtbot):
     qtbot.addWidget(win)
     views = win.findChildren(QWebEngineView)
     assert any(not v.isHidden() for v in views)
+
+
+def test_every_page_fills_its_container_flush(qtbot):
+    from smart_gallery.gui.app import HEADER_MARGIN
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    assert win.stack_container.layout().contentsMargins().left() == HEADER_MARGIN
+    for area in AREAS:
+        win.show_area(area.id)
+        m = win._pages[area.id].layout().contentsMargins()
+        assert (m.left(), m.top(), m.right(), m.bottom()) == (0, 0, 0, 0), area.id
+
+
+def test_summary_shows_only_for_the_open_page_and_clears(qtbot, repo, monkeypatch):
+    from PySide6.QtCore import Signal
+    from PySide6.QtWidgets import QWidget
+
+    from smart_gallery.gui import areas
+    from smart_gallery.gui.galleries.store import Gallery
+
+    class Page(QWidget):
+        summary_changed = Signal(str)
+
+    page = None
+
+    def factory(ctx):
+        nonlocal page
+        page = Page()
+        return page
+
+    old = areas.AREAS[0]
+    patched = [dataclasses.replace(old, factory=factory), *areas.AREAS[1:]]
+    monkeypatch.setattr("smart_gallery.gui.app.AREAS", patched)
+    win = MainWindow()
+    qtbot.addWidget(win)
+    page.summary_changed.emit("3 files · 1 KB")
+    assert win.summary.text() == "3 files · 1 KB"
+    win.show_area("people")
+    assert win.summary.text() == ""
+    win.show_area(old.id)
+    assert win.summary.text() == "3 files · 1 KB"
+    win.ctx.set_gallery(Gallery("uuid", str(repo.db_path), "Archive"))
+    assert win.summary.text() == ""

@@ -139,7 +139,9 @@ class PeopleView(QWidget):
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
         self.splitter.setSizes([260, 740])
-        QVBoxLayout(self).addWidget(self.splitter)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(self.splitter)
 
         self.find_button.clicked.connect(self.find_faces)
         self.undo_button.clicked.connect(self.undo)

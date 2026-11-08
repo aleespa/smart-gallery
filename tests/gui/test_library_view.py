@@ -227,20 +227,26 @@ def test_sort_direction_toggle(qtbot, repo, make_item):
     view, _ = _view(qtbot, repo.db_path)
     # The newest photos come first by default.
     qtbot.waitUntil(lambda: _relpaths(view) == ["c.jpg", "b.jpg", "a.jpg"])
-    assert view.descending.isChecked()
+    assert view._descending
+    assert view.descending.isCheckable() is False
 
-    view.descending.setChecked(False)
+    view.descending.click()
     qtbot.waitUntil(lambda: _relpaths(view) == ["a.jpg", "b.jpg", "c.jpg"])
 
     # Picking a sort resets the direction to that sort's natural one.
     view.sort.setCurrentIndex(view.sort.findData("size"))
-    assert view.descending.isChecked()
+    assert view._descending
     qtbot.waitUntil(lambda: _relpaths(view) == ["b.jpg", "c.jpg", "a.jpg"])
-    view.descending.setChecked(False)
+    view.descending.click()
     qtbot.waitUntil(lambda: _relpaths(view) == ["a.jpg", "c.jpg", "b.jpg"])
 
     view.sort.setCurrentIndex(view.sort.findData("name"))
-    assert not view.descending.isChecked()
+    assert not view._descending
+    assert view.descending.toolTip() == "A to Z"
+
+    view.descending.click()
+    view.descending.click()
+    assert not view._descending
 
 
 def _labels(view):

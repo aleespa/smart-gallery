@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QToolButton, QWidget
 
 from smart_gallery import colors
 from smart_gallery.gui import theme
-from smart_gallery.gui.viewer import icons
+from smart_gallery.gui import icons
 
 MARGIN = 24  # around the fitted photo
 ARROW_SIZE = QSize(40, 64)

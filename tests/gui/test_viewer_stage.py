@@ -8,7 +8,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from smart_gallery import colors
-from smart_gallery.gui.viewer import icons
+from smart_gallery.gui import icons
 from smart_gallery.gui.viewer.stage import (
     ARROW_INSET,
     MAX_ZOOM,

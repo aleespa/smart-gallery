@@ -46,7 +46,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from smart_gallery.gui import theme
+from smart_gallery.gui import icons, theme
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.filters_panel import PANEL_WIDTH, FilterPanel
 from smart_gallery.gui.library.grid import GroupedGrid
@@ -73,8 +73,12 @@ PIXMAP_CACHE_SIZE = 600  # ~55 MB of tile pixmaps
 TREE_INDENT = theme.TREE_INDENT
 # (label, sort, descending by default): newest, A to Z, largest first.
 SORTS = (("Date taken", "date", True), ("Name", "name", False), ("Size", "size", True))
-ASCENDING_ARROW = "↑"
-DESCENDING_ARROW = "↓"
+# What the order is now, keyed by sort: (descending, ascending).
+DIRECTION_TIPS = {
+    "date": ("Newest first", "Oldest first"),
+    "name": ("Z to A", "A to Z"),
+    "size": ("Largest first", "Smallest first"),
+}
 PATH_ROLE = Qt.ItemDataRole.UserRole + 1
 HIDE_FILTERS_TEXT = "«"
 HIDE_FILTERS_TIP = "Hide the filters"
@@ -416,14 +420,13 @@ class LibraryView(QWidget):
         for label, value, _descending in SORTS:
             self.sort.addItem(label, value)
         self.descending = QToolButton()
-        self.descending.setCheckable(True)
+        self._descending = SORTS[0][2]
         # Tool buttons keep a fixed, shorter height; let it fill the header row
         # so it lines up with the sort box.
         self.descending.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
         )
-        self.descending.setChecked(SORTS[0][2])
-        self._show_direction(SORTS[0][2])
+        self._show_direction()
         # The filter panel hides itself with « in its top row; while hidden, a
         # slim strip in its place brings it back.
         self.hide_filters_btn = QToolButton()
@@ -500,8 +503,7 @@ class LibraryView(QWidget):
         self.tree.selectionModel().currentChanged.connect(self._on_tree_current)
         self.subfolders.toggled.connect(self.reload_rows)
         self.sort.currentIndexChanged.connect(self._on_sort_changed)
-        self.descending.toggled.connect(self._show_direction)
-        self.descending.toggled.connect(self.reload_rows)
+        self.descending.clicked.connect(self._flip_direction)
         self.hide_filters_btn.clicked.connect(lambda: self.set_filters_shown(False))
         self.filters_strip.clicked.connect(lambda: self.set_filters_shown(True))
         self.export_btn.clicked.connect(self.open_export)
@@ -580,7 +582,7 @@ class LibraryView(QWidget):
             recursive=self.subfolders.isChecked(),
             filters=None if is_query_empty(filters) else filters,
             sort=self.sort.currentData(),
-            descending=self.descending.isChecked(),
+            descending=self._descending,
         )
 
         def load(repo):
@@ -592,18 +594,22 @@ class LibraryView(QWidget):
 
     def _on_sort_changed(self, index: int) -> None:
         """Switch to the new sort's natural direction, then reload once."""
-        descending = SORTS[index][2]
+        self._descending = SORTS[index][2]
         self.grid.expand_all()  # another sort's headings name other groups
-        self.descending.blockSignals(True)
-        self.descending.setChecked(descending)
-        self.descending.blockSignals(False)
-        self._show_direction(descending)
+        self._show_direction()
         self.reload_rows()
 
-    def _show_direction(self, descending: bool) -> None:
-        self.descending.setText(DESCENDING_ARROW if descending else ASCENDING_ARROW)
-        direction = "Descending" if descending else "Ascending"
-        self.descending.setToolTip(f"{direction}. Click to reverse.")
+    def _flip_direction(self) -> None:
+        self._descending = not self._descending
+        self._show_direction()
+        self.reload_rows()
+
+    def _show_direction(self) -> None:
+        name = "sort-down" if self._descending else "sort-up"
+        colour = self.palette().color(QPalette.ColorRole.ButtonText)
+        self.descending.setIcon(icons.icon(name, colour))
+        tips = DIRECTION_TIPS[self.sort.currentData()]
+        self.descending.setToolTip(tips[0] if self._descending else tips[1])
 
     def select_folder(self, path: str) -> None:
         """Show ``path`` (POSIX, relative to the root; "" for everything)."""

@@ -48,7 +48,7 @@ from smart_gallery.gui.titlebar import (
 )
 from smart_gallery.gui.repo_query import RepoQuery
 from smart_gallery.gui.thumbs.cache import thumb_path
-from smart_gallery.gui.viewer import icons
+from smart_gallery.gui import icons
 from smart_gallery.gui.viewer.filmstrip import Filmstrip
 from smart_gallery.gui.viewer.info import InfoSection, build_info, photo_people
 from smart_gallery.gui.viewer.previews import PREVIEW_EDGE, ZOOM_EDGE, PreviewLoader

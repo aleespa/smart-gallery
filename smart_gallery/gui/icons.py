@@ -1,4 +1,4 @@
-"""Small line icons for the photo viewer, painted with QPainter (no files)."""
+"""Shared line icons (viewer, Library and form buttons), painted with QPainter (no files)."""
 
 from __future__ import annotations
 
@@ -71,6 +71,54 @@ def _open(p: QPainter, s: float) -> None:
     p.drawLine(QPointF(s * 0.85, s * 0.15), QPointF(s * 0.85, s * 0.4))
 
 
+def _sort(p: QPainter, s: float, up: bool) -> None:
+    """An arrow with a stem; the head points up for ascending, down for descending."""
+    tip, tail = (0.18, 0.82) if up else (0.82, 0.18)
+    head = 0.2 if up else -0.2
+    p.drawLine(QPointF(s * 0.5, s * tip), QPointF(s * 0.5, s * tail))
+    path = QPainterPath(QPointF(s * 0.3, s * (tip + head)))
+    path.lineTo(s * 0.5, s * tip)
+    path.lineTo(s * 0.7, s * (tip + head))
+    p.drawPath(path)
+
+
+def _refresh(p: QPainter, s: float) -> None:
+    rect = QRectF(s * 0.17, s * 0.17, s * 0.66, s * 0.66)
+    p.drawArc(rect, 40 * 16, 280 * 16)
+    # The arrow head sits at the arc's open end (upper right).
+    path = QPainterPath(QPointF(s * 0.8, s * 0.12))
+    path.lineTo(s * 0.8, s * 0.34)
+    path.lineTo(s * 0.58, s * 0.34)
+    p.drawPath(path)
+
+
+def _undo(p: QPainter, s: float) -> None:
+    path = QPainterPath(QPointF(s * 0.38, s * 0.2))
+    path.lineTo(s * 0.18, s * 0.4)
+    path.lineTo(s * 0.38, s * 0.6)
+    p.drawPath(path)
+    curve = QPainterPath(QPointF(s * 0.18, s * 0.4))
+    curve.lineTo(s * 0.55, s * 0.4)
+    curve.cubicTo(
+        QPointF(s * 0.85, s * 0.4),
+        QPointF(s * 0.85, s * 0.8),
+        QPointF(s * 0.55, s * 0.8),
+    )
+    curve.lineTo(s * 0.35, s * 0.8)
+    p.drawPath(curve)
+
+
+def _browse(p: QPainter, s: float) -> None:
+    """A folder with three dots: pick a location."""
+    path = QPainterPath(QPointF(s * 0.1, s * 0.2))
+    for x, y in ((0.4, 0.2), (0.48, 0.28), (0.9, 0.28), (0.9, 0.8), (0.1, 0.8)):
+        path.lineTo(s * x, s * y)
+    path.closeSubpath()
+    p.drawPath(path)
+    for x in (0.3, 0.5, 0.7):
+        p.drawPoint(QPointF(s * x, s * 0.54))
+
+
 _PAINTERS = {
     "prev": lambda p, s: _chevron(p, s, True),
     "next": lambda p, s: _chevron(p, s, False),
@@ -82,6 +130,11 @@ _PAINTERS = {
     "close": _close,
     "play": _play,
     "open": _open,
+    "sort-up": lambda p, s: _sort(p, s, True),
+    "sort-down": lambda p, s: _sort(p, s, False),
+    "refresh": _refresh,
+    "undo": _undo,
+    "browse": _browse,
 }
 NAMES = tuple(_PAINTERS)
 

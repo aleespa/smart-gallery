@@ -34,10 +34,13 @@ from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.dashboard import charts
 from smart_gallery.gui.dashboard.calendar import PhotoCalendar
 from smart_gallery.gui.dashboard.model import DashboardData, load_dashboard
-from smart_gallery.gui.filters_panel import PANEL_WIDTH, FilterPanel
+from smart_gallery.gui.collapsible_filters import CollapsibleFilters
+from smart_gallery.gui.filters_panel import FilterPanel
 from smart_gallery.gui.paths import app_data_dir
 from smart_gallery.gui.repo_query import RepoQuery
 from smart_gallery.gui.state_store import load_json, save_json
+from smart_gallery.gui.ui.metrics import FILTER_WIDTH
+from smart_gallery.gui.ui.widgets import EmptyState, SectionHeader
 from smart_gallery.organize.filters import is_query_empty
 
 NO_GALLERY = "Open or create a gallery to see its stats."
@@ -142,15 +145,19 @@ class Panel(QFrame):
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self._name = title
         self._collapsed = False
+        # The chevron button collapses the panel; the title text is a SectionHeader.
         self.title = QToolButton()
         self.title.setAutoRaise(True)  # flat
         self.title.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.title.setFont(theme.serif_font(theme.HEADER_PT))  # as Library groups
+        self.header = SectionHeader(title)
         self.title.clicked.connect(lambda: self.set_collapsed(not self._collapsed))
         self._refresh_title()
         self.body: QWidget | None = None
         self._layout = QVBoxLayout(self)
-        self._layout.addWidget(self.title, 0, Qt.AlignmentFlag.AlignLeft)
+        head = QHBoxLayout()
+        head.addWidget(self.title)
+        head.addWidget(self.header, 1)
+        self._layout.addLayout(head)
 
     @property
     def collapsed(self) -> bool:
@@ -167,7 +174,8 @@ class Panel(QFrame):
 
     def _refresh_title(self) -> None:
         chevron = "▸" if self._collapsed else "▾"
-        self.title.setText(f"{chevron} {self._name}")
+        self.title.setText(chevron)
+        self.title.setToolTip(("Show " if self._collapsed else "Hide ") + self._name)
 
     def set_body(self, body: QWidget | None) -> None:
         """Show ``body`` (hidden while collapsed), or hide the panel when it
@@ -250,18 +258,19 @@ class DashboardView(QWidget):
         top_layout.addLayout(self._tiles_row)
         top_layout.addWidget(self.charts_area, 1)
 
-        self.message = QLabel()
-        self.message.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.message.setWordWrap(True)
+        self.message = EmptyState()
         self.stack = QStackedWidget()
         self.stack.addWidget(top)
         self.stack.addWidget(self.message)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.collapsible = CollapsibleFilters(self.filters, STATE_FILE)
         splitter.addWidget(self.filters)
+        splitter.addWidget(self.collapsible.strip)
         splitter.addWidget(self.stack)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([PANEL_WIDTH, 940])
+        splitter.setStretchFactor(2, 1)
+        splitter.setCollapsible(1, False)  # else the strip shows at width 0
+        splitter.setSizes([FILTER_WIDTH, 0, 940])
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.addWidget(splitter)
@@ -278,7 +287,9 @@ class DashboardView(QWidget):
     def _save_collapsed(self, *_args) -> None:
         names = sorted(t for t, p in self.panels.items() if p.collapsed)
         try:
-            save_json(self.state_path, {"collapsed": names})
+            state = load_json(self.state_path)  # keep filters_shown
+            state["collapsed"] = names
+            save_json(self.state_path, state)
         except OSError as exc:  # e.g. the file is locked; the next save retries
             logger.warning("Could not save %s: %s", self.state_path, exc)
 
@@ -409,5 +420,5 @@ class DashboardView(QWidget):
         self._show_message(text)
 
     def _show_message(self, text: str) -> None:
-        self.message.setText(text)
+        self.message.show_text(text)
         self.stack.setCurrentWidget(self.message)

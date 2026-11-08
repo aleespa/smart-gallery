@@ -19,6 +19,7 @@ from PySide6.QtCore import (
     QSize,
     Qt,
     QTimer,
+    Signal,
 )
 from PySide6.QtGui import (
     QFont,
@@ -30,7 +31,6 @@ from PySide6.QtGui import (
     QStandardItemModel,
 )
 from PySide6.QtWidgets import (
-    QAbstractButton,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -48,7 +48,10 @@ from PySide6.QtWidgets import (
 
 from smart_gallery.gui import icons, theme
 from smart_gallery.gui.context import AppContext
-from smart_gallery.gui.filters_panel import PANEL_WIDTH, FilterPanel
+from smart_gallery.gui.collapsible_filters import CollapsibleFilters
+from smart_gallery.gui.filters_panel import FilterPanel
+from smart_gallery.gui.ui.metrics import FILTER_WIDTH, SIDEBAR_WIDTH
+from smart_gallery.gui.ui.widgets import EmptyState, PanelFooter
 from smart_gallery.gui.library.grid import GroupedGrid
 from smart_gallery.gui.library.model import (
     FolderNode,
@@ -80,17 +83,13 @@ DIRECTION_TIPS = {
     "size": ("Largest first", "Smallest first"),
 }
 PATH_ROLE = Qt.ItemDataRole.UserRole + 1
-HIDE_FILTERS_TEXT = "«"
-HIDE_FILTERS_TIP = "Hide the filters"
-SHOW_FILTERS_TIP = "Show the filters"
-FILTERS_STRIP_TEXT = "Filters"
 IMPORT_TEXT = "Import…"
 IMPORT_TIP = "Copy new photos and videos in from a card, phone or folder"
 EXPORT_TEXT = "Export…"
 EXPORT_TIP = "Copy the files these filters select to a folder"
 EXPORT_SIZE = (720, 720)
 IMPORT_SIZE = (860, 760)
-STRIP_WIDTH = 28
+STATE_FILE = "library.json"  # {"filters_shown": bool}
 
 NO_GALLERY = "Open or create a gallery to browse it here."
 DISCONNECTED = "Drive not connected. Plug in {label} to browse it."
@@ -339,53 +338,9 @@ def _tree_items(node: FolderNode, label: str) -> QStandardItem:
     return item
 
 
-class CollapsedStrip(QAbstractButton):
-    """A slim bar with its label running bottom to top; it stands in for a
-    hidden panel and brings it back when clicked."""
-
-    def __init__(self, text: str, parent: QWidget | None = None):
-        super().__init__(parent)
-        self.setText(text)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedWidth(STRIP_WIDTH)
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-
-    def sizeHint(self) -> QSize:
-        return QSize(STRIP_WIDTH, self.fontMetrics().horizontalAdvance(self.text()))
-
-    def paintEvent(self, _event) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        palette = self.palette()
-        back = palette.color(QPalette.ColorRole.Button)
-        if self.isDown():
-            back = back.darker(115)
-        elif self.underMouse():
-            back = back.lighter(125)
-        painter.setPen(palette.color(QPalette.ColorRole.Mid))
-        painter.setBrush(back)
-        painter.drawRoundedRect(
-            QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 4, 4
-        )
-        painter.setPen(palette.color(QPalette.ColorRole.ButtonText))
-        painter.translate(0, self.height())
-        painter.rotate(-90)
-        # Rotated, x runs up the bar and y across it; the label starts at the top.
-        width = self.fontMetrics().horizontalAdvance(self.text())
-        top = QRectF(self.height() - width - 12, 0, width, self.width())
-        painter.drawText(top, Qt.AlignmentFlag.AlignCenter, self.text())
-        painter.end()
-
-    def enterEvent(self, event) -> None:
-        self.update()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event) -> None:
-        self.update()
-        super().leaveEvent(event)
-
-
 class LibraryView(QWidget):
+    summary_changed = Signal(str)  # "N files · S", or "" with nothing to count
+
     def __init__(self, ctx: AppContext, parent: QWidget | None = None):
         super().__init__(parent)
         self.ctx = ctx
@@ -410,12 +365,14 @@ class LibraryView(QWidget):
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.addWidget(self.tree, 1)
-        left_layout.addWidget(self.subfolders)
+        footer = PanelFooter()
+        footer.add(self.subfolders)
+        left_layout.addWidget(footer)
 
         self.filters = FilterPanel(ctx)
 
         # Header, grid and message.
-        self.stats = QLabel()
+        self.summary_text = ""
         self.sort = QComboBox()
         for label, value, _descending in SORTS:
             self.sort.addItem(label, value)
@@ -429,16 +386,8 @@ class LibraryView(QWidget):
         self._show_direction()
         # The filter panel hides itself with « in its top row; while hidden, a
         # slim strip in its place brings it back.
-        self.hide_filters_btn = QToolButton()
-        self.hide_filters_btn.setText(HIDE_FILTERS_TEXT)
-        self.hide_filters_btn.setToolTip(HIDE_FILTERS_TIP)
-        self.hide_filters_btn.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
-        )
-        self.filters.top_row.addWidget(self.hide_filters_btn)
-        self.filters_strip = CollapsedStrip(FILTERS_STRIP_TEXT)
-        self.filters_strip.setToolTip(SHOW_FILTERS_TIP)
-        self.filters_strip.setVisible(False)
+        self.collapsible = CollapsibleFilters(self.filters, STATE_FILE)
+        self.filters_strip = self.collapsible.strip
         self.export_btn = QPushButton(EXPORT_TEXT)
         self.export_btn.setToolTip(EXPORT_TIP)
         self.filters.bottom_row.addWidget(self.export_btn, 1)
@@ -450,16 +399,14 @@ class LibraryView(QWidget):
         self.header_controls = QWidget()
         header = QHBoxLayout(self.header_controls)
         header.setContentsMargins(0, 0, 0, 0)
-        header.addWidget(self.import_btn)
-        header.addSpacing(16)
-        header.addWidget(self.stats)
-        header.addSpacing(16)
         header.addWidget(QLabel("Sort by"))
         header.addWidget(self.sort)
         header.addWidget(self.descending)
         header.addSpacing(16)
         self.mirror_btn = MirrorButton(ctx)
         header.addWidget(self.mirror_btn)
+        header.addSpacing(16)
+        header.addWidget(self.import_btn)
         # The primary Import button sets the row's height; the other controls
         # fill it so the row lines up.
         for widget in (self.sort, self.mirror_btn):
@@ -473,9 +420,7 @@ class LibraryView(QWidget):
         self.grid.setTextElideMode(Qt.TextElideMode.ElideMiddle)
         self.grid_model = LibraryGridModel(self)
         self.grid.setModel(self.grid_model)
-        self.message = QLabel()
-        self.message.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.message.setWordWrap(True)
+        self.message = EmptyState()
         self.stack = QStackedWidget()
         self.stack.addWidget(self.grid)
         self.stack.addWidget(self.message)
@@ -488,11 +433,11 @@ class LibraryView(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left)
         splitter.addWidget(self.filters)
-        splitter.addWidget(self.filters_strip)
+        splitter.addWidget(self.collapsible.strip)
         splitter.addWidget(right)
         splitter.setStretchFactor(3, 1)
         splitter.setCollapsible(2, False)  # else the strip shows at width 0
-        splitter.setSizes([220, PANEL_WIDTH, 0, 800])
+        splitter.setSizes([SIDEBAR_WIDTH, FILTER_WIDTH, 0, 800])
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.addWidget(splitter)
@@ -506,8 +451,6 @@ class LibraryView(QWidget):
         self.subfolders.toggled.connect(self.reload_rows)
         self.sort.currentIndexChanged.connect(self._on_sort_changed)
         self.descending.clicked.connect(self._flip_direction)
-        self.hide_filters_btn.clicked.connect(lambda: self.set_filters_shown(False))
-        self.filters_strip.clicked.connect(lambda: self.set_filters_shown(True))
         self.export_btn.clicked.connect(self.open_export)
         self.import_btn.clicked.connect(self.open_import)
         ctx.open_in_import.connect(self._import_again)
@@ -527,11 +470,6 @@ class LibraryView(QWidget):
             ctx.thumbs.ready.connect(self._on_thumb_ready)
 
         self.reload()
-
-    def set_filters_shown(self, shown: bool) -> None:
-        """Show the filter panel, or hide it behind the slim Filters strip."""
-        self.filters.setVisible(shown)
-        self.filters_strip.setVisible(not shown)
 
     # ── import and export ───────────────────────────────────────────────────
     def open_export(self) -> None:
@@ -640,7 +578,7 @@ class LibraryView(QWidget):
         self.grid_model.set_rows([])
         self.grid_model.forget_thumbnails()
         self.tree_model.clear()
-        self.stats.clear()
+        self._set_summary("")
         self.reload()
 
     def _on_tree(self, node: FolderNode) -> None:
@@ -676,7 +614,7 @@ class LibraryView(QWidget):
         self._root = Path(root)
         self.grid.set_groups(group_rows(rows, sort))
         self.grid_model.set_rows(rows, self._holder_labels(rows, holders))
-        self.stats.setText(f"{format_count(count, 'file')} · {format_size(size)}")
+        self._set_summary(f"{format_count(count, 'file')} · {format_size(size)}")
         if rows:
             self.stack.setCurrentWidget(self.grid)
         else:
@@ -695,6 +633,10 @@ class LibraryView(QWidget):
             if r.offloaded and relpath_key(r.relpath) in holders
         }
 
+    def _set_summary(self, text: str) -> None:
+        self.summary_text = text
+        self.summary_changed.emit(text)
+
     def _on_failed(self, error) -> None:
         if self.ctx.current is None:
             text = NO_GALLERY
@@ -709,8 +651,8 @@ class LibraryView(QWidget):
         if clear:
             self.grid_model.set_rows([])
             self.tree_model.clear()
-            self.stats.clear()
-        self.message.setText(text)
+            self._set_summary("")
+        self.message.show_text(text)
         self.stack.setCurrentWidget(self.message)
 
     # ── thumbnails ──────────────────────────────────────────────────────────

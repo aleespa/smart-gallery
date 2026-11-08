@@ -178,7 +178,7 @@ def test_dashboard_files_row_reflows_with_width(qtbot, repo, make_item):
 
 def test_dashboard_disconnected_drive_message(qtbot, tmp_path):
     view, _ = _view(qtbot, tmp_path / "gone" / "gallery.db")
-    qtbot.waitUntil(lambda: "not connected" in view.message.text())
+    qtbot.waitUntil(lambda: "not connected" in view.message.text.text())
     assert view.stack.currentWidget() is view.message
 
 
@@ -203,7 +203,8 @@ def test_panel_collapses_to_its_title(qtbot, repo, make_item):
     panel.title.click()
     assert panel.collapsed and panel.isVisibleTo(view)
     assert not panel.body.isVisibleTo(view)
-    assert panel.title.text() == "▸ " + FILES_PANEL
+    assert panel.title.text() == "▸"
+    assert panel.header.title.text() == FILES_PANEL
     panel.title.click()
     assert not panel.collapsed and panel.body.isVisibleTo(view)
 
@@ -251,8 +252,8 @@ def test_headings_use_the_serif_face(qtbot, repo, make_item):
     view, _ = _view(qtbot, repo.db_path)
     _loaded(qtbot, view)
     panel = view.panels[FILES_PANEL]
-    assert panel.title.font().families()[0] == theme.SERIF[0]
-    assert panel.title.font().pointSizeF() == theme.HEADER_PT
+    assert panel.header.title.font().families()[0] == theme.SERIF[0]
+    assert panel.header.title.font().pointSizeF() == theme.HEADER_PT
     (cameras,) = [
         label for label in panel.body.findChildren(QLabel) if label.text() == "Cameras"
     ]
@@ -286,3 +287,24 @@ def test_calendar_year_survives_catalog_updates_not_filter_changes(
     ctx.set_filters(FilterOptions())
     qtbot.waitUntil(lambda: view.data is not second)
     assert view.panels[CALENDAR_PANEL].body.year == 2026
+
+
+def test_stats_filters_hide_behind_a_strip_and_keep_collapsed_state(qtbot, repo):
+    from smart_gallery.gui.paths import app_data_dir
+    from smart_gallery.gui.state_store import load_json
+    from smart_gallery.gui.ui.widgets import EmptyState, SectionHeader
+
+    view, _ = _view(qtbot, repo.db_path)
+    view.show()
+    assert view.filters.isVisible() and not view.collapsible.strip.isVisible()
+    view.panels[SETTINGS_PANEL].title.click()
+    view.collapsible.hide_btn.click()
+    assert not view.filters.isVisible() and view.collapsible.strip.isVisible()
+    saved = load_json(app_data_dir() / "dashboard.json")
+    assert saved["filters_shown"] is False and saved["collapsed"] == [SETTINGS_PANEL]
+    again, _ = _view(qtbot, repo.db_path)
+    assert not again.collapsible.shown and again.panels[SETTINGS_PANEL].collapsed
+    view.collapsible.strip.click()
+    assert view.filters.isVisible()
+    assert isinstance(view.message, EmptyState)
+    assert all(isinstance(p.header, SectionHeader) for p in view.panels.values())

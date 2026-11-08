@@ -49,7 +49,7 @@ def test_library_shows_rows_for_folder(qtbot, repo, make_item):
     )
     view, _ = _view(qtbot, repo.db_path)
     qtbot.waitUntil(lambda: len(view.grid_model.rows) == 3)
-    assert view.stats.text().startswith("3 files")
+    assert view.summary_text.startswith("3 files")
 
     view.select_folder("a")
     # Newest first by default.
@@ -57,7 +57,7 @@ def test_library_shows_rows_for_folder(qtbot, repo, make_item):
 
     view.subfolders.setChecked(False)
     qtbot.waitUntil(lambda: _relpaths(view) == ["a/1.jpg"])
-    assert view.stats.text().startswith("1 file")
+    assert view.summary_text.startswith("1 file")
     assert view.stack.currentWidget() is view.grid
 
 
@@ -65,7 +65,9 @@ def test_library_disconnected_drive_message(qtbot, tmp_path):
     missing = tmp_path / "gone" / ".smart_gallery" / "gallery.db"
     view, ctx = _view(qtbot, missing, label="Holiday")
     qtbot.waitUntil(lambda: view.stack.currentWidget() is view.message)
-    assert view.message.text() == ("Drive not connected. Plug in Holiday to browse it.")
+    assert view.message.text.text() == (
+        "Drive not connected. Plug in Holiday to browse it."
+    )
     assert view.grid_model.rows == []
     # Filter changes while disconnected do not raise either.
     ctx.set_filters(ctx.filters)
@@ -373,7 +375,7 @@ def test_filters_hide_behind_a_strip_and_come_back(qtbot, repo):
     view, _ = _view(qtbot, repo.db_path)
     view.show()
     assert view.filters.isVisible() and not view.filters_strip.isVisible()
-    view.hide_filters_btn.click()
+    view.collapsible.hide_btn.click()
     assert not view.filters.isVisible() and view.filters_strip.isVisible()
     view.filters_strip.click()
     assert view.filters.isVisible() and not view.filters_strip.isVisible()
@@ -385,3 +387,38 @@ def test_sync_options_sit_right_of_sort(qtbot, repo):
     widgets = [layout.itemAt(i).widget() for i in range(layout.count())]
     assert widgets.index(view.sort) < widgets.index(view.mirror_btn)
     assert view.mirror_btn.text() == "Sync options"
+
+
+def test_library_summary_signal_header_and_footer(qtbot, repo, make_item, tmp_path):
+    from smart_gallery.gui.ui.widgets import EmptyState, PanelFooter
+
+    repo.upsert_many([make_item("a/1.jpg", date_taken="2026-01-01")])
+    ctx = AppContext()
+    ctx.thumbs = FakeThumbs()
+    ctx.set_gallery(Gallery("uuid", str(repo.db_path), "test"))
+    view = LibraryView(ctx)
+    qtbot.addWidget(view)
+    with qtbot.waitSignal(
+        view.summary_changed, check_params_cb=lambda t: t.startswith("1 file ·")
+    ):
+        view.reload()
+    layout = view.header_controls.layout()
+    widgets = [layout.itemAt(i).widget() for i in range(layout.count())]
+    assert view.import_btn is widgets[-1]
+    assert not hasattr(view, "stats")
+    assert isinstance(view.message, EmptyState)
+    assert isinstance(view.subfolders.parentWidget(), PanelFooter)
+
+
+def test_library_summary_cleared_when_drive_missing(qtbot, tmp_path):
+    missing = tmp_path / "gone" / ".smart_gallery" / "gallery.db"
+    view, _ = _view(qtbot, missing, label="Holiday")
+    qtbot.waitUntil(lambda: view.stack.currentWidget() is view.message)
+    assert view.summary_text == ""
+
+
+def test_library_filters_shown_persists(qtbot, repo):
+    view, _ = _view(qtbot, repo.db_path)
+    view.collapsible.hide_btn.click()
+    again, _ = _view(qtbot, repo.db_path)
+    assert not again.collapsible.shown

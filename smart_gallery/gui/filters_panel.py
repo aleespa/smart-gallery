@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 from smart_gallery.gui import theme
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.filter_widgets import ChipPicker, DateField
+from smart_gallery.gui.ui.metrics import FILTER_WIDTH
 from smart_gallery.gui.filters_model import (
     FilterValues,
     filter_choices,
@@ -48,7 +49,7 @@ from smart_gallery.organize.filters import FilterOptions
 DEBOUNCE_MS = 300
 # Wide enough for the three Type boxes side by side; the Library and the
 # Dashboard open the panel at this width.
-PANEL_WIDTH = 300
+PANEL_WIDTH = FILTER_WIDTH
 CLEAR_TEXT = "Clear all filters"
 PEOPLE_MATCH = (("any", "Any of them"), ("all", "All of them"))
 FILE_TYPES = (("image", "Photos"), ("video", "Videos"), ("other", "Other files"))

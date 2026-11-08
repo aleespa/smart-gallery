@@ -1,15 +1,20 @@
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import QObject, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtWidgets import QHeaderView, QMessageBox
+
+from smart_gallery.colors import KEEP, NEUTRAL
 
 from smart_gallery.gui.app import MainWindow
 from smart_gallery.gui.actions.view import ActionsView
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.history.store import HistoryStore, JobRecord
-from smart_gallery.gui.history.view import HistoryView
+from smart_gallery.gui.history.view import HistoryView, _StatusDelegate, format_start
 from smart_gallery.gui.jobs import JobRunner, JobSpec
+from smart_gallery.gui.ui.widgets import ActionBar, EmptyState, status_pill
 
 FAKE_CLI = [sys.executable, str(Path(__file__).with_name("fake_cli.py"))]
 
@@ -338,20 +343,7 @@ def test_second_close_while_question_is_open_is_ignored(qtbot, tmp_path, monkeyp
             runner.cancel()
 
 
-# ── Task 9: pills, start times, detail stack, action bar ─────────────────────
-from datetime import datetime  # noqa: E402
-
-from PySide6.QtCore import QRectF, Qt  # noqa: E402
-from PySide6.QtGui import QPainter, QPixmap  # noqa: E402
-from PySide6.QtWidgets import QHeaderView  # noqa: E402
-
-from smart_gallery.gui.history.view import format_start  # noqa: E402
-from smart_gallery.gui.ui.widgets import (
-    ActionBar,
-    EmptyState,
-    status_pill,
-)  # noqa: E402
-
+# Pills, start times, detail stack, action bar
 NOW = datetime(2026, 11, 8, 12, 0)
 
 
@@ -362,19 +354,46 @@ def test_start_today_yesterday_else_date():
     assert format_start("garbage", NOW) == "garbage"
 
 
-def test_status_pill_paints_onto_a_pixmap(qtbot):
-    pix = QPixmap(80, 24)
-    painter = QPainter(pix)
-    status_pill(painter, QRectF(0, 0, 80, 24), "ok")
+def test_start_midnight_boundary():
+    now = datetime(2026, 11, 8, 0, 1)
+    assert format_start("2026-11-07T23:59:00", now) == "Yesterday 23:59"
+
+
+def test_start_tz_aware_is_converted_to_local():
+    aware = datetime(2026, 11, 8, 10, 0).astimezone()
+    expected = f"Today {aware:%H:%M}"
+    assert format_start(aware.isoformat(timespec="seconds"), NOW) == expected
+    utc = aware.astimezone(timezone.utc).isoformat(timespec="seconds")
+    assert format_start(utc, NOW) == expected
+
+
+def _pill_pixel(status):
+    img = QImage(80, 24, QImage.Format.Format_ARGB32)
+    img.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(img)
+    status_pill(painter, QRectF(0, 0, 80, 24), status)
     painter.end()
+    return img.pixelColor(8, 12)
+
+
+def _distance(a, b):
+    b = QColor(b)
+    return (
+        abs(a.red() - b.red()) + abs(a.green() - b.green()) + abs(a.blue() - b.blue())
+    )
+
+
+def test_status_pill_paints_onto_an_image(qtbot):
+    ok, weird = _pill_pixel("ok"), _pill_pixel("weird")
+    assert ok.alpha() > 0 and weird.alpha() > 0
+    assert _distance(ok, KEEP) < _distance(ok, NEUTRAL)
+    assert _distance(weird, NEUTRAL) < _distance(weird, KEEP)
 
 
 def test_status_column_uses_a_pill_delegate(qtbot, tmp_path):
     view = _view(qtbot, tmp_path, _record("A", status="weird"))[0]
-    assert view.table.itemDelegateForColumn(3) is not None
+    assert isinstance(view.table.itemDelegateForColumn(3), _StatusDelegate)
     assert _cell(view, 0, 3) == "weird"
-    pix = QPixmap(view.table.viewport().size())
-    view.table.viewport().render(pix)
 
 
 def test_header_and_resize_modes(qtbot, tmp_path):

@@ -83,9 +83,47 @@ def primary(button: QPushButton) -> QPushButton:
     return button
 
 
+# A destructive action (move to recycle bin, delete): an ERROR outline that
+# fills on hover, so it never competes with the page's one coral primary.
+DANGER_STYLE = f"""
+QPushButton#dangerButton {{
+    background: transparent;
+    color: {ERROR};
+    border: 1px solid {ERROR};
+    border-radius: 4px;
+    padding: 7px 20px;
+}}
+QPushButton#dangerButton:hover {{ background: {ERROR}; color: {ON_ACCENT}; }}
+QPushButton#dangerButton:pressed {{ background: {ERROR}; color: {ON_ACCENT}; }}
+QPushButton#dangerButton:disabled {{
+    background: {DARK_PALETTE["Button"]};
+    color: {DARK_DISABLED_TEXT};
+    border: none;
+}}
+"""
+
+
+def danger(button: QPushButton) -> QPushButton:
+    """Style ``button`` as a destructive action (outline, fills on hover)."""
+    button.setObjectName("dangerButton")
+    button.setStyleSheet(DANGER_STYLE)
+    return button
+
+
 def qcolor(color: str | tuple[int, ...]) -> QColor:
     """A ``colors`` value as a QColor: ``#RRGGBB`` or an ``(r, g, b, a)`` tuple."""
     return QColor(*color) if isinstance(color, tuple) else QColor(color)
+
+
+_FILL = QColor(ACCENT_FILL)
+# A checked segment is tinted with an accent underline, not filled, so a
+# segmented switch never reads as a primary button.
+SEGMENT_STYLE = f"""
+QWidget#segment QPushButton:checked {{
+    background: rgba({_FILL.red()}, {_FILL.green()}, {_FILL.blue()}, 60);
+    border-bottom: 2px solid {ACCENT};
+}}
+"""
 
 
 def apply_theme(app: QApplication) -> None:

@@ -147,8 +147,6 @@ def test_main_actions_are_primary_buttons(qtbot, repo):
     for view in views:
         qtbot.addWidget(view)
     buttons = [
-        library.filters.clear_btn,
-        library.export_btn,
         library.import_btn,
         views[1].run_button,
         views[2].run_button,

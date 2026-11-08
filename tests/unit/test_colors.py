@@ -82,3 +82,7 @@ def test_text_on_the_accent_fill_is_readable():
 def test_accent_text_reads_on_the_dark_window():
     """Links and outlines use the bright accent straight on the background."""
     assert _contrast(colors.ACCENT, colors.DARK_PALETTE["Window"]) >= 4.5
+
+
+def test_error_is_readable_on_the_window():
+    assert _contrast(colors.ERROR, colors.DARK_PALETTE["Window"]) >= 3.0

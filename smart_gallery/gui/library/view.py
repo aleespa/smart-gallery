@@ -438,7 +438,6 @@ class LibraryView(QWidget):
         self.filters_strip.setVisible(False)
         self.export_btn = QPushButton(EXPORT_TEXT)
         self.export_btn.setToolTip(EXPORT_TIP)
-        theme.primary(self.export_btn)
         self.filters.bottom_row.addWidget(self.export_btn, 1)
         self.import_btn = QPushButton(IMPORT_TEXT)
         self.import_btn.setToolTip(IMPORT_TIP)

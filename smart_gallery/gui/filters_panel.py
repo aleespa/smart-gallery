@@ -150,7 +150,6 @@ class FilterPanel(QWidget):
         self.people_box.setVisible(False)
         body.addStretch(1)
         self.clear_btn = QPushButton(CLEAR_TEXT)
-        theme.primary(self.clear_btn)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)

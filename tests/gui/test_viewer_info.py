@@ -61,7 +61,7 @@ def test_info_without_metadata(make_item):
     s = _sections(item)
     assert s["date"].heading == "Date unknown" and s["date"].lines == ()
     assert "exposure" not in s and "camera" not in s and "people" not in s
-    assert s["file"].lines == ("976.6 KB", "a.jpg")
+    assert s["file"].lines == ("977 KB", "a.jpg")
 
 
 def test_people_section_only_unnamed(make_item):

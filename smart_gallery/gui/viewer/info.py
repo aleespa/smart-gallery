@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from smart_gallery.format import format_size as _format_size
 from smart_gallery.models import MediaItem
 from smart_gallery.util import format_shutter
 
@@ -55,14 +56,7 @@ class PhotoPeople:
 def format_size(num_bytes: int | None) -> str:
     if num_bytes is None:
         return EMPTY
-    size = float(num_bytes)
-    for unit in ("B", "KB", "MB", "GB"):
-        if size < 1024:
-            break
-        size /= 1024
-    else:
-        unit = "TB"
-    return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+    return _format_size(num_bytes)
 
 
 def format_duration(ms: float | None) -> str:

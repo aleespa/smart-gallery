@@ -25,11 +25,11 @@ from smart_gallery.gui.dashboard.view import (  # noqa: E402
 )
 
 METRIC_LABELS = [
-    "Total Files",
-    "Images (filtered)",
+    "Total files",
+    "Photos",
     "Videos",
-    "Total Size",
-    "Video Length",
+    "Total size",
+    "Video length",
 ]
 
 

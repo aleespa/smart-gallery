@@ -12,10 +12,10 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from smart_gallery import colors
+from smart_gallery.format import format_size
 
 FOLDER, TYPE = "folder", "type"  # StorageNode.kind
 NO_EXT = "(none)"
-_UNITS = ("B", "KB", "MB", "GB", "TB")
 
 
 @dataclass
@@ -46,17 +46,7 @@ def type_label(ext: str | None) -> str:
     return label or NO_EXT
 
 
-def format_bytes(n: int) -> str:
-    """1024-based size with three significant figures (``45.6 GB``)."""
-    if n < 1024:
-        return f"{int(n)} B"
-    value = float(n)
-    unit = 0
-    while value >= 1024 and unit < len(_UNITS) - 1:
-        value /= 1024
-        unit += 1
-    decimals = 2 if value < 10 else 1 if value < 100 else 0
-    return f"{value:.{decimals}f} {_UNITS[unit]}"
+format_bytes = format_size  # kept so existing imports work
 
 
 def _order(nodes: list[StorageNode]) -> list[StorageNode]:

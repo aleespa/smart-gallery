@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from smart_gallery.format import format_duration as _format_seconds
 from smart_gallery.gui import theme
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.history.store import JobRecord
@@ -50,13 +51,7 @@ def format_duration(started_at: str, ended_at: str) -> str:
         return ""
     if seconds < 0:
         return ""
-    hours, rest = divmod(seconds, 3600)
-    minutes, seconds = divmod(rest, 60)
-    if hours:
-        return f"{hours}h {minutes}m {seconds}s"
-    if minutes:
-        return f"{minutes}m {seconds}s"
-    return f"{seconds}s"
+    return _format_seconds(seconds)
 
 
 def read_log(path: str) -> str | None:

@@ -1,3 +1,4 @@
+from smart_gallery.format import format_size
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -50,16 +51,16 @@ def test_metrics_labels_and_values():
     fi, fv, fo = _images(2), _videos(), pd.DataFrame()
     m = dict(figures.metrics(fi, fv, fo))
     assert list(m) == [
-        "Total Files",
-        "Images (filtered)",
+        "Total files",
+        "Photos",
         "Videos",
-        "Total Size",
-        "Video Length",
+        "Total size",
+        "Video length",
     ]
-    assert m["Total Files"] == "3"
-    assert m["Images (filtered)"] == "2"
-    assert m["Total Size"] == "7 MB"
-    assert m["Video Length"] == "0h 1m 30s"
+    assert m["Total files"] == "3"
+    assert m["Photos"] == "2"
+    assert m["Total size"] == format_size(7 * 1048576)
+    assert m["Video length"] == "1m 30s"
 
 
 def test_parse_shutter():

@@ -12,10 +12,12 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from smart_gallery import colors
+from smart_gallery.format import format_duration, format_size
 from smart_gallery.dashboard import data
 from smart_gallery.dashboard.data import geotagged, parse_shutter  # noqa: F401
 from smart_gallery.db import GalleryRepository
 from smart_gallery.organize.filters import FilterOptions
+
 
 def load_catalog_df(db_path, filters: Optional[FilterOptions] = None) -> pd.DataFrame:
     """Load the catalog (optionally filtered in SQL) as a DataFrame."""
@@ -36,23 +38,24 @@ def split_media(df: pd.DataFrame):
 
 def metrics(fi, fv, fo) -> list[tuple[str, str]]:
     """The headline numbers as (label, formatted value) pairs."""
-    total_size = sum(
-        d["size (MB)"].sum() for d in (fi, fv, fo) if "size (MB)" in d.columns
-    )
+    frames = (fi, fv, fo)
+    if all("size_bytes" in d.columns for d in frames if len(d.columns)):
+        total_bytes = sum(d["size_bytes"].sum() for d in frames if len(d.columns))
+    else:
+        total_bytes = sum(
+            d["size (MB)"].sum() * 1048576 for d in frames if "size (MB)" in d.columns
+        )
     total_duration_sec = (
         fv["duration_ms"].sum(skipna=True) / 1000.0
         if "duration_ms" in fv.columns
         else 0.0
     )
-    h = int(total_duration_sec // 3600)
-    m = int((total_duration_sec % 3600) // 60)
-    s = int(total_duration_sec % 60)
     return [
-        ("Total Files", f"{len(fi) + len(fv) + len(fo):,}"),
-        ("Images (filtered)", f"{len(fi):,}"),
+        ("Total files", f"{len(fi) + len(fv) + len(fo):,}"),
+        ("Photos", f"{len(fi):,}"),
         ("Videos", f"{len(fv):,}"),
-        ("Total Size", f"{total_size:,.0f} MB"),
-        ("Video Length", f"{h}h {m}m {s}s"),
+        ("Total size", format_size(int(total_bytes))),
+        ("Video length", format_duration(total_duration_sec)),
     ]
 
 

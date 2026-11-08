@@ -108,3 +108,14 @@ def test_face_commands_unavailable_without_insightface(monkeypatch):
     assert model.unavailable_reason("sync") is None
     monkeypatch.setattr(model, "faces_available", lambda: True)
     assert model.unavailable_reason("scan-faces") is None
+
+
+def test_every_command_is_in_exactly_one_group():
+    grouped = [n for g in model.COMMAND_GROUPS.values() for n in g]
+    assert len(grouped) == len(set(grouped))
+    assert set(grouped) == set(model.gui_forms())
+
+
+def test_command_label_falls_back_to_cli_name():
+    assert model.command_label("sync-mirror") == "Sync mirror"
+    assert model.command_label("mystery") == "mystery"

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import QApplication, QFileDialog
 
 from smart_gallery.forms import default_values
@@ -9,6 +9,7 @@ from smart_gallery.gui.actions.fields import make_editor
 from smart_gallery.gui.actions.view import ActionsView
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.jobs import JobSpec
+from smart_gallery.gui.ui.metrics import SIDEBAR_WIDTH
 
 ALL_KINDS = {
     "text",
@@ -39,6 +40,15 @@ class FakeJobs(QObject):
     def start(self, spec):
         self.calls.append(spec)
         return True
+
+
+def _cli(item):
+    return item.data(Qt.ItemDataRole.UserRole)
+
+
+def _cli_names(view):
+    items = (view.commands.item(i) for i in range(view.commands.count()))
+    return [_cli(i) for i in items if _cli(i)]
 
 
 def _view(qtbot, jobs=True, root=None):
@@ -197,8 +207,26 @@ def test_face_commands_show_banner_and_disable_run(qtbot, monkeypatch):
 
 def test_commands_listed_in_cli_order(qtbot):
     view, _ = _view(qtbot)
-    names = [view.commands.item(i).text() for i in range(view.commands.count())]
-    assert names == list(model.gui_forms())
+    assert sorted(_cli_names(view)) == sorted(model.gui_forms())
+    assert _cli_names(view)[0] == "init"
+
+
+def test_commands_grouped_under_unselectable_headings(qtbot):
+    view, _ = _view(qtbot)
+    lst = view.commands
+    assert lst.width() == SIDEBAR_WIDTH
+    heads = [lst.item(i) for i in range(lst.count()) if _cli(lst.item(i)) is None]
+    assert [h.text() for h in heads] == list(model.COMMAND_GROUPS)
+    assert all(h.flags() == Qt.ItemFlag.NoItemFlags for h in heads)
+    item = next(
+        lst.item(i) for i in range(lst.count()) if _cli(lst.item(i)) == "sync-mirror"
+    )
+    assert item.text() == "Sync mirror"
+    assert item.toolTip() == "sync-mirror"
+    assert _cli(lst.currentItem()) == "init"
+    view.select_command("sync-mirror")
+    assert view.title.title.text() == "Sync mirror"
+    assert view.title.subtitle.text()
 
 
 def test_collapsed_sections_start_folded_and_unfold(qtbot):
@@ -241,7 +269,7 @@ def test_open_in_actions_selects_command_and_fills_values(qtbot):
     ctx.open_in_actions.emit(
         ["export", "--from", "E:/", "--to", "D:/out", "--min-iso", "400"]
     )
-    assert view.commands.currentItem().text() == "export"
+    assert _cli(view.commands.currentItem()) == "export"
     assert view.editor("min_iso").value() == "400"
     assert view.editor("dest").value().replace("\\", "/") == "D:/out"
     assert view.preview.text().startswith("smart-gallery export")
@@ -252,7 +280,7 @@ def test_open_in_actions_ignores_unusable_argv(qtbot):
     view.select_command("sync")
     ctx.open_in_actions.emit(["nonsense"])
     ctx.open_in_actions.emit([])
-    assert view.commands.currentItem().text() == "sync"
+    assert _cli(view.commands.currentItem()) == "sync"
 
 
 def test_actions_area_builds_the_real_view(qtbot):

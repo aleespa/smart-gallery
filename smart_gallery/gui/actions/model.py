@@ -26,6 +26,55 @@ FACES_MISSING = "Face features aren't installed in this build"
 READ_ONLY_COMMANDS = {"export", "report", "people", "compare", "convert-raw"}
 
 
+COMMAND_GROUPS: dict[str, dict[str, str]] = {
+    "Catalog": {
+        "init": "Create catalog",
+        "sync": "Sync with disk",
+        "import": "Import",
+        "export": "Export",
+        "report": "Report",
+        "compare": "Compare catalogs",
+        "rename": "Rename files",
+    },
+    "Mirror": {
+        "pair": "Pair drives",
+        "sync-mirror": "Sync mirror",
+        "free-up": "Free up space",
+        "bring-back": "Bring back",
+    },
+    "Files": {
+        "convert-raw": "Convert RAW",
+        "raw-to-jpeg": "RAW to JPEG",
+        "recycle": "Move to Recycle Bin",
+    },
+    "Faces": {
+        "scan-faces": "Scan faces",
+        "find-faces": "Find faces",
+        "file-faces": "Sort faces",
+        "identify-faces": "Identify from samples",
+        "cluster-faces": "Group faces",
+        "label-faces": "Label faces",
+        "undo-faces": "Undo face labels",
+    },
+    "People": {
+        "people": "List people",
+        "name-person": "Name person",
+        "hide-person": "Hide person",
+        "merge-persons": "Merge people",
+        "split-person": "Split person",
+        "delete-person": "Delete person",
+    },
+}
+
+
+def command_label(name: str) -> str:
+    """The readable label for a CLI command (the name itself if unlisted)."""
+    for group in COMMAND_GROUPS.values():
+        if name in group:
+            return group[name]
+    return name
+
+
 def gui_forms() -> dict[str, CommandForm]:
     """One form per command offered in the desktop app, in CLI order."""
     forms = command_forms(build_parser(), hidden=GUI_HIDDEN_COMMANDS)

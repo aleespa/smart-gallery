@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QRect, Qt, Signal
+
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (
     QApplication,
@@ -14,6 +15,9 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
+    QStyledItemDelegate,
+    QStyle,
     QPushButton,
     QScrollArea,
     QStackedWidget,
@@ -37,6 +41,8 @@ from smart_gallery.gui.actions.fields import FieldEditor, make_editor
 from smart_gallery.gui.actions.model import READ_ONLY_COMMANDS
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.jobs import JobSpec
+from smart_gallery.gui.ui.metrics import SIDEBAR_WIDTH
+from smart_gallery.gui.ui.widgets import SectionHeader
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +222,53 @@ class CommandPage(QScrollArea):
                 self.sections[section.title].unfold()
 
 
+class CommandDelegate(QStyledItemDelegate):
+    """A command row: its label on the left, the CLI name muted on the right."""
+
+    def paint(self, painter, option, index) -> None:
+        cli = index.data(Qt.ItemDataRole.UserRole)
+        if not cli:
+            super().paint(painter, option, index)
+            return
+        label_option = option
+        self.initStyleOption(label_option, index)
+        label_option.text = ""
+        style = option.widget.style() if option.widget else QApplication.style()
+        style.drawControl(
+            QStyle.ControlElement.CE_ItemViewItem, label_option, painter, option.widget
+        )
+        rect: QRect = option.rect.adjusted(8, 0, -8, 0)
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        palette = option.palette
+        painter.save()
+        muted_role = (
+            QPalette.ColorRole.HighlightedText
+            if selected
+            else QPalette.ColorRole.PlaceholderText
+        )
+        metrics = painter.fontMetrics()
+        cli_width = metrics.horizontalAdvance(cli)
+        painter.setPen(palette.color(muted_role))
+        painter.drawText(
+            rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, cli
+        )
+        text_role = (
+            QPalette.ColorRole.HighlightedText if selected else QPalette.ColorRole.Text
+        )
+        painter.setPen(palette.color(text_role))
+        text_rect = rect.adjusted(0, 0, -(cli_width + 8), 0)
+        painter.drawText(
+            text_rect,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            metrics.elidedText(
+                index.data(Qt.ItemDataRole.DisplayRole),
+                Qt.TextElideMode.ElideRight,
+                text_rect.width(),
+            ),
+        )
+        painter.restore()
+
+
 class ActionsView(QWidget):
     def __init__(self, ctx: AppContext, parent: QWidget | None = None):
         super().__init__(parent)
@@ -225,13 +278,11 @@ class ActionsView(QWidget):
         self._busy = bool(ctx.jobs is not None and ctx.jobs.running)
 
         self.commands = QListWidget()
-        self.commands.setFixedWidth(180)
-        for name in self.forms:
-            self.commands.addItem(name)
+        self.commands.setFixedWidth(SIDEBAR_WIDTH)
+        self.commands.setItemDelegate(CommandDelegate(self.commands))
+        self._fill_commands()
 
-        self.title = QLabel()
-        self.title.setWordWrap(True)
-        self.title.setStyleSheet("font-weight: bold;")
+        self.title = SectionHeader("")
         self.banner = QLabel()
         self.banner.setWordWrap(True)
         self.banner.setStyleSheet(theme.WARNING_BANNER_STYLE)
@@ -271,7 +322,37 @@ class ActionsView(QWidget):
         if ctx.jobs is not None:
             ctx.jobs.started.connect(lambda _spec: self._set_busy(True))
             ctx.jobs.finished.connect(lambda _record: self._set_busy(False))
-        self.commands.setCurrentRow(0)
+        self.commands.setCurrentRow(self._first_command_row())
+
+    def _fill_commands(self) -> None:
+        """Group headings (not selectable) and one row per command."""
+        listed: set[str] = set()
+        for group, commands in model.COMMAND_GROUPS.items():
+            names = [n for n in commands if n in self.forms]
+            if not names:
+                continue
+            heading = QListWidgetItem(group)
+            heading.setFlags(Qt.ItemFlag.NoItemFlags)
+            heading.setFont(theme.serif_font(theme.SECTION_PT))
+            self.commands.addItem(heading)
+            for name in names:
+                self._add_command(name)
+                listed.add(name)
+        for name in self.forms:  # a command nobody grouped yet
+            if name not in listed:
+                self._add_command(name)
+
+    def _add_command(self, name: str) -> None:
+        item = QListWidgetItem(model.command_label(name))
+        item.setData(Qt.ItemDataRole.UserRole, name)
+        item.setToolTip(name)
+        self.commands.addItem(item)
+
+    def _first_command_row(self) -> int:
+        for row in range(self.commands.count()):
+            if self.commands.item(row).data(Qt.ItemDataRole.UserRole):
+                return row
+        return -1
 
     # ── access (also used by tests) ──────────────────────────────────────────
     def page(self) -> CommandPage:
@@ -292,8 +373,11 @@ class ActionsView(QWidget):
 
     # ── selection ────────────────────────────────────────────────────────────
     def select_command(self, name: str) -> None:
-        row = list(self.forms).index(name)
-        self.commands.setCurrentRow(row)
+        for row in range(self.commands.count()):
+            if self.commands.item(row).data(Qt.ItemDataRole.UserRole) == name:
+                self.commands.setCurrentRow(row)
+                return
+        raise ValueError(name)
 
     def _gallery_root(self) -> str | None:
         gallery = self.ctx.current
@@ -302,7 +386,9 @@ class ActionsView(QWidget):
     def _show_row(self, row: int) -> None:
         if row < 0:
             return
-        name = self.commands.item(row).text()
+        name = self.commands.item(row).data(Qt.ItemDataRole.UserRole)
+        if not name:
+            return
         page = self._pages.get(name)
         if page is None:
             form = self.forms[name]
@@ -311,7 +397,8 @@ class ActionsView(QWidget):
             self._pages[name] = page
             self.stack.addWidget(page)
         self.stack.setCurrentWidget(page)
-        self.title.setText(f"{name} — {page.form.description}")
+        self.title.set_title(model.command_label(name))
+        self.title.set_subtitle(page.form.description)
         self._show_state()
 
     def _page_changed(self, page: CommandPage) -> None:

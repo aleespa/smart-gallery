@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QInputDialog, QMessageBox
+from PySide6.QtWidgets import QInputDialog, QMessageBox, QPushButton
 
 from smart_gallery.config import drive_root_of
 from smart_gallery.gui import paths
@@ -387,10 +387,52 @@ def test_pending_count_in_header(qtbot, repo, cat, make_item):
     cat.person("Alice")
     repo.upsert_many([make_item(f"new{i}.jpg") for i in range(3)])
     view = _view(qtbot, _ctx(repo))
-    expected = PENDING.format(n=view.data.pending_images)
     assert view.data.pending_images >= 3
-    assert view.status.text() == expected
     assert view.header_controls.isAncestorOf(view.find_button)
+
+
+def test_pending_summary_via_signal(qtbot, repo, cat, make_item):
+    cat.person("Alice")
+    repo.upsert_many([make_item(f"new{i}.jpg") for i in range(3)])
+    view = PeopleView(_ctx(repo))
+    qtbot.addWidget(view)
+    seen = []
+    view.summary_changed.connect(seen.append)
+    view.reload()
+    qtbot.waitUntil(lambda: bool(seen))
+    n = view.data.pending_images
+    assert n >= 3
+    assert seen[-1] == f"{n:,} photos not scanned yet"
+    assert PENDING.format(n=n) == seen[-1]
+    assert not hasattr(view, "status")
+
+
+def test_no_stray_button_while_loading(qtbot, repo):
+    view = PeopleView(_ctx(repo))  # catalog still loading: nothing shown yet
+    qtbot.addWidget(view)
+    view.show()
+    buttons = view.message_page.findChildren(QPushButton)
+    assert not [b for b in buttons if b.isVisible() and not b.text()]
+    assert not view.message_action.isVisible()
+
+
+def test_header_controls_order_and_undo_icon(qtbot):
+    view = PeopleView(AppContext())
+    qtbot.addWidget(view)
+    lay = view.header_controls.layout()
+    items = [lay.itemAt(i).widget() for i in range(lay.count())]
+    assert items == [view.undo_button, view.find_button]
+    assert not view.undo_button.icon().isNull()
+    assert view.undo_button.text() == "Undo"
+
+
+def test_show_hidden_in_panel_footer(qtbot):
+    from smart_gallery.gui.ui.widgets import PanelFooter
+
+    view = PeopleView(AppContext())
+    qtbot.addWidget(view)
+    assert isinstance(view.list.show_hidden.parentWidget(), PanelFooter)
+    assert view.splitter.sizes()[0] > 0
 
 
 class _Crops(QObject):

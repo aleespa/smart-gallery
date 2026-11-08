@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from smart_gallery.gui import paths, theme
 from smart_gallery.gui.people import model
+from smart_gallery.gui.ui.widgets import PanelFooter
 
 PERSON_ROLE = Qt.ItemDataRole.UserRole + 1  # model.PersonRow on a person row
 HEADER_ROLE = Qt.ItemDataRole.UserRole + 2  # section title on a header row
@@ -264,7 +265,9 @@ class PeopleList(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.search)
         layout.addWidget(self.list, 1)
-        layout.addWidget(self.show_hidden)
+        footer = PanelFooter()
+        footer.add(self.show_hidden)
+        layout.addWidget(footer)
 
         self.search.textChanged.connect(self._apply_search)
         self.list.itemSelectionChanged.connect(self._on_selection)

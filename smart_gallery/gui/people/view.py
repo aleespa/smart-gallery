@@ -14,12 +14,11 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
-    QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -30,7 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from smart_gallery.config import drive_root_of
-from smart_gallery.gui import paths, theme
+from smart_gallery.gui import icons, paths, theme
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.jobspec import JOB_RUNNING, JobSpec
 from smart_gallery.gui.people import model
@@ -41,11 +40,13 @@ from smart_gallery.gui.people.person_view import (
     SeveralPeoplePage,
 )
 from smart_gallery.gui.repo_query import RepoQuery
+from smart_gallery.gui.ui.metrics import SIDEBAR_WIDTH
+from smart_gallery.gui.ui.widgets import EmptyState
 from smart_gallery.services.label_faces import LabelEntry, write_label_list
 
 FIND_TITLE = "Find faces"
 FIND_BUTTON = "Find new faces"
-PENDING = "{n:,} images not scanned yet"
+PENDING = "{n:,} photos not scanned yet"
 NO_GALLERY = "Open or create a gallery to see its people."
 DISCONNECTED = "Drive not connected. Plug in {label} to see its people."
 READ_ERROR = "Could not read the catalog: {error}"
@@ -78,6 +79,8 @@ LIST_ERROR = "Could not save the face corrections: {error}"
 
 
 class PeopleView(QWidget):
+    summary_changed = Signal(str)  # "N photos not scanned yet", "" when none
+
     def __init__(self, ctx: AppContext, parent: QWidget | None = None):
         super().__init__(parent)
         self.ctx = ctx
@@ -85,7 +88,6 @@ class PeopleView(QWidget):
         self.loaded = False  # True once the latest load has been shown
         self._root = Path()
         self._loading_root = Path()
-        self._message_callback: Callable[[], None] | None = None
         self._pending: list[LabelEntry] = []  # corrections not sent yet
         self._pending_roots: list[str] = []  # the gallery each one belongs to
         self._send_timer = QTimer(self)
@@ -95,33 +97,24 @@ class PeopleView(QWidget):
         self._query = RepoQuery(ctx, self)
 
         # Shown on the page header's right (MainWindow takes header_controls).
-        self.status = QLabel()
         self.find_button = QPushButton(FIND_BUTTON)
         theme.primary(self.find_button)
         self.undo_button = QPushButton(UNDO)
+        self.undo_button.setIcon(
+            icons.icon("undo", self.palette().buttonText().color(), 18)
+        )
         self.undo_button.setEnabled(False)
         self.header_controls = QWidget()
         header = QHBoxLayout(self.header_controls)
         header.setContentsMargins(0, 0, 0, 0)
-        header.addWidget(self.status)
         header.addWidget(self.undo_button)
         header.addWidget(self.find_button)
 
         self.list = PeopleList(ctx)
 
-        self.message = QLabel()
-        self.message.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.message.setWordWrap(True)
-        self.message.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
-        self.message_action = QPushButton()
-        self.message_page = QWidget()
-        page = QVBoxLayout(self.message_page)
-        page.addStretch(1)
-        page.addWidget(self.message)
-        page.addWidget(self.message_action, 0, Qt.AlignmentFlag.AlignHCenter)
-        page.addStretch(1)
+        self.message_page = EmptyState()
+        self.message = self.message_page.text
+        self.message_action = self.message_page.action
         self.person_page = PersonPage(ctx)
         self.several_page = SeveralPeoplePage(ctx)
         self.hidden_page = HiddenFacesPage(ctx)
@@ -138,7 +131,7 @@ class PeopleView(QWidget):
         self.splitter.addWidget(self.right)
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
-        self.splitter.setSizes([260, 740])
+        self.splitter.setSizes([SIDEBAR_WIDTH, 1000 - SIDEBAR_WIDTH])
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.addWidget(self.splitter)
@@ -147,7 +140,6 @@ class PeopleView(QWidget):
         self.undo_button.clicked.connect(self.undo)
         self._undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
         self._undo_shortcut.activated.connect(self.undo)
-        self.message_action.clicked.connect(self._on_message_action)
         self.list.selection_changed.connect(self._on_selection)
         self.list.merge_requested.connect(self.merge)
         self.list.rename_requested.connect(self.rename)
@@ -194,8 +186,8 @@ class PeopleView(QWidget):
 
     def _clear(self) -> None:
         self.data = None
-        self.status.setText("")
         self.list.set_people(None)
+        self.summary_changed.emit("")
         self._set_undo(None)
 
     def _set_undo(self, summary: str | None) -> None:
@@ -212,7 +204,7 @@ class PeopleView(QWidget):
         self.hidden_page.set_people(result)
         self._set_undo(result.last_undo)
         n = result.pending_images
-        self.status.setText(PENDING.format(n=n) if n > 0 else "")
+        self.summary_changed.emit(PENDING.format(n=n) if n > 0 else "")
         if not result.has_faces:
             if paths.faces_available():
                 self._find_message(NO_FACES)
@@ -254,20 +246,13 @@ class PeopleView(QWidget):
         action: Callable[[], None] | None = None,
     ) -> None:
         """Show ``text`` on the right, with a button running ``action``."""
-        self.message.setText(text)
-        self._message_callback = action
-        self.message_action.setText(action_label or "")
-        self.message_action.setHidden(not action_label)
+        self.message_page.show_text(text, "", action_label, action)
         self.message_action.setEnabled(True)
         self.right.setCurrentWidget(self.message_page)
 
     def _find_message(self, text: str) -> None:
         self.show_message(text, FIND_TITLE, self.find_faces)
         self.message_action.setEnabled(paths.faces_available())
-
-    def _on_message_action(self) -> None:
-        if self._message_callback is not None:
-            self._message_callback()
 
     def _on_selection(self, ids: list) -> None:
         if self.data is None or not (self.data.named or self.data.groups):

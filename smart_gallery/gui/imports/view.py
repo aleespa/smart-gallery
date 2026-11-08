@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QGroupBox,
-    QScrollArea,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -19,6 +18,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -27,6 +27,7 @@ from smart_gallery.forms import format_command
 from smart_gallery.gui import theme
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.galleries.store import is_connected
+from smart_gallery.gui.icons import set_button_icon
 from smart_gallery.gui.imports.editor import ProfileEditor
 from smart_gallery.gui.imports.model import build_import_job, list_removable_drives
 from smart_gallery.gui.paths import app_data_dir
@@ -60,6 +61,8 @@ class ImportView(QWidget):
         self.source_combo.setMinimumWidth(260)
         self.browse_button = QPushButton("Browse folder…")
         self.refresh_button = QPushButton("Refresh")
+        set_button_icon(self.browse_button, "browse")
+        set_button_icon(self.refresh_button, "refresh")
         self.profile_combo = QComboBox()
         self.new_button = QPushButton("New")
         self.edit_button = QPushButton("Edit")

@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from smart_gallery.forms import PLACEHOLDERS, Field
 from smart_gallery.gui.actions.model import join_values
+from smart_gallery.gui.icons import set_button_icon
 
 # Output files (not folders), by (command, key), with the save dialog's filter.
 SAVE_FILE_FILTERS = {
@@ -77,6 +78,7 @@ class PathEditor(TextEditor):
         else:
             label = "Add folder…" if self._adds else "Browse…"
         self.browse = QPushButton(label)
+        set_button_icon(self.browse, "browse")
         self.browse.clicked.connect(self._browse)
         self.row.addWidget(self.browse)
 

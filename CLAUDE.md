@@ -254,7 +254,22 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   `FilterOptions` field needs a line there too). `--jpeg-only`
   converts CR2/CR3 by copying each into a staging folder under the
   destination and running `convert_cr3` on the batch; the source drive is
-  never written.
+  never written. Both windows share the kit: a `SectionHeader` heading, card
+  sections, a `Disclosure("Command")` for the command line and an `ActionBar`
+  footer (dry run left, primary right).
+- **UI kit** (`gui/ui/`). `metrics.py` (Qt-free spacing/width constants) and
+  `widgets.py` (`SectionHeader`, `EmptyState`, `ActionBar`, `PanelFooter`,
+  `Disclosure`, `status_pill`). Update a `SectionHeader` only through
+  `set_title`/`set_subtitle` (an empty subtitle hides itself). Sizes and
+  counts go through `smart_gallery/format.py` (`format_size`, `format_count`,
+  `format_duration`); viewer clip timecodes stay clock format. `MainWindow`
+  pads the page stack and pages have zero root margins; a page may expose
+  `summary_changed = Signal(str)` (emit from data callbacks only, `""` when
+  there is no gallery or it failed), shown muted beside the title.
+  `gui/collapsible_filters.py` is shared by Library and Stats.
+  `tests/gui/test_button_roles.py` enforces one visible primary button per
+  page and an icon on every `Browse…` button; icons come from
+  `gui/icons.py` (`set_button_icon`).
 - **Theme** lives in `gui/theme.py`: Segoe UI Variable Text for controls,
   Georgia (`serif_font`) for headings only, and one accent in two shades.
   `ACCENT` (the first Sunset stop, bright coral) is for text and thin lines
@@ -265,7 +280,10 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   use `palette(highlight)` for a fill and `theme.ACCENT` for a line, never a
   hard-coded colour; `tests/unit/test_colors.py` checks both contrasts. A
   page's main action goes through `theme.primary(button)` (white bold text on
-  `ACCENT_FILL`, plain grey while disabled); other buttons stay plain. The brand name
+  `ACCENT_FILL`, plain grey while disabled); other buttons stay plain, except `theme.danger` (Storage's Recycle Bin
+  buttons: outlined until hover). `theme.SEGMENT_STYLE` (applied by
+  `segment()`) styles segmented controls, and `theme.CARD_STYLE` makes a
+  `QGroupBox` a card (MainWindow and FormWindow). The brand name
   (`gui/brand.py`) runs along the same `SUNSET` stops.
   The app is **always dark** (no light mode): `apply_theme` asks Qt for the
   dark scheme, and where the platform ignores that (offscreen tests, older

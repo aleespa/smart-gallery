@@ -45,10 +45,11 @@ from smart_gallery.gui.exports.model import (
     export_summary,
 )
 from smart_gallery.gui.galleries.store import is_connected
+from smart_gallery.gui.icons import set_button_icon
 from smart_gallery.gui.paths import app_data_dir, exiftool_available
 from smart_gallery.gui.repo_query import RepoQuery
-from smart_gallery.gui.ui.widgets import ActionBar, Disclosure, SectionHeader
 from smart_gallery.gui.state_store import load_json, save_json
+from smart_gallery.gui.ui.widgets import ActionBar, Disclosure, SectionHeader
 from smart_gallery.storage.tree import format_bytes
 
 STATE_FILE = "export.json"  # the last run's ExportSettings, but not NOT_SAVED
@@ -95,6 +96,7 @@ class ExportView(QWidget):
         self.dest = QLineEdit()
         self.dest.setPlaceholderText("A folder, e.g. on a USB stick")
         self.browse_button = QPushButton("Browse…")
+        set_button_icon(self.browse_button, "browse")
         self.open_button = QPushButton("Open folder")
         self.folder = QLineEdit()  # empty: the placeholder's dated name
         self.folder.setToolTip("A new folder made inside the destination")

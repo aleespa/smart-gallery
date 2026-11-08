@@ -5,7 +5,15 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import (
+    QColor,
+    QIcon,
+    QPainter,
+    QPainterPath,
+    QPalette,
+    QPen,
+    QPixmap,
+)
 
 
 def _chevron(p: QPainter, s: float, left: bool) -> None:
@@ -167,3 +175,9 @@ def dot_position(centre: QPointF, radius: float, angle: float) -> QPointF:
     return QPointF(
         centre.x() + radius * math.cos(rad), centre.y() + radius * math.sin(rad)
     )
+
+
+def set_button_icon(button, name: str, size: int = 16) -> None:
+    """Give a push button the line icon ``name`` in its palette text colour."""
+    color = button.palette().color(QPalette.ColorRole.ButtonText)
+    button.setIcon(icon(name, color, size))

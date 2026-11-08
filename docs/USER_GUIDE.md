@@ -308,7 +308,7 @@ it brings the panel back.
 |---|---|
 | **Date taken** | Only items taken between two dates (either end can be left empty). |
 | **Type** | Photos, Videos, Other files. None ticked means all. |
-| **People** | (with face recognition) photos with *any* or *all* of the chosen people. |
+| **People** | (with face recognition) photos with *any* or *all* of the selected people. |
 | **Cameras**, **Lenses** | Tick one or more; the search box narrows long lists. |
 | **File extensions** | For example only `.CR3`, or only `.JPG`. |
 | **Exposure** | Aperture, ISO and shutter-speed ranges. |
@@ -354,9 +354,14 @@ format the card yourself afterwards.
    *Canon SD card* and *Pixel dump*. **New**, **Edit** and **Delete** manage
    them.
 3. **Import into.** Tick each gallery to copy into.
-4. The **Commands** box shows exactly what will run.
-5. Tick **Dry run** to see what would be copied without copying anything.
-6. Press **Run import**.
+4. The **Command** section (closed until you open it) shows exactly what
+   will run.
+5. The footer has **Dry run** on the left (tick it to see what would be
+   copied without copying anything) and the one coral **Run import** button
+   on the right.
+
+The window's sections are cards under a heading that tells you what is
+selected; **Browse…** and **Refresh** carry a small icon.
 
 #### Profiles and rules
 
@@ -440,7 +445,7 @@ you add, delete, rename or edit files **outside** the app (in File Explorer,
 in a photo editor, from another program), run a **sync** so the catalog
 catches up:
 
-- In the app: **Advanced** page, choose **sync**, press **Run**.
+- In the app: **Advanced** page, choose **Sync with disk**, press **Run**.
 - From a command prompt: `smart-gallery sync E:\`
 
 Sync is quick: it compares each file's size and modification time with the
@@ -458,7 +463,8 @@ waiting for a face scan.
 The **Stats** page draws charts of the open gallery, using the same filters as
 the Library:
 
-- tiles with totals (total files, images, videos, total size, video length),
+- tiles with totals (**Total files**, **Photos**, **Videos**, **Total size**,
+  **Video length**),
 - **Cameras and Lenses**: which cameras and lenses you use most,
 - **Camera Settings Distribution**: apertures, ISO, shutter speeds, focal lengths,
 - **Photography Timeline**: photos per month,
@@ -492,14 +498,15 @@ alone.
 - Click a folder on the left to show only its pairs. **Select a folder to
   check its pictures**: the app compares the two images of each pair in that
   folder and remembers the result.
-- The footer adds up your choices (*3 chosen · frees 72 MB*).
+- The footer adds up what is selected (*3 selected · frees 72 MB*); pairs
+  you leave unselected are left alone.
 - **Move files to Recycle Bin** moves the files you chose not to keep to the
-  Windows Recycle Bin and removes them from the catalog. **Clear choices**
+  Windows Recycle Bin and removes them from the catalog. **Clear selection**
   starts over.
 
 Nothing is deleted outright. If the drive has no Recycle Bin (for example a
 removable drive), the app refuses before touching anything. A file whose size
-or date changed since you chose is skipped. To undo, restore the files from
+or date changed since you selected it is skipped. To undo, restore the files from
 the Recycle Bin and run a [sync](#8-keeping-the-catalog-up-to-date).
 
 ---
@@ -721,7 +728,8 @@ and the next sync copies the files across.
 ![The Advanced page](images/area-actions.png)
 
 The **Advanced** page (the last tab) offers every Smart Gallery command as a form: pick a
-command on the left, fill in its options, press **Run**. Required fields are
+command on the left (commands have readable names, grouped under Catalog,
+Mirror, Files, Faces and People), fill in its options, press **Run**. Required fields are
 marked with `*`, each option has a short explanation under it, and the line at
 the bottom shows the exact command that will run. **Copy as CLI command**
 copies it so you can run it from a command prompt.
@@ -731,20 +739,21 @@ from here:
 
 | Command | Use it to |
 |---|---|
-| **sync** | Update the catalog after changes made outside the app. |
-| **export** | The same as the Export page ([section 7](#export)), for scripting or the command line. |
-| **report** | Write an Excel workbook listing the files (optionally with charts). |
-| **compare** | Compare two catalogs. |
-| **convert-raw** | Extract the full-size JPEG stored inside Canon RAW files. |
-| **rename** | Rename a gallery. |
+| **Sync with disk** (`sync`) | Update the catalog after changes made outside the app. |
+| **Export** | The same as the Export page ([section 7](#export)), for scripting or the command line. |
+| **Report** | Write an Excel workbook listing the files (optionally with charts). |
+| **Compare catalogs** | Compare two catalogs. |
+| **Convert RAW** | Extract the full-size JPEG stored inside Canon RAW files. |
+| **Rename files** | Rename a gallery. |
 
 ### History
 
 ![The History page](images/area-history.png)
 
 **History** lists every job the app ran, newest first: its title, when it
-started, how long it took, how it ended (*ok*, *failed*, *cancelled*) and a
-one-line summary. Select a job to read the end of its log below. **Run again**
+started, how long it took, how it ended (a coloured status pill: *ok*, *failed*, *cancelled*) and a
+one-line summary. Start times read like *Today 17:01*. Select a job to read
+the end of its log below. **Run again**
 repeats it with the same options. For an import it opens the Library's
 Import window with the same profile instead, since the card's drive letter
 may have changed.
@@ -816,7 +825,7 @@ drive letter is fine.
 
 **I deleted or edited files in File Explorer and the Library still shows the
 old state.**
-Run **sync** from the Advanced page ([section 8](#8-keeping-the-catalog-up-to-date)).
+Run **Sync with disk** from the Advanced page ([section 8](#8-keeping-the-catalog-up-to-date)).
 
 **Thumbnails show a grey picture.**
 They are being made; give it a moment. A file the program cannot read (an

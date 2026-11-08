@@ -141,10 +141,10 @@ def test_command_is_collapsed_until_asked_for(
     assert view.problem.text() == "Choose a destination folder."
     view.dest.setText(str(tmp_path))
     assert not view.problem.isVisible()
-    view.command_toggle.click()
+    view.command.button.click()
     assert view.preview.isVisible()
     assert view.preview.toPlainText().startswith("smart-gallery export")
-    view.command_toggle.click()
+    view.command.button.click()
     assert not view.preview.isVisible()
 
 
@@ -200,3 +200,13 @@ def test_enter_in_a_box_presses_no_button(qtbot, repo, make_item):
     library.export_btn.click()
     buttons = library.export_window.findChildren(QPushButton)
     assert buttons and not any(b.autoDefault() or b.isDefault() for b in buttons)
+
+
+def test_footer_holds_run_and_dry_run(qtbot, repo, make_item, monkeypatch):
+    view, ctx = _view(qtbot, repo, make_item, monkeypatch)
+    assert view.footer.isAncestorOf(view.run_button)
+    assert view.footer.isAncestorOf(view.dry_run)
+    assert view.run_button.width() < view.width() / 2
+    assert view.run_button.x() > view.dry_run.x()
+    assert not hasattr(view, "command_toggle")
+    assert view.command.button.text() == "Command" and not view.command.opened

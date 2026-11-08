@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
+    QGroupBox,
+    QScrollArea,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -28,6 +30,7 @@ from smart_gallery.gui.galleries.store import is_connected
 from smart_gallery.gui.imports.editor import ProfileEditor
 from smart_gallery.gui.imports.model import build_import_job, list_removable_drives
 from smart_gallery.gui.paths import app_data_dir
+from smart_gallery.gui.ui.widgets import ActionBar, Disclosure, SectionHeader
 from smart_gallery.import_profiles import (
     ImportProfile,
     delete_profile,
@@ -36,6 +39,7 @@ from smart_gallery.import_profiles import (
     seed_starter_profiles,
 )
 
+SOURCE_HINT = "Choose a source to import from."
 PICK_AGAIN = (
     "Pick the source and target galleries again — drive letters may have changed."
 )
@@ -66,8 +70,12 @@ class ImportView(QWidget):
         self.dry_run_box = QCheckBox("Dry run (plan only, copy nothing)")
         self.run_button = QPushButton("Run import")
         theme.primary(self.run_button)
-        self.note = QLabel()
-        self.note.setWordWrap(True)
+        self.heading = SectionHeader("Import", SOURCE_HINT)
+        self.footer = ActionBar()
+        self.note = self.footer.note
+        self.footer.add_left(self.dry_run_box)
+        self.footer.add_right(self.run_button)
+        self.command = Disclosure("Command", self.preview)
 
         source_row = QHBoxLayout()
         source_row.addWidget(QLabel("Source"))
@@ -80,16 +88,26 @@ class ImportView(QWidget):
         profile_row.addWidget(self.new_button)
         profile_row.addWidget(self.edit_button)
         profile_row.addWidget(self.delete_button)
+        source_box = QGroupBox("Source")
+        source_layout = QVBoxLayout(source_box)
+        source_layout.addLayout(source_row)
+        source_layout.addLayout(profile_row)
+        into_box = QGroupBox("Import into")
+        into_layout = QVBoxLayout(into_box)
+        into_layout.addWidget(self.gallery_list)
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.addWidget(source_box)
+        body_layout.addWidget(into_box, 1)
+        body_layout.addWidget(self.command)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setWidget(body)
         layout = QVBoxLayout(self)
-        layout.addLayout(source_row)
-        layout.addLayout(profile_row)
-        layout.addWidget(QLabel("Import into"))
-        layout.addWidget(self.gallery_list, 1)
-        layout.addWidget(QLabel("Commands"))
-        layout.addWidget(self.preview, 2)
-        layout.addWidget(self.dry_run_box)
-        layout.addWidget(self.note)
-        layout.addWidget(self.run_button)
+        layout.addWidget(self.heading)
+        layout.addWidget(scroll, 1)
+        layout.addWidget(self.footer)
 
         self.browse_button.clicked.connect(self._browse)
         self.refresh_button.clicked.connect(self.refresh_sources)
@@ -126,7 +144,7 @@ class ImportView(QWidget):
         self._load_profiles_once()
         if name and any(p.name == name for p in self._profiles):
             self.profile_combo.setCurrentText(name)
-        self.note.setText(PICK_AGAIN)
+        self.footer.set_note(PICK_AGAIN)
 
     def _profiles_dir(self):
         return app_data_dir() / "profiles"
@@ -247,7 +265,12 @@ class ImportView(QWidget):
 
     def _update(self) -> None:
         jobs = self.ctx.jobs
-        has_profile = self._profile() is not None
+        profile = self._profile()
+        has_profile = profile is not None
+        source = self.source()
+        self.heading.set_subtitle(
+            f"{profile.name} · {source}" if profile and source else SOURCE_HINT
+        )
         self.edit_button.setEnabled(has_profile)
         self.delete_button.setEnabled(has_profile)
         try:
@@ -268,6 +291,6 @@ class ImportView(QWidget):
         except ValueError as error:
             self.preview.setPlainText(str(error))
             return
-        self.note.clear()
+        self.footer.set_note("")
         if self.ctx.jobs.start(spec) is not False:
             self.ran.emit()

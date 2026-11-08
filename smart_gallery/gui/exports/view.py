@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QDir, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QDir, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QScrollArea,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -48,6 +47,7 @@ from smart_gallery.gui.exports.model import (
 from smart_gallery.gui.galleries.store import is_connected
 from smart_gallery.gui.paths import app_data_dir, exiftool_available
 from smart_gallery.gui.repo_query import RepoQuery
+from smart_gallery.gui.ui.widgets import ActionBar, Disclosure, SectionHeader
 from smart_gallery.gui.state_store import load_json, save_json
 from smart_gallery.storage.tree import format_bytes
 
@@ -87,10 +87,10 @@ class ExportView(QWidget):
         self._summary: ExportSummary | None = None
         self._counter = RepoQuery(ctx, self)
 
-        self.source = QLabel()
-        self.source.setFont(theme.serif_font(theme.HEADER_PT))
-        self.summary = QLabel()
-        self.summary.setWordWrap(True)
+        self.heading = SectionHeader("")
+        self.source = self.heading.title
+        self.summary = self.heading.subtitle
+        self.footer = ActionBar()
 
         self.dest = QLineEdit()
         self.dest.setPlaceholderText("A folder, e.g. on a USB stick")
@@ -122,23 +122,17 @@ class ExportView(QWidget):
         self.manifest = QCheckBox("Write a list of the exported files (CSV)")
         self.portable_db = QCheckBox("Also write a catalog the app can open there")
 
-        self.command_toggle = QToolButton()
-        self.command_toggle.setText(COMMAND)
-        self.command_toggle.setCheckable(True)
-        self.command_toggle.setAutoRaise(True)
-        self.command_toggle.setToolButtonStyle(
-            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
-        )
-        self.command_toggle.setArrowType(Qt.ArrowType.RightArrow)
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
         self.preview.setMaximumHeight(90)
-        self.preview.setVisible(False)
+        self.command = Disclosure(COMMAND, self.preview)
         self.problem = QLabel()  # why Run is off, with the command collapsed
         self.problem.setWordWrap(True)
         self.dry_run = QCheckBox("Dry run (plan only, copy nothing)")
         self.run_button = QPushButton("Run export")
         theme.primary(self.run_button)
+        self.footer.add_left(self.dry_run)
+        self.footer.add_right(self.run_button)
 
         self._build_layout()
         self._load_settings()
@@ -161,7 +155,6 @@ class ExportView(QWidget):
         for combo in (*self.levels, self.on_exist):
             combo.currentIndexChanged.connect(lambda _i: self._update())
         self.run_button.clicked.connect(self._run)
-        self.command_toggle.toggled.connect(self._show_command)
         self._counter.finished.connect(self._set_summary)
         self._counter.failed.connect(lambda _e: self._set_summary(None))
         ctx.gallery_changed.connect(lambda _g: self._recount())
@@ -213,25 +206,21 @@ class ExportView(QWidget):
 
         form = QWidget()
         right = QVBoxLayout(form)
-        right.addWidget(self.source)
-        right.addWidget(self.summary)
         right.addWidget(dest_box)
         right.addWidget(folders)
         right.addWidget(format_box)
         right.addWidget(extras)
-        right.addWidget(self.command_toggle)
-        right.addWidget(self.preview)
-        right.addWidget(self.dry_run)
+        right.addWidget(self.command)
         right.addWidget(self.problem)
-        right.addWidget(self.run_button)
         right.addStretch(1)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(form)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(scroll)
+        layout.addWidget(self.heading)
+        layout.addWidget(scroll, 1)
+        layout.addWidget(self.footer)
 
     # ── settings ────────────────────────────────────────────────────────────
     def settings(self) -> ExportSettings:
@@ -344,11 +333,6 @@ class ExportView(QWidget):
         self.problem.setVisible(False)
         jobs = self.ctx.jobs
         self.run_button.setEnabled(jobs is not None and not jobs.running)
-
-    def _show_command(self, shown: bool) -> None:
-        self.preview.setVisible(shown)
-        arrow = Qt.ArrowType.DownArrow if shown else Qt.ArrowType.RightArrow
-        self.command_toggle.setArrowType(arrow)
 
     def _browse(self) -> None:
         chosen = QFileDialog.getExistingDirectory(

@@ -222,3 +222,29 @@ def test_select_profile_preselects_and_asks_to_pick_again(qtbot, tmp_path):
     view.select_profile("Deleted since")  # unknown: keep the selection
     assert view.profile_combo.currentText() == "Pixel dump"
     assert view.note.text() == PICK_AGAIN
+
+
+def test_footer_holds_run_and_dry_run(qtbot, tmp_path):
+    view, ctx, galleries = _view(qtbot, tmp_path)
+    assert view.footer.isAncestorOf(view.run_button)
+    assert view.footer.isAncestorOf(view.dry_run_box)
+    assert view.run_button.width() < view.width() / 2
+    assert view.run_button.x() > view.dry_run_box.x()
+
+
+def test_heading_sections_and_command_disclosure(qtbot, tmp_path):
+    from PySide6.QtWidgets import QGroupBox
+
+    view, ctx, galleries = _view(qtbot, tmp_path)
+    assert view.heading.title.text() == "Import"
+    assert view.heading.subtitle.text() == "Choose a source to import from."
+    titles = {b.title() for b in view.findChildren(QGroupBox)}
+    assert {"Source", "Import into"} <= titles
+    view.set_source("F:\\")
+    view.profile_combo.setCurrentIndex(0)
+    name = view.profile_combo.currentText()
+    if name:
+        assert view.heading.subtitle.text() == f"{name} · F:\\"
+    assert not view.command.opened and not view.preview.isVisible()
+    view.command.button.click()
+    assert view.preview.isVisible()

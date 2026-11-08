@@ -3,6 +3,11 @@
 It is modeless and kept between openings, so a form keeps what was typed in
 it. Once the form starts its job (its ``ran`` signal) the window closes; the
 job's progress shows in the status bar like any other.
+
+A form lays itself out as ``heading`` (a SectionHeader), a scrolling body and
+``footer`` (an ActionBar with the primary button at its right), so they stay
+put when the body scrolls, here and when the form is used on its own. The
+window only frames the form; it does not rearrange it.
 """
 
 from __future__ import annotations

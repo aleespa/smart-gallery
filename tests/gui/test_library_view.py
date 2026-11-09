@@ -795,3 +795,63 @@ def test_drag_writes_once(qtbot, repo, monkeypatch):
         view.size_slider.slider.setValue(px)
     qtbot.waitUntil(lambda: bool(writes))
     assert writes == [300]
+
+
+def _portrait_model(tmp_path, n):
+    from smart_gallery.gui.library.view import LibraryGridModel
+
+    thumb = tmp_path / "p.jpg"
+    Image.new("RGB", (341, 512), "green").save(thumb)
+    model = LibraryGridModel()
+    model.set_rows([_row(i, f"{i}.jpg", width=2000, height=3000) for i in range(n)])
+    return model, str(thumb)
+
+
+def test_pixmap_cache_never_drops_a_tile_on_screen(qtbot, tmp_path):
+    from smart_gallery.gui.library.view import PIXMAP_CACHE_BYTES
+
+    model, thumb = _portrait_model(tmp_path, 400)
+    model.set_visible_rows(range(320))  # a 4K screen of the smallest tiles
+    assert 320 * 341 * 512 * 4 > PIXMAP_CACHE_BYTES
+    for i in range(320, 400):  # off screen, shown earlier
+        model.set_thumbnail(i, thumb)
+    for i in range(320):
+        model.set_thumbnail(i, thumb)
+    assert not any(model.needs_thumbnail(r) for r in model.rows[:320])
+    # Over the budget, everything off screen went first.
+    assert all(model.needs_thumbnail(r) for r in model.rows[320:])
+
+
+def test_pixmap_cache_keeps_its_budget_for_tiles_off_screen(qtbot, tmp_path):
+    from smart_gallery.gui.library.view import PIXMAP_CACHE_BYTES
+
+    model, thumb = _portrait_model(tmp_path, 400)
+    model.set_visible_rows(range(100))
+    for i in range(100, 400):  # oldest first: 100, 101, ...
+        model.set_thumbnail(i, thumb)
+    for i in range(100):
+        model.set_thumbnail(i, thumb)
+    tile = 341 * 512 * 4
+    assert model._pixmap_bytes <= PIXMAP_CACHE_BYTES
+    assert not any(model.needs_thumbnail(r) for r in model.rows[:100])
+    assert model.needs_thumbnail(model.rows[100])  # the oldest off screen
+    assert not model.needs_thumbnail(model.rows[399])
+    # Scrolled away: the old screen may go, but the budget holds again.
+    model.set_visible_rows([])
+    assert model._pixmap_bytes <= PIXMAP_CACHE_BYTES
+    model.set_visible_rows(range(320))
+    for i in range(320):
+        model.set_thumbnail(i, thumb)
+    assert not any(model.needs_thumbnail(r) for r in model.rows[:320])
+    assert model._pixmap_bytes <= max(PIXMAP_CACHE_BYTES, 320 * tile)
+
+
+def test_library_tells_the_model_which_rows_are_on_screen(qtbot, repo, make_item):
+    repo.upsert_many([make_item(f"a/{i:04}.jpg") for i in range(500)])
+    view, ctx = _view(qtbot, repo.db_path)
+    view.resize(900, 600)
+    view.show()
+    qtbot.waitUntil(lambda: bool(ctx.thumbs.requests))
+    visible = view.grid.visible_rows()
+    keys = {view.grid_model._key(view.grid_model.rows[i]) for i in visible}
+    assert keys and view.grid_model._on_screen == keys

@@ -74,7 +74,8 @@ from smart_gallery.organize.filters import is_query_empty
 
 THUMB_DEBOUNCE_MS = 120
 # Thumbnails kept, by their pixels (512 x 341 is 0.7 MB): enough for a full
-# screen of the smallest tiles and a little scrolling either way.
+# screen of the smallest tiles and a little scrolling either way. Tiles on
+# screen are never dropped, even past it (a 4K screen of portraits needs more).
 PIXMAP_CACHE_BYTES = 200 * 1024 * 1024
 TREE_INDENT = theme.TREE_INDENT
 # (label, sort, descending by default): newest, A to Z, largest first.
@@ -133,7 +134,8 @@ class LibraryGridModel(QAbstractListModel):
     Pixmaps are the thumbnails as loaded (``PhotoTileDelegate`` scales them to
     the tile), keyed by (id, mtime_ns), so a reload keeps the ones whose file
     did not change; the most recently shown are kept, up to
-    ``PIXMAP_CACHE_BYTES``.
+    ``PIXMAP_CACHE_BYTES``. The rows on screen (``set_visible_rows``) are
+    kept whatever the budget, so a big screen never drops a tile it shows.
     """
 
     # Every pixmap was dropped (another catalog): scaled copies are stale too.
@@ -146,6 +148,7 @@ class LibraryGridModel(QAbstractListModel):
         self._pixmaps: OrderedDict[tuple, QPixmap] = OrderedDict()
         self._pixmap_bytes = 0
         self._missing: set[tuple] = set()  # no thumbnail: keep the placeholder
+        self._on_screen: set[tuple] = set()  # keys never dropped from the cache
         self.holders: dict[int, str] = {}  # offloaded row id -> mirror label
 
     @staticmethod
@@ -216,10 +219,30 @@ class LibraryGridModel(QAbstractListModel):
             self._row_of = {r.id: i for i, r in enumerate(self.rows)}
             self.endInsertRows()
 
+    def set_visible_rows(self, rows) -> None:
+        """The rows on screen now: their pixmaps stay cached (loaded or still
+        to come), even past the byte budget; the rest give way first."""
+        n = len(self.rows)
+        self._on_screen = {self._key(self.rows[i]) for i in rows if i < n}
+        self._trim()
+
+    def _trim(self, keep: tuple | None = None) -> None:
+        """Drop the least recently shown pixmaps off screen (never ``keep``,
+        the one just stored) until the cache is within its budget."""
+        if self._pixmap_bytes <= PIXMAP_CACHE_BYTES:
+            return
+        for key in list(self._pixmaps):  # oldest first
+            if self._pixmap_bytes <= PIXMAP_CACHE_BYTES:
+                break
+            if key == keep or key in self._on_screen:
+                continue
+            self._pixmap_bytes -= _pixmap_bytes(self._pixmaps.pop(key))
+
     def forget_thumbnails(self) -> None:
         """Drop every pixmap: ids from another catalog mean other files."""
         self._pixmaps.clear()
         self._pixmap_bytes = 0
+        self._on_screen.clear()
         self.thumbnails_forgotten.emit()
         self._missing.clear()
 
@@ -248,9 +271,7 @@ class LibraryGridModel(QAbstractListModel):
                 self._pixmap_bytes -= _pixmap_bytes(old)
             self._pixmaps[key] = pixmap
             self._pixmap_bytes += _pixmap_bytes(pixmap)
-            while self._pixmap_bytes > PIXMAP_CACHE_BYTES and len(self._pixmaps) > 1:
-                _key, dropped = self._pixmaps.popitem(last=False)
-                self._pixmap_bytes -= _pixmap_bytes(dropped)
+            self._trim(keep=key)
         index = self.index(i)
         self.dataChanged.emit(
             index, index, [Qt.ItemDataRole.DecorationRole, PLACEHOLDER_ROLE]
@@ -629,6 +650,7 @@ class LibraryView(QWidget):
         if thumbs is None or self._root is None or not self.grid.isVisible():
             return
         visible = self.grid.visible_rows()
+        self.grid_model.set_visible_rows(visible)
         if not visible:
             return
         # Rows scrolled past are still queued; drop them so what is on screen

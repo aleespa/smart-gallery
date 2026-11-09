@@ -807,3 +807,49 @@ def test_person_slider_hidden_in_faces_mode_and_resize_requests_thumbs(
     assert page.size_slider.isHidden()
     page.photos_button.click()
     assert not page.size_slider.isHidden()
+
+
+def test_photo_grid_tells_the_model_which_rows_are_on_screen(qtbot, tmp_path):
+    from PySide6.QtCore import QObject, Signal
+
+    from smart_gallery.gui.library.model import LibraryRow
+    from smart_gallery.gui.people.person_view import PhotoGrid
+
+    class Thumbs(QObject):
+        ready = Signal(str, int, str)
+
+        def __init__(self):
+            super().__init__()
+            self.requests = []
+
+        def request(self, root, media_id, *_args):
+            self.requests.append(media_id)
+
+        def cancel_pending(self):
+            pass
+
+    ctx = AppContext()
+    ctx.thumbs = Thumbs()
+    photos = PhotoGrid(ctx)
+    qtbot.addWidget(photos)
+    rows = [
+        LibraryRow(
+            i,
+            f"a/{i}.jpg",
+            media_type="image",
+            ext=".jpg",
+            mtime_ns=1,
+            date_taken="2026-03-01",
+            width=3000,
+            height=2000,
+            orientation=1,
+        )
+        for i in range(300)
+    ]
+    photos.set_rows(tmp_path, rows)
+    photos.resize(900, 600)
+    photos.show()
+    qtbot.waitUntil(lambda: bool(ctx.thumbs.requests))
+    visible = photos.grid.visible_rows()
+    keys = {photos.model._key(photos.model.rows[i]) for i in visible}
+    assert keys and photos.model._on_screen == keys

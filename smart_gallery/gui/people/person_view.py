@@ -151,6 +151,7 @@ class PhotoGrid(QWidget):
         if thumbs is None or self.root is None or not self.grid.isVisible():
             return
         visible = self.grid.visible_rows()
+        self.model.set_visible_rows(visible)
         if not visible:
             return
         thumbs.cancel_pending()

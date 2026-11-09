@@ -7,7 +7,7 @@ import time
 import pytest
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QStandardItem, QStandardItemModel, QWheelEvent
-from PySide6.QtWidgets import QApplication, QFrame
+from PySide6.QtWidgets import QAbstractItemView, QApplication, QFrame
 
 from smart_gallery.gui.library.grid import (
     ASPECT_ROLE,
@@ -144,15 +144,15 @@ def test_ctrl_wheel_changes_row_height(qtbot):
     event = _wheel(grid, 120, Qt.KeyboardModifier.ControlModifier)
     assert event.isAccepted()
     assert grid.row_height() == ROW_HEIGHT_DEFAULT + ROW_HEIGHT_STEP
-    assert bar.value() == 50
     assert _rect(grid, model, 200).height() == ROW_HEIGHT_DEFAULT + ROW_HEIGHT_STEP
     _wheel(grid, -120, Qt.KeyboardModifier.ControlModifier)
     _wheel(grid, -120, Qt.KeyboardModifier.ControlModifier)
     assert grid.row_height() == ROW_HEIGHT_DEFAULT - ROW_HEIGHT_STEP
-    assert bar.value() == 50
+    assert grid.visible_rows()[0] == 0  # still at the first rows
+    before = bar.value()
     _wheel(grid, -120, Qt.KeyboardModifier.NoModifier)  # a plain wheel scrolls
     assert grid.row_height() == ROW_HEIGHT_DEFAULT - ROW_HEIGHT_STEP
-    assert bar.value() > 50
+    assert bar.value() > before
 
 
 def test_collapsed_group_has_no_tiles(qtbot):
@@ -292,3 +292,96 @@ def test_scroll_to_a_tall_tile_keeps_its_top_under_the_band(qtbot):
     assert _rect(grid, model, 20).top() == HEADER_HEIGHT  # just under the band
     grid.scrollTo(model.index(0, 0))
     assert grid.verticalOffset() == 0  # the first row brings its heading
+
+
+# ── keeping the user's place ────────────────────────────────────────────────
+
+
+def _at_top(grid, model, row):
+    grid.scrollTo(model.index(row, 0), QAbstractItemView.ScrollHint.PositionAtTop)
+    assert _rect(grid, model, row).top() == HEADER_HEIGHT  # just under the band
+
+
+def _top_left(grid):
+    """The first tile of the top row under the band."""
+    return grid.indexAt(QPoint(SIDE_PAD + 1, HEADER_HEIGHT + 1)).row()
+
+
+def test_row_height_change_keeps_the_row_at_the_top(qtbot):
+    grid, model = _grid(qtbot, [1.5] * 2000)
+    _at_top(grid, model, 800)
+    for px in (300, ROW_HEIGHT_MIN, ROW_HEIGHT_DEFAULT):
+        first = _top_left(grid)
+        grid.set_row_height(px)
+        assert _rect(grid, model, first).top() == HEADER_HEIGHT
+        assert 800 in grid.visible_rows()
+
+
+def test_row_height_change_scales_the_offset_into_the_top_row(qtbot):
+    grid, model = _grid(qtbot, [1.5] * 2000)
+    _at_top(grid, model, 800)
+    half = _rect(grid, model, 800).height() // 2
+    grid.verticalScrollBar().setValue(grid.verticalOffset() + half)
+    old_height = _rect(grid, model, 800).height()
+    grid.set_row_height(300)
+    rect = _rect(grid, model, 800)
+    hidden = HEADER_HEIGHT - rect.top()  # the part of its row under the band
+    assert abs(hidden - half * rect.height() / old_height) <= 1
+
+
+def test_width_change_keeps_the_row_at_the_top(qtbot):
+    grid, model = _grid(qtbot, [1.5] * 2000)
+    _at_top(grid, model, 800)
+    grid.resize(700, 600)
+    assert _rect(grid, model, 800).top() == HEADER_HEIGHT
+    first = _top_left(grid)
+    grid.resize(1400, 600)
+    qtbot.waitUntil(lambda: not grid._stale)  # laid out by the timer
+    assert _rect(grid, model, first).top() == HEADER_HEIGHT
+    assert 800 in grid.visible_rows()
+
+
+def test_size_change_keeps_the_current_tile_in_view(qtbot):
+    grid, model = _grid(qtbot, [1.5] * 2000)
+    _at_top(grid, model, 800)
+    low = [r for r in grid.visible_rows() if _rect(grid, model, r).top() > 400]
+    current = low[0]
+    grid.setCurrentIndex(model.index(current, 0))
+    grid.set_row_height(ROW_HEIGHT_MAX)
+    rect = _rect(grid, model, current)
+    assert rect.top() >= HEADER_HEIGHT and rect.bottom() < 600
+    grid.resize(600, 600)
+    rect = _rect(grid, model, current)
+    assert rect.top() >= HEADER_HEIGHT and rect.bottom() < 600
+
+
+def test_model_reset_keeps_the_scroll_value(qtbot):
+    grid, model = _grid(qtbot, [1.5] * 2000)
+    grid.visible_rows()  # laid out for the shown width
+    grid.verticalScrollBar().setValue(5000)
+    grid.set_groups([RowGroup(0, 1000, "A"), RowGroup(1000, 1000, "B")])
+    assert grid.verticalOffset() == 5000
+
+
+def test_width_changes_are_laid_out_once(qtbot, monkeypatch):
+    grid, model = _grid(qtbot, [1.5] * 200)
+    calls = []
+    real = grid._relayout
+    monkeypatch.setattr(
+        grid, "_relayout", lambda *a, **k: (calls.append(1), real(*a, **k))
+    )
+    for width in (900, 800, 700):
+        grid.resize(width, 600)
+    assert calls == []  # coalesced: nothing laid out yet
+    qtbot.waitUntil(lambda: calls == [1])
+    qtbot.wait(50)
+    assert calls == [1]
+    last = _rect(grid, model, 3)
+    assert last.x() + last.width() <= 700 - SIDE_PAD
+    # A geometry query does not wait for the timer.
+    grid.resize(1000, 600)
+    last = _rect(grid, model, 3)
+    assert last.x() + last.width() == 1000 - SIDE_PAD
+    assert calls == [1, 1]
+    qtbot.wait(50)
+    assert calls == [1, 1]

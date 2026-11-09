@@ -11,6 +11,12 @@ they only touch the rows in view.
 
 While a group scrolls under the top edge, its heading stays pinned there
 until the next heading pushes it out.
+
+A new width or row height keeps the user's place: the tile at the top of the
+view (or the current tile, while it is in view) stays where it was. Width
+changes are laid out at most once per ``RELAYOUT_DELAY_MS`` (a window drag
+sends many); until then the old tables are painted, and any geometry query
+lays out first, so callers always see the current width.
 """
 
 from __future__ import annotations
@@ -25,6 +31,7 @@ from PySide6.QtCore import (
     QPointF,
     QRect,
     Qt,
+    QTimer,
     Signal,
 )
 from PySide6.QtGui import QCursor, QFont, QPainter, QPalette, QPolygonF, QRegion
@@ -65,6 +72,7 @@ SIDE_PAD = 12  # px between the tiles and the grid's left and right edges
 MIN_LAYOUT_WIDTH = ROW_HEIGHT_MIN
 SCROLL_STEP = 40
 WHEEL_NOTCH = 120  # angleDelta of one wheel click
+RELAYOUT_DELAY_MS = 16  # width changes within this are laid out once
 
 
 def _aspect(value) -> float:
@@ -103,6 +111,14 @@ class GroupedGrid(QAbstractItemView):
         self._widths: list[int] = []
         self._laid_width = -1  # viewport width of the current tables
         self._height = 0
+        # The width changed since the tables were made; they still match the
+        # scroll offset, so the next layout can keep the user's place.
+        self._stale = False
+        self._painting = False
+        self._relayout_timer = QTimer(self)
+        self._relayout_timer.setSingleShot(True)
+        self._relayout_timer.setInterval(RELAYOUT_DELAY_MS)
+        self._relayout_timer.timeout.connect(self._ensure_layout)
         self._wheel_rest = 0  # angleDelta not yet turned into a size step
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setMouseTracking(True)
@@ -120,7 +136,7 @@ class GroupedGrid(QAbstractItemView):
         if px == self._target:
             return
         self._target = px
-        self._relayout()
+        self._relayout(keep_place=True)
         self.row_height_changed.emit(px)
 
     def set_groups(self, groups: list[RowGroup]) -> None:
@@ -130,6 +146,7 @@ class GroupedGrid(QAbstractItemView):
 
     def groups(self) -> list[RowGroup]:
         """The groups as laid out (one unnamed group if none match)."""
+        self._ensure_layout()
         return list(self._layout)
 
     def is_collapsed(self, label: str) -> bool:
@@ -194,7 +211,58 @@ class GroupedGrid(QAbstractItemView):
             ]
         return self._aspects
 
-    def _relayout(self, *_args) -> None:
+    def _ensure_layout(self) -> None:
+        """Lay out now if a width change is waiting (not while painting:
+        a paint shows the old tables until the timer runs)."""
+        if self._stale and not self._painting:
+            self._relayout(keep_place=True)
+
+    def _place(self) -> tuple[int, int, int, int, bool] | None:
+        """Where the user is, from the current tables: (model row, its
+        viewport y, px into its visual row at that y, that row's height,
+        whether it is the current tile).
+
+        The current tile while any of it is below the pinned band, else the
+        first row at the band's lower edge."""
+        if not self._row_tops:
+            return None
+        offset = self.verticalOffset()
+        page_top = offset + self._header
+        current = self.currentIndex()
+        if (
+            current.isValid()
+            and current.row() < len(self._xs)
+            and not self._hidden_row(current.row())
+        ):
+            v = self._visual_row(current.row())
+            top, height = self._row_tops[v], self._row_heights[v]
+            if top + height > page_top and top < offset + self.viewport().height():
+                return current.row(), top - offset, 0, height, True
+        v = max(0, bisect_right(self._row_tops, page_top) - 1)
+        if self._row_tops[v] + self._row_heights[v] <= page_top:
+            v = min(v + 1, len(self._row_tops) - 1)  # in the gap below it
+        top, height = self._row_tops[v], self._row_heights[v]
+        return self._row_starts[v], self._header, page_top - top, height, False
+
+    def _restore(self, place) -> None:
+        """Scroll so ``place``'s row is back at its viewport y (the px into
+        it scaled to the row's new height); the current tile stays in view."""
+        row, view_y, into, old_height, is_current = place
+        if row >= len(self._xs) or self._hidden_row(row):
+            return
+        v = self._visual_row(row)
+        if into > 0:  # inside the row: the same share of it
+            into = round(into * self._row_heights[v] / max(1, old_height))
+        self.verticalScrollBar().setValue(self._row_tops[v] + into - view_y)
+        if is_current:
+            self.scrollTo(self.currentIndex())
+
+    def _relayout(self, *_args, keep_place: bool = False) -> None:
+        """Lay every tile out again; with ``keep_place`` (a new width or row
+        height over the same rows) the tile in view stays in view."""
+        place = self._place() if keep_place else None
+        self._stale = False
+        self._relayout_timer.stop()
         n = self._row_count()
         if sum(g.count for g in self._groups) == n:
             self._layout, self._header = list(self._groups), HEADER_HEIGHT
@@ -234,10 +302,16 @@ class GroupedGrid(QAbstractItemView):
         self._xs, self._widths = xs, widths
         self._height = y
         self.updateGeometries()
+        if place is not None:
+            self._restore(place)
         self.viewport().update()
 
     def _hidden(self, g: RowGroup) -> bool:
         return bool(self._header) and g.label in self._collapsed
+
+    def _hidden_row(self, row: int) -> bool:
+        gi = self._group_of(row)
+        return gi >= 0 and self._hidden(self._layout[gi])
 
     def _group_of(self, row: int) -> int:
         return bisect_right(self._starts, row) - 1
@@ -280,6 +354,7 @@ class GroupedGrid(QAbstractItemView):
     def visible_rows(self) -> list[int]:
         """Rows with a tile at least partly in view, in order. Not a range: a
         collapsed group between two open ones has rows but no tiles."""
+        self._ensure_layout()
         return list(self._rows_in(self._content_viewport()))
 
     def _pinned(self) -> tuple[int, int]:
@@ -306,6 +381,7 @@ class GroupedGrid(QAbstractItemView):
 
     def heading_at(self, point: QPoint) -> int:
         """Index of the group whose heading is at viewport ``point``, or -1."""
+        self._ensure_layout()
         if not self._header:
             return -1
         pinned = self._in_pinned(point)
@@ -328,9 +404,13 @@ class GroupedGrid(QAbstractItemView):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if self.viewport().width() == self._laid_width:
+            self._stale = False  # back to the width it was laid out for
+            self._relayout_timer.stop()
             self.updateGeometries()  # only taller or shorter: same rows
         else:
-            self._relayout()
+            self._stale = True
+            if not self._relayout_timer.isActive():
+                self._relayout_timer.start()
 
     def wheelEvent(self, event) -> None:
         """Ctrl + wheel changes the row height (up: bigger) instead of
@@ -359,6 +439,7 @@ class GroupedGrid(QAbstractItemView):
 
     # ── QAbstractItemView ───────────────────────────────────────────────────
     def visualRect(self, index: QModelIndex) -> QRect:
+        self._ensure_layout()
         if not index.isValid() or index.row() >= self._row_count():
             return QRect()
         rect = self._cell_rect(index.row())
@@ -367,6 +448,7 @@ class GroupedGrid(QAbstractItemView):
         return rect.translated(0, -self.verticalOffset())
 
     def indexAt(self, point: QPoint) -> QModelIndex:
+        self._ensure_layout()
         model = self.model()
         if model is None or self._in_pinned(point) >= 0:
             return QModelIndex()  # the pinned heading covers the tiles
@@ -383,6 +465,7 @@ class GroupedGrid(QAbstractItemView):
     def scrollTo(
         self, index: QModelIndex, hint=QAbstractItemView.ScrollHint.EnsureVisible
     ) -> None:
+        self._ensure_layout()
         if not index.isValid() or self.isIndexHidden(index):
             return
         rect = self._cell_rect(index.row())
@@ -412,10 +495,11 @@ class GroupedGrid(QAbstractItemView):
         return self.verticalScrollBar().value()
 
     def isIndexHidden(self, index: QModelIndex) -> bool:
-        gi = self._group_of(index.row()) if index.isValid() else -1
-        return gi >= 0 and self._hidden(self._layout[gi])
+        self._ensure_layout()
+        return index.isValid() and self._hidden_row(index.row())
 
     def moveCursor(self, action, modifiers) -> QModelIndex:
+        self._ensure_layout()
         if not self._row_tops:  # no rows, or every group collapsed
             return QModelIndex()
         first, last = self._row_starts[0], self._row_ends[-1] - 1
@@ -499,6 +583,7 @@ class GroupedGrid(QAbstractItemView):
         model = self.model()
         if model is None:
             return
+        self._ensure_layout()
         content = rect.normalized().translated(0, self.verticalOffset())
         chosen = QItemSelection()
         for row in self._rows_in(content):
@@ -551,14 +636,20 @@ class GroupedGrid(QAbstractItemView):
 
     # ── painting ────────────────────────────────────────────────────────────
     def paintEvent(self, event) -> None:
-        painter = QPainter(self.viewport())
-        offset = self.verticalOffset()
-        exposed = event.rect().translated(0, offset)
-        model = self.model()
-        if model is not None:
-            self._paint_tiles(painter, exposed, model)
-        if self._header:
-            self._paint_headings(painter, exposed, offset)
+        # A width change still waiting is painted with the old tables: laying
+        # out here would undo the coalescing (every resize step is painted).
+        self._painting = True
+        try:
+            painter = QPainter(self.viewport())
+            offset = self.verticalOffset()
+            exposed = event.rect().translated(0, offset)
+            model = self.model()
+            if model is not None:
+                self._paint_tiles(painter, exposed, model)
+            if self._header:
+                self._paint_headings(painter, exposed, offset)
+        finally:
+            self._painting = False
 
     def _paint_tiles(self, painter: QPainter, exposed: QRect, model) -> None:
         option = QStyleOptionViewItem()

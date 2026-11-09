@@ -31,7 +31,6 @@ from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.library.grid import GroupedGrid
 from smart_gallery.gui.library.model import LibraryQuery, group_rows, library_rows
 from smart_gallery.gui.library.view import (
-    GRID_SIZE,
     ICON_EDGE,
     THUMB_DEBOUNCE_MS,
     LibraryGridModel,
@@ -109,7 +108,6 @@ class PhotoGrid(QWidget):
         self.viewer: MediaViewer | None = None
         self.grid = GroupedGrid()
         self.grid.setIconSize(QSize(ICON_EDGE, ICON_EDGE))
-        self.grid.setGridSize(GRID_SIZE)
         self.grid.setTextElideMode(Qt.TextElideMode.ElideMiddle)
         self.model = LibraryGridModel(self)
         self.grid.setModel(self.model)

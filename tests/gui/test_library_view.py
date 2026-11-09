@@ -283,7 +283,7 @@ def test_grid_groups_follow_the_sort(qtbot, repo, make_item):
 
 
 def test_grid_headings_take_space_and_are_not_tiles(qtbot, repo, make_item):
-    from smart_gallery.gui.library.grid import HEADER_HEIGHT
+    from smart_gallery.gui.library.grid import HEADER_HEIGHT, SIDE_PAD
 
     repo.upsert_many(
         [
@@ -298,7 +298,8 @@ def test_grid_headings_take_space_and_are_not_tiles(qtbot, repo, make_item):
     grid = view.grid
     first = grid.visualRect(view.grid_model.index(0))
     second = grid.visualRect(view.grid_model.index(1))
-    assert first.top() >= HEADER_HEIGHT
+    assert first.top() == HEADER_HEIGHT
+    assert first.x() == second.x() == SIDE_PAD
     assert second.top() >= first.bottom() + HEADER_HEIGHT  # own heading between
     assert not grid.indexAt(first.topLeft() - QPoint(0, HEADER_HEIGHT)).isValid()
     assert grid.indexAt(first.center()).row() == 0
@@ -307,7 +308,7 @@ def test_grid_headings_take_space_and_are_not_tiles(qtbot, repo, make_item):
 
 
 def test_clicking_a_heading_collapses_its_group(qtbot, repo, make_item):
-    from smart_gallery.gui.library.grid import HEADER_HEIGHT
+    from smart_gallery.gui.library.grid import HEADER_HEIGHT, SIDE_PAD
 
     repo.upsert_many(
         [
@@ -330,6 +331,8 @@ def test_clicking_a_heading_collapses_its_group(qtbot, repo, make_item):
     assert grid.visualRect(model.index(0)).isNull()
     # February's heading moves up under March's, and its tile follows it.
     assert grid.heading_at(QPoint(20, HEADER_HEIGHT + 5)) == 1
+    assert grid.visualRect(model.index(2)).top() == 2 * HEADER_HEIGHT
+    assert grid.visualRect(model.index(2)).x() == SIDE_PAD
     assert grid.visible_rows() == [2]
     assert grid.indexAt(grid.visualRect(model.index(2)).center()).row() == 2
 

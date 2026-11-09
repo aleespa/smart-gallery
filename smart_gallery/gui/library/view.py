@@ -363,7 +363,6 @@ class LibraryView(QWidget):
 
         self.grid = GroupedGrid()
         self.grid.setIconSize(QSize(ICON_EDGE, ICON_EDGE))
-        self.grid.setGridSize(GRID_SIZE)
         self.grid.setTextElideMode(Qt.TextElideMode.ElideMiddle)
         self.grid_model = LibraryGridModel(self)
         self.grid.setModel(self.grid_model)

@@ -1,15 +1,22 @@
-"""Icon grid that shows a heading line above each group of rows; clicking a
-heading collapses or expands its group.
+"""Photo grid that lays its tiles out in justified rows, with a heading line
+above each group of rows; clicking a heading collapses or expands its group.
 
-``QListView`` cannot break its icon flow for a full-width heading, so this
-view lays the tiles out itself. Every tile is the same size, so the layout
-is arithmetic: a group's top plus its row and column, and painting, hit
-testing and selection only touch the rows in view.
+``QListView`` cannot break its flow for a full-width heading or give each
+tile its own width, so this view lays the tiles out itself. Each open group
+is cut into rows by ``justify`` (the tiles of a row share one height and a
+full row spans the width), and the result is kept in flat tables: each
+visual row's top, height and first and last model rows, and each tile's x
+and width. Painting, hit testing and selection look rows up by bisect, so
+they only touch the rows in view.
+
+While a group scrolls under the top edge, its heading stays pinned there
+until the next heading pushes it out.
 """
 
 from __future__ import annotations
 
-from bisect import bisect_right
+import math
+from bisect import bisect_left, bisect_right
 
 from PySide6.QtCore import (
     QItemSelection,
@@ -17,7 +24,6 @@ from PySide6.QtCore import (
     QPoint,
     QPointF,
     QRect,
-    QSize,
     Qt,
     Signal,
 )
@@ -31,33 +37,71 @@ from PySide6.QtWidgets import (
 )
 
 from smart_gallery.gui import theme
+from smart_gallery.gui.library.justify import (
+    GAP,
+    MAX_ASPECT,
+    MIN_ASPECT,
+    ROW_HEIGHT_DEFAULT,
+    ROW_HEIGHT_MAX,
+    ROW_HEIGHT_MIN,
+    ROW_HEIGHT_STEP,
+    justify,
+)
 from smart_gallery.gui.library.model import RowGroup
 
+# Width / height of an index's tile; the grid reads it, the model provides it.
+ASPECT_ROLE = Qt.ItemDataRole.UserRole + 20
+FALLBACK_ASPECT = 1.5  # an index without a usable aspect: a 3:2 photo
 HEADER_HEIGHT = 40
 HEADER_PT = theme.HEADER_PT
 HEADER_PAD = 6  # px left of the chevron
 CHEVRON = 10  # px across the collapse chevron
 CHEVRON_GAP = 8  # px between the chevron and the heading text
-TILE_INSET = 3  # px between a tile's selection box and its grid cell
+SIDE_PAD = 12  # px between the tiles and the grid's left and right edges
+# Rows are never laid out narrower than this, so a tiny viewport cannot
+# squeeze tiles down to nothing (they run off its right edge instead).
+MIN_LAYOUT_WIDTH = ROW_HEIGHT_MIN
 SCROLL_STEP = 40
+WHEEL_NOTCH = 120  # angleDelta of one wheel click
+
+
+def _aspect(value) -> float:
+    try:
+        aspect = float(value)
+    except (TypeError, ValueError):
+        return FALLBACK_ASPECT
+    if not math.isfinite(aspect) or aspect <= 0:
+        return FALLBACK_ASPECT
+    return min(MAX_ASPECT, max(MIN_ASPECT, aspect))
 
 
 class GroupedGrid(QAbstractItemView):
     # A group was collapsed or expanded, so other tiles may now be in view.
     groups_toggled = Signal()
+    row_height_changed = Signal(int)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        self._cell = QSize(100, 100)
+        self._target = ROW_HEIGHT_DEFAULT  # row height asked for
         self._groups: list[RowGroup] = []
         # Collapsed headings by label, so they stay collapsed across reloads.
         self._collapsed: set[str] = set()
         self._layout: list[RowGroup] = []  # groups that match the model
-        self._starts: list[int] = []
+        self._starts: list[int] = []  # first model row of each group
         self._tops: list[int] = []  # content y of each group's heading
         self._header = HEADER_HEIGHT
-        self._cols = 1
+        self._aspects: list[float] | None = None  # per model row, read once
+        # One entry per visual row (open groups only), in order:
+        self._row_tops: list[int] = []
+        self._row_heights: list[int] = []
+        self._row_starts: list[int] = []  # first model row in it
+        self._row_ends: list[int] = []  # one past its last model row
+        # One entry per model row (zero while its group is collapsed):
+        self._xs: list[int] = []
+        self._widths: list[int] = []
+        self._laid_width = -1  # viewport width of the current tables
         self._height = 0
+        self._wheel_rest = 0  # angleDelta not yet turned into a size step
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setMouseTracking(True)
         self.viewport().setAttribute(Qt.WidgetAttribute.WA_Hover)
@@ -65,12 +109,17 @@ class GroupedGrid(QAbstractItemView):
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
 
     # ── configuration ───────────────────────────────────────────────────────
-    def setGridSize(self, size: QSize) -> None:
-        self._cell = QSize(size)
-        self._relayout()
+    def row_height(self) -> int:
+        return self._target
 
-    def gridSize(self) -> QSize:
-        return QSize(self._cell)
+    def set_row_height(self, px: int) -> None:
+        """The height rows aim for; full rows end up a little lower."""
+        px = min(ROW_HEIGHT_MAX, max(ROW_HEIGHT_MIN, int(px)))
+        if px == self._target:
+            return
+        self._target = px
+        self._relayout()
+        self.row_height_changed.emit(px)
 
     def set_groups(self, groups: list[RowGroup]) -> None:
         """Headings for the model's rows; ignored until they cover them all."""
@@ -107,12 +156,12 @@ class GroupedGrid(QAbstractItemView):
         old = self.model()
         if old is not None:
             for signal in self._layout_signals(old):
-                signal.disconnect(self._relayout)
+                signal.disconnect(self._model_changed)
         super().setModel(model)
         if model is not None:
             for signal in self._layout_signals(model):
-                signal.connect(self._relayout)
-        self._relayout()
+                signal.connect(self._model_changed)
+        self._model_changed()
 
     @staticmethod
     def _layout_signals(model):
@@ -128,6 +177,21 @@ class GroupedGrid(QAbstractItemView):
         model = self.model()
         return 0 if model is None else model.rowCount(self.rootIndex())
 
+    def _model_changed(self, *_args) -> None:
+        self._aspects = None
+        self._relayout()
+
+    def _read_aspects(self, n: int) -> list[float]:
+        """Each row's aspect. Read only when the rows change: a resize or a
+        new row height lays out the same shapes again."""
+        if self._aspects is None or len(self._aspects) != n:
+            model, root = self.model(), self.rootIndex()
+            self._aspects = [
+                _aspect(model.data(model.index(r, 0, root), ASPECT_ROLE))
+                for r in range(n)
+            ]
+        return self._aspects
+
     def _relayout(self, *_args) -> None:
         n = self._row_count()
         if sum(g.count for g in self._groups) == n:
@@ -135,62 +199,78 @@ class GroupedGrid(QAbstractItemView):
         else:  # stale or no headings: one block without a heading
             self._layout = [RowGroup(0, n, "")] if n else []
             self._header = 0
-        self._cols = max(1, self.viewport().width() // max(1, self._cell.width()))
+        aspects = self._read_aspects(n)
+        self._laid_width = self.viewport().width()
+        width = max(MIN_LAYOUT_WIDTH, self._laid_width - 2 * SIDE_PAD)
         self._starts, self._tops = [], []
+        row_tops, row_heights, row_starts, row_ends = [], [], [], []
+        xs, widths = [0] * n, [0] * n
         y = 0
         for g in self._layout:
             self._starts.append(g.start)
             self._tops.append(y)
-            y += self._header + self._shown_rows(g) * self._cell.height()
+            y += self._header
+            if self._hidden(g):
+                continue
+            for row in justify(
+                aspects[g.start : g.start + g.count], width, self._target
+            ):
+                first = g.start + row.start
+                x = SIDE_PAD
+                for i, w in enumerate(row.widths, first):
+                    w = max(1, w)
+                    xs[i] = x
+                    widths[i] = w
+                    x += w + GAP
+                row_tops.append(y)
+                row_heights.append(row.height)
+                row_starts.append(first)
+                row_ends.append(first + len(row.widths))
+                y += row.height + GAP
+        self._row_tops, self._row_heights = row_tops, row_heights
+        self._row_starts, self._row_ends = row_starts, row_ends
+        self._xs, self._widths = xs, widths
         self._height = y
         self.updateGeometries()
         self.viewport().update()
 
-    def _group_rows(self, g: RowGroup) -> int:
-        return -(-g.count // self._cols)
-
     def _hidden(self, g: RowGroup) -> bool:
         return bool(self._header) and g.label in self._collapsed
-
-    def _shown_rows(self, g: RowGroup) -> int:
-        """Tile rows the group takes up: none while collapsed."""
-        return 0 if self._hidden(g) else self._group_rows(g)
 
     def _group_of(self, row: int) -> int:
         return bisect_right(self._starts, row) - 1
 
+    def _visual_row(self, row: int) -> int:
+        """The visual row holding model ``row`` (which must be shown)."""
+        return bisect_right(self._row_starts, row) - 1
+
     def _cell_rect(self, row: int) -> QRect:
-        """Content-space grid cell of ``row`` (not scrolled); null if hidden."""
+        """Content-space tile of ``row`` (not scrolled); null if hidden."""
         gi = self._group_of(row)
-        if gi < 0:
+        if gi < 0 or row >= len(self._xs) or self._hidden(self._layout[gi]):
             return QRect()
-        g = self._layout[gi]
-        if self._hidden(g):
-            return QRect()
-        r, c = divmod(row - g.start, self._cols)
-        w, h = self._cell.width(), self._cell.height()
-        return QRect(c * w, self._tops[gi] + self._header + r * h, w, h)
+        v = self._visual_row(row)
+        return QRect(
+            self._xs[row], self._row_tops[v], self._widths[row], self._row_heights[v]
+        )
 
     def _rows_in(self, rect: QRect):
-        """Rows whose cells intersect ``rect`` (content space), in order."""
-        h, w = self._cell.height(), self._cell.width()
-        first_col = max(0, rect.left() // w)
-        last_col = min(self._cols - 1, rect.right() // w)
-        if last_col < first_col:
-            return
-        gi = max(0, bisect_right(self._tops, rect.top()) - 1)
-        for gi in range(gi, len(self._layout)):
-            top = self._tops[gi] + self._header
-            if self._tops[gi] > rect.bottom():
+        """Rows whose tiles intersect ``rect`` (content space), in order."""
+        top, bottom = rect.top(), rect.bottom()
+        left, right = rect.left(), rect.right()
+        first = max(0, bisect_right(self._row_tops, top) - 1)
+        for v in range(first, len(self._row_tops)):
+            row_top = self._row_tops[v]
+            if row_top > bottom:
                 break
-            g = self._layout[gi]
-            first_row = max(0, (rect.top() - top) // h)
-            last_row = min(self._shown_rows(g) - 1, (rect.bottom() - top) // h)
-            for r in range(first_row, last_row + 1):
-                for c in range(first_col, last_col + 1):
-                    i = r * self._cols + c
-                    if i < g.count:
-                        yield g.start + i
+            if row_top + self._row_heights[v] <= top:
+                continue  # the row above the rect's top edge
+            for row in range(self._row_starts[v], self._row_ends[v]):
+                x = self._xs[row]
+                if x > right:
+                    break
+                if x + self._widths[row] > left:
+                    yield row
 
     def _content_viewport(self) -> QRect:
         return self.viewport().rect().translated(0, self.verticalOffset())
@@ -200,10 +280,35 @@ class GroupedGrid(QAbstractItemView):
         collapsed group between two open ones has rows but no tiles."""
         return list(self._rows_in(self._content_viewport()))
 
+    def _pinned(self) -> tuple[int, int]:
+        """The group whose heading is pinned at the top and the heading's
+        viewport y (0, or less while the next heading pushes it up); -1 when
+        no heading has scrolled under the top edge."""
+        if not self._header:
+            return -1, 0
+        offset = self.verticalOffset()
+        gi = bisect_right(self._tops, offset) - 1
+        if gi < 0 or self._tops[gi] >= offset:
+            return -1, 0
+        y = 0
+        if gi + 1 < len(self._tops):
+            y = min(0, self._tops[gi + 1] - offset - self._header)
+        return gi, y
+
+    def _in_pinned(self, point: QPoint) -> int:
+        """The pinned group if viewport ``point`` is on its heading, else -1."""
+        gi, top = self._pinned()
+        if gi >= 0 and top <= point.y() < top + self._header:
+            return gi
+        return -1
+
     def heading_at(self, point: QPoint) -> int:
         """Index of the group whose heading is at viewport ``point``, or -1."""
         if not self._header:
             return -1
+        pinned = self._in_pinned(point)
+        if pinned >= 0:
+            return pinned
         y = point.y() + self.verticalOffset()
         gi = bisect_right(self._tops, y) - 1
         if gi < 0 or y >= self._tops[gi] + self._header:
@@ -220,7 +325,35 @@ class GroupedGrid(QAbstractItemView):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._relayout()
+        if self.viewport().width() == self._laid_width:
+            self.updateGeometries()  # only taller or shorter: same rows
+        else:
+            self._relayout()
+
+    def wheelEvent(self, event) -> None:
+        """Ctrl + wheel changes the row height (up: bigger) instead of
+        scrolling; small touchpad deltas add up to one step per notch."""
+        if not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self._wheel_rest = 0
+            super().wheelEvent(event)
+            return
+        dy = event.angleDelta().y()
+        if dy and (dy > 0) != (self._wheel_rest > 0):
+            self._wheel_rest = 0  # turned the other way
+        self._wheel_rest += dy
+        steps = int(self._wheel_rest / WHEEL_NOTCH)
+        if steps:
+            self._wheel_rest -= steps * WHEEL_NOTCH
+            self.set_row_height(self._target + steps * ROW_HEIGHT_STEP)
+        event.accept()
+
+    def scrollContentsBy(self, dx: int, dy: int) -> None:
+        super().scrollContentsBy(dx, dy)
+        if self._header:
+            # The scroll moved the pinned heading's pixels with the tiles;
+            # repaint the strip it was in and the one it is in now.
+            band = QRect(0, 0, self.viewport().width(), self._header + abs(dy))
+            self.viewport().update(band)
 
     # ── QAbstractItemView ───────────────────────────────────────────────────
     def visualRect(self, index: QModelIndex) -> QRect:
@@ -229,24 +362,21 @@ class GroupedGrid(QAbstractItemView):
         rect = self._cell_rect(index.row())
         if rect.isNull():
             return QRect()
-        return rect.translated(0, -self.verticalOffset()).adjusted(
-            TILE_INSET, TILE_INSET, -TILE_INSET, -TILE_INSET
-        )
+        return rect.translated(0, -self.verticalOffset())
 
     def indexAt(self, point: QPoint) -> QModelIndex:
+        model = self.model()
+        if model is None or self._in_pinned(point) >= 0:
+            return QModelIndex()  # the pinned heading covers the tiles
         x, y = point.x(), point.y() + self.verticalOffset()
-        w, h = self._cell.width(), self._cell.height()
-        gi = bisect_right(self._tops, y) - 1
-        if gi < 0 or x < 0 or x // w >= self._cols:
+        v = bisect_right(self._row_tops, y) - 1
+        if v < 0 or y >= self._row_tops[v] + self._row_heights[v]:
             return QModelIndex()
-        g = self._layout[gi]
-        local = y - self._tops[gi] - self._header
-        if local < 0:  # on the heading
-            return QModelIndex()
-        i = (local // h) * self._cols + x // w
-        if i >= g.count or self._hidden(g):
-            return QModelIndex()
-        return self.model().index(g.start + i, 0, self.rootIndex())
+        lo, hi = self._row_starts[v], self._row_ends[v]
+        row = bisect_right(self._xs, x, lo, hi) - 1
+        if row < lo or x >= self._xs[row] + self._widths[row]:
+            return QModelIndex()  # side padding or a gap
+        return model.index(row, 0, self.rootIndex())
 
     def scrollTo(
         self, index: QModelIndex, hint=QAbstractItemView.ScrollHint.EnsureVisible
@@ -254,12 +384,13 @@ class GroupedGrid(QAbstractItemView):
         if not index.isValid() or self.isIndexHidden(index):
             return
         rect = self._cell_rect(index.row())
+        if rect.isNull():
+            return
         bar = self.verticalScrollBar()
         page = self.viewport().height()
-        top = rect.top()
-        g = self._layout[self._group_of(index.row())]
-        if index.row() - g.start < self._cols:
-            top -= self._header  # bring the first row's heading along
+        # Clear of the pinned heading; on a group's first row, that is the
+        # group's own heading coming along.
+        top = rect.top() - self._header
         if hint == QAbstractItemView.ScrollHint.PositionAtTop:
             bar.setValue(top)
         elif hint == QAbstractItemView.ScrollHint.PositionAtBottom:
@@ -282,11 +413,9 @@ class GroupedGrid(QAbstractItemView):
         return gi >= 0 and self._hidden(self._layout[gi])
 
     def moveCursor(self, action, modifiers) -> QModelIndex:
-        open_groups = [g for g in self._layout if not self._hidden(g)]
-        if not open_groups:
+        if not self._row_tops:  # no rows, or every group collapsed
             return QModelIndex()
-        first = open_groups[0].start
-        last = open_groups[-1].start + open_groups[-1].count - 1
+        first, last = self._row_starts[0], self._row_ends[-1] - 1
         current = self.currentIndex()
         row = current.row()
         A = QAbstractItemView.CursorAction
@@ -297,14 +426,13 @@ class GroupedGrid(QAbstractItemView):
         elif action in (A.MoveRight, A.MoveNext):
             target = self._step(row, 1)
         elif action == A.MoveUp:
-            target = self._row_above(row)
+            target = self._row_step(row, -1)
         elif action == A.MoveDown:
-            target = self._row_below(row)
-        elif action in (A.MovePageUp, A.MovePageDown):
-            step = self._row_above if action == A.MovePageUp else self._row_below
-            target = row
-            for _ in range(max(1, self.viewport().height() // self._cell.height())):
-                target = step(target)
+            target = self._row_step(row, 1)
+        elif action == A.MovePageUp:
+            target = self._page_step(row, -1)
+        elif action == A.MovePageDown:
+            target = self._page_step(row, 1)
         elif action == A.MoveHome:
             target = first
         elif action == A.MoveEnd:
@@ -334,30 +462,35 @@ class GroupedGrid(QAbstractItemView):
         o = self._layout[other]
         return o.start if direction > 0 else o.start + o.count - 1
 
-    def _row_above(self, row: int) -> int:
-        gi = self._group_of(row)
-        g = self._layout[gi]
-        r, c = divmod(row - g.start, self._cols)
-        if r > 0:
-            return row - self._cols
-        other = self._open_neighbour(gi, -1)
-        if other < 0:
-            return row
-        prev = self._layout[other]
-        last_row_start = (prev.count - 1) // self._cols * self._cols
-        return prev.start + min(last_row_start + c, prev.count - 1)
+    def _nearest(self, v: int, centre: float) -> int:
+        """The tile in visual row ``v`` whose centre is nearest ``centre``."""
+        return min(
+            range(self._row_starts[v], self._row_ends[v]),
+            key=lambda r: abs(self._xs[r] + self._widths[r] / 2 - centre),
+        )
 
-    def _row_below(self, row: int) -> int:
-        gi = self._group_of(row)
-        g = self._layout[gi]
-        r, c = divmod(row - g.start, self._cols)
-        if r + 1 < self._group_rows(g):
-            return g.start + min(row - g.start + self._cols, g.count - 1)
-        other = self._open_neighbour(gi, 1)
-        if other < 0:
+    def _centre(self, row: int) -> float:
+        return self._xs[row] + self._widths[row] / 2
+
+    def _row_step(self, row: int, direction: int) -> int:
+        """The tile below (1) or above (-1) ``row``, across groups."""
+        v = self._visual_row(row) + direction
+        if not 0 <= v < len(self._row_tops):
             return row
-        nxt = self._layout[other]
-        return nxt.start + min(c, nxt.count - 1)
+        return self._nearest(v, self._centre(row))
+
+    def _page_step(self, row: int, direction: int) -> int:
+        """The tile about one viewport height below (1) or above (-1)."""
+        v = self._visual_row(row)
+        page = max(1, self.viewport().height())
+        last = len(self._row_tops) - 1
+        if direction > 0:
+            target = bisect_right(self._row_tops, self._row_tops[v] + page) - 1
+            target = min(last, max(v + 1, target))
+        else:
+            target = bisect_left(self._row_tops, self._row_tops[v] - page)
+            target = max(0, min(v - 1, target))
+        return self._nearest(target, self._centre(row))
 
     def setSelection(self, rect: QRect, flags) -> None:
         model = self.model()
@@ -413,11 +546,13 @@ class GroupedGrid(QAbstractItemView):
         painter = QPainter(self.viewport())
         offset = self.verticalOffset()
         exposed = event.rect().translated(0, offset)
+        model = self.model()
+        if model is not None:
+            self._paint_tiles(painter, exposed, model)
         if self._header:
             self._paint_headings(painter, exposed, offset)
-        model = self.model()
-        if model is None:
-            return
+
+    def _paint_tiles(self, painter: QPainter, exposed: QRect, model) -> None:
         option = QStyleOptionViewItem()
         self.initViewItemOption(option)
         option.decorationPosition = QStyleOptionViewItem.Position.Top
@@ -451,30 +586,41 @@ class GroupedGrid(QAbstractItemView):
             delegate.paint(painter, option, index)
 
     def _paint_headings(self, painter: QPainter, exposed: QRect, offset: int) -> None:
-        width = self.viewport().width()
-        title_font = theme.serif_font(HEADER_PT)
-        count_font = QFont(self.font())
-        text = self.palette().color(QPalette.ColorRole.Text)
-        muted = self.palette().color(QPalette.ColorRole.PlaceholderText)
-        align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        left = HEADER_PAD + CHEVRON + CHEVRON_GAP
-        for gi, g in enumerate(self._layout):
+        for gi in range(len(self._layout)):
             top = self._tops[gi]
             if top > exposed.bottom():
                 break
             if top + self._header < exposed.top():
                 continue
-            y = top - offset
-            self._paint_chevron(painter, y, self._hidden(g), muted)
-            box = QRect(left, y, width - left - HEADER_PAD, self._header)
-            painter.setFont(title_font)
-            painter.setPen(text)
-            used = painter.boundingRect(box, align, g.label)
-            painter.drawText(box, align, g.label)
-            painter.setFont(count_font)
-            painter.setPen(muted)
-            count = box.adjusted(used.width() + 10, 0, 0, 0)
-            painter.drawText(count, align, f"{g.count:,}")
+            self._paint_heading(painter, gi, top - offset)
+        # The heading of the group under the top edge, over its tiles.
+        gi, y = self._pinned()
+        if gi >= 0 and y + self._header > exposed.top() - offset:
+            viewport = self.viewport()
+            band = QRect(0, y, viewport.width(), self._header)
+            # The grid's own background, so the band reads as the page.
+            back = viewport.palette().color(viewport.backgroundRole())
+            painter.fillRect(band, back)
+            self._paint_heading(painter, gi, y)
+
+    def _paint_heading(self, painter: QPainter, gi: int, y: int) -> None:
+        """Group ``gi``'s chevron, title and count with the top at viewport y."""
+        g = self._layout[gi]
+        width = self.viewport().width()
+        text = self.palette().color(QPalette.ColorRole.Text)
+        muted = self.palette().color(QPalette.ColorRole.PlaceholderText)
+        align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        left = HEADER_PAD + CHEVRON + CHEVRON_GAP
+        self._paint_chevron(painter, y, self._hidden(g), muted)
+        box = QRect(left, y, width - left - HEADER_PAD, self._header)
+        painter.setFont(theme.serif_font(HEADER_PT))
+        painter.setPen(text)
+        used = painter.boundingRect(box, align, g.label)
+        painter.drawText(box, align, g.label)
+        painter.setFont(QFont(self.font()))
+        painter.setPen(muted)
+        count = box.adjusted(used.width() + 10, 0, 0, 0)
+        painter.drawText(count, align, f"{g.count:,}")
 
     def _paint_chevron(self, painter: QPainter, y: int, collapsed: bool, color):
         """A small triangle: pointing right when collapsed, down when open."""

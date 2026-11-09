@@ -250,10 +250,14 @@ subfolders; untick it to see only the files directly in that folder.
 
 Photos fill each row edge to edge, like a photo album: portrait shots are
 narrow tiles and landscape shots are wide ones, all the same height. Tiles
-show no file names. Hover a tile to see a tick box for selecting it; the
-viewer shows the details. Videos carry a small video badge, and freed-up
-files a freed-up badge. Thumbnails are made in the background the first time
-you see them and kept, so scrolling is fast afterwards. Tiles are grouped under headings that follow the sort order:
+show no file names. Hover a tile and it brightens slightly. Click a tile to
+select it; the selected one shows a ring and a tick. The viewer shows the
+details. Videos show a play sign with the video's length at top right, and
+freed-up files an *On <drive>* label at bottom left.
+Thumbnails are made in the background the first time you see them and kept,
+so scrolling is fast afterwards.
+
+Tiles are grouped under headings that follow the sort order:
 by month for *Date taken*, by folder for *Name*, by size band for *Size*.
 Click a heading's triangle to fold a group; right-click a heading for
 **Collapse all** and **Expand all**. The heading of the group you are in stays
@@ -332,7 +336,7 @@ the Library also shapes the charts.
 
 ### Greyed-out items
 
-Faded tiles with grey names are photos whose file is **not on this drive**
+Faded tiles with an *On <drive>* label at bottom left are photos whose file is **not on this drive**
 any more: they were moved to a mirror drive to free up space
 ([section 12](#12-two-drives-a-working-copy-and-a-mirror)). They stay in the
 catalog, with their faces and information, so you can still find and count

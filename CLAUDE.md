@@ -83,7 +83,7 @@ drift apart:
   and video Rotation 0/90/180/270 maps to 1/6/3/8
   (`models.orientation_from_exif`). `models.display_size` swaps width and
   height for 5-8, and the grid sizes tiles from it. `sync` backfills NULLs for
-  present, non-offloaded image/video rows it did not re-analyse this run:
+  present, non-offloaded image/video rows that this run did not re-analyse:
   `analysis/extract.py:read_orientations` (rotation-only ExifTool profile,
   `-fast`), progress step "Reading rotation", written by
   `repo.set_orientations` (only that column, committed per batch), counted in

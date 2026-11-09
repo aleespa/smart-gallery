@@ -1118,13 +1118,15 @@ by its `db_uuid`, like a mirror (9.2).
 
 ### 12.3 Thumbnails and previews
 
-`gui/thumbs/cache.py`. Thumbnails (512 px on the long edge, `THUMB_EDGE`) are cached on the
-gallery's drive at `.smart_gallery\thumbs\<id÷1000>\<id>-<mtime_ns>-s512.jpg`; the mtime in the
+`gui/thumbs/cache.py`. Thumbnails (512 px on the long edge, `THUMB_EDGE`)
+are cached on the gallery's drive at
+`.smart_gallery\thumbs\<id÷1000>\<id>-<mtime_ns>-s512.jpg`; the mtime in the
 name makes an edited file get a fresh thumbnail, and `s512` is the size. RAW
 thumbnails are turned upright by the RAW's own Orientation tag (the embedded
 previews carry none). Older files (`<id>-<mtime_ns>.jpg`, `-r1.jpg`) and their
 `.none` markers are deleted when the thumbnail is made again, which happens on
-demand. A `.none` marker records a file that couldn't be thumbnailed, so it isn't retried.
+demand. A `.none` marker records a file that couldn't be thumbnailed, so it
+isn't retried.
 
 | File | Source of the picture |
 |---|---|

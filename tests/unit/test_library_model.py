@@ -249,3 +249,30 @@ def test_unmigrated_catalog_loads_without_offloaded_table(repo, make_item):
     (row,) = library_rows(repo, LibraryQuery())
 
     assert row.relpath == "a/x.jpg" and row.offloaded is False
+
+
+def test_library_rows_carry_size_and_orientation(repo, make_item):
+    _add(repo, make_item, "a/x.jpg", width=6000, height=4000, orientation=6)
+
+    (row,) = library_rows(repo, LibraryQuery())
+
+    assert (row.width, row.height, row.orientation) == (6000, 4000, 6)
+    assert row.aspect == pytest.approx(0.667, abs=1e-3)
+
+
+def test_library_rows_on_v8_catalog_read_only(drive, make_item):
+    from smart_gallery.db import GalleryRepository
+
+    r = GalleryRepository.create(drive, label="t")
+    path = r.db_path
+    r.conn.execute("ALTER TABLE media_items DROP COLUMN orientation")
+    r.conn.execute("UPDATE meta SET value='8' WHERE key='schema_version'")
+    r.conn.execute(
+        "INSERT INTO media_items (relpath, media_type, ext, size_bytes)"
+        " VALUES ('a.jpg', 'image', '.jpg', 1)"
+    )
+    r.conn.commit()
+    r.close()
+    with GalleryRepository.open(path, read_only=True) as ro:
+        (row,) = library_rows(ro, LibraryQuery())
+    assert row.relpath == "a.jpg" and row.orientation is None

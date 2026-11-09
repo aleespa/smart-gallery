@@ -11,6 +11,7 @@ from typing import Literal, Optional
 
 from smart_gallery.db.repository import GalleryRepository
 from smart_gallery.db.where import build_where
+from smart_gallery.gui.library.justify import tile_aspect
 from smart_gallery.mirror.types import key
 from smart_gallery.organize.filters import FilterOptions
 
@@ -56,6 +57,13 @@ class LibraryRow:
     date_taken: Optional[str] = None  # 'YYYY-MM-DD', for date groups
     size_bytes: Optional[int] = None  # for size groups
     offloaded: bool = False  # freed up: the file is kept on a mirror only
+    width: Optional[int] = None  # pixels as stored (before orientation)
+    height: Optional[int] = None
+    orientation: Optional[int] = None  # EXIF 1-8; None = not read yet
+
+    @property
+    def aspect(self) -> float:
+        return tile_aspect(self.width, self.height, self.orientation, self.media_type)
 
 
 @dataclass(frozen=True)
@@ -116,9 +124,15 @@ def library_rows(repo: GalleryRepository, q: LibraryQuery) -> list[LibraryRow]:
     where, params = _library_where(q)
     order = _ORDER_BY.get(q.sort, _ORDER_BY["date"])
     order = order.format(d="DESC" if q.descending else "ASC")
+    # A read-only open of a pre-v9 catalog never migrates: no orientation yet.
+    has_orientation = any(
+        c["name"] == "orientation"
+        for c in repo.conn.execute("PRAGMA table_info(media_items)")
+    )
+    orientation = "orientation" if has_orientation else "NULL AS orientation"
     cur = repo.conn.execute(
         f"SELECT id, relpath, media_type, ext, mtime_ns, duration_ms,"
-        f" date_taken, size_bytes"
+        f" date_taken, size_bytes, width, height, {orientation}"
         f" FROM media_items{where} ORDER BY {order}",
         params,
     )
@@ -135,6 +149,9 @@ def library_rows(repo: GalleryRepository, q: LibraryQuery) -> list[LibraryRow]:
             r["date_taken"],
             r["size_bytes"],
             key(r["relpath"]) in offloaded,
+            r["width"],
+            r["height"],
+            r["orientation"],
         )
         for r in cur
     ]

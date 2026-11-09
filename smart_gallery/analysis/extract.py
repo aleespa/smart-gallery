@@ -14,14 +14,15 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from loguru import logger
 
 from smart_gallery.config import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
-from smart_gallery.models import MediaItem
+from smart_gallery.models import MediaItem, orientation_from_exif
 from smart_gallery.progress import (
     READING,
+    ROTATING,
     ProgressCallback,
     ProgressEvent,
     check_cancelled,
@@ -42,6 +43,7 @@ EXIFTOOL_IMAGE_TAG_ARGS = [
     "-ImageHeight",
     "-Orientation",
 ]
+EXIFTOOL_ROTATION_TAG_ARGS = ["-Orientation", "-Rotation"]
 EXIFTOOL_VIDEO_TAG_ARGS = [
     "-ImageWidth",
     "-ImageHeight",
@@ -128,6 +130,8 @@ def run_exiftool_batch(file_paths: List[Path], tag_profile: str = "all") -> List
     profile_tags = EXIFTOOL_IMAGE_TAG_ARGS + EXIFTOOL_VIDEO_TAG_ARGS
     if tag_profile == "image":
         profile_tags = EXIFTOOL_IMAGE_TAG_ARGS
+    elif tag_profile == "rotation":
+        profile_tags = EXIFTOOL_ROTATION_TAG_ARGS
     elif tag_profile == "video":
         profile_tags = EXIFTOOL_VIDEO_TAG_ARGS
 
@@ -168,6 +172,87 @@ def run_exiftool_batch(file_paths: List[Path], tag_profile: str = "all") -> List
                 pass
 
 
+def _run_batches(
+    files: List[Path],
+    tag_profile: str,
+    stop_event: Optional[threading.Event],
+    on_records: Callable[[List[Dict], int], None],
+) -> None:
+    """Run ExifTool over ``files`` in parallel batches; call
+    ``on_records(records, batch_len)`` on the calling thread as each finishes."""
+    if not files:
+        return
+    num_workers, batch_size = _choose_exiftool_plan(len(files))
+    batches = [files[i : i + batch_size] for i in range(0, len(files), batch_size)]
+    # Not a ``with`` block: leaving one waits for the running batches,
+    # which a cancel must not.
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=num_workers)
+    futures = {
+        ex.submit(run_exiftool_batch, batch, tag_profile): len(batch)
+        for batch in batches
+    }
+    pending = set(futures)
+    try:
+        while pending:
+            # Wake at least once a second to see a stop request, even
+            # while every worker is still inside a batch.
+            done, pending = concurrent.futures.wait(
+                pending, timeout=1, return_when=concurrent.futures.FIRST_COMPLETED
+            )
+            check_cancelled()
+            if stop_event and stop_event.is_set():
+                break
+            for future in done:
+                on_records(future.result(), futures[future])
+    except BaseException:
+        # Cancelled (or failed): drop the queued batches without waiting.
+        ex.shutdown(wait=False, cancel_futures=True)
+        raise
+    # A stop_event leaves batches pending: cancel them, don't wait.
+    ex.shutdown(wait=not pending, cancel_futures=True)
+
+
+def _path_key(path) -> str:
+    return os.path.normcase(os.path.normpath(str(path)))
+
+
+def read_orientations(
+    items: List[tuple],
+    progress_callback: Optional[ProgressCallback] = None,
+    on_batch: Optional[Callable[[Dict[Path, int]], None]] = None,
+) -> Dict[Path, int]:
+    """Read only the EXIF orientation of ``(abspath, media_type)`` files.
+
+    Returns an entry for each file ExifTool produced a record for (1 when the
+    file has no tag); ``on_batch`` gets each finished batch's entries so a
+    cancel keeps what was read."""
+    if not items:
+        return {}
+    by_key = {_path_key(path): (path, mt) for path, mt in items}
+    result: Dict[Path, int] = {}
+    total = len(items)
+    done = 0
+
+    def _on_records(records: List[Dict], batch_len: int) -> None:
+        nonlocal done
+        found: Dict[Path, int] = {}
+        for record in records:
+            hit = by_key.get(_path_key(record.get("SourceFile") or ""))
+            if hit is not None:
+                found[hit[0]] = orientation_from_exif(record, hit[1])
+        result.update(found)
+        if found and on_batch:
+            on_batch(found)
+        done += batch_len
+        if progress_callback:
+            progress_callback(ProgressEvent(ROTATING, min(done, total), total))
+
+    if progress_callback:
+        progress_callback(ProgressEvent(ROTATING, 0, total))
+    _run_batches([path for path, _ in items], "rotation", None, _on_records)
+    return result
+
+
 def analyze_paths(
     file_paths: List[Path],
     drive_root: Optional[Path] = None,
@@ -202,48 +287,18 @@ def analyze_paths(
     if progress_callback:
         progress_callback(ProgressEvent(READING, processed, total))
 
-    def _run(file_list: List[Path], tag_profile: str) -> None:
+    def _on_records(records: List[Dict], batch_len: int) -> None:
         nonlocal processed
-        if not file_list:
-            return
-        num_workers, batch_size = _choose_exiftool_plan(len(file_list))
-        batches = [
-            file_list[i : i + batch_size] for i in range(0, len(file_list), batch_size)
-        ]
-        # Not a ``with`` block: leaving one waits for the running batches,
-        # which a cancel must not.
-        ex = concurrent.futures.ThreadPoolExecutor(max_workers=num_workers)
-        futures = {
-            ex.submit(run_exiftool_batch, batch, tag_profile): len(batch)
-            for batch in batches
-        }
-        pending = set(futures)
-        try:
-            while pending:
-                # Wake at least once a second to see a stop request, even
-                # while every worker is still inside a batch.
-                done, pending = concurrent.futures.wait(
-                    pending, timeout=1, return_when=concurrent.futures.FIRST_COMPLETED
-                )
-                check_cancelled()
-                if stop_event and stop_event.is_set():
-                    break
-                for future in done:
-                    for record in future.result():
-                        item = MediaItem.from_exiftool(record, drive_root)
-                        if item is not None:
-                            items.append(item)
-                    processed += futures[future]
-                    if progress_callback:
-                        progress_callback(
-                            ProgressEvent(READING, min(processed, total), total)
-                        )
-        except BaseException:
-            # Cancelled (or failed): drop the queued batches without waiting.
-            ex.shutdown(wait=False, cancel_futures=True)
-            raise
-        # A stop_event leaves batches pending: cancel them, don't wait.
-        ex.shutdown(wait=not pending, cancel_futures=True)
+        for record in records:
+            item = MediaItem.from_exiftool(record, drive_root)
+            if item is not None:
+                items.append(item)
+        processed += batch_len
+        if progress_callback:
+            progress_callback(ProgressEvent(READING, min(processed, total), total))
+
+    def _run(file_list: List[Path], tag_profile: str) -> None:
+        _run_batches(file_list, tag_profile, stop_event, _on_records)
 
     _run(image_files, "image")
     _run(video_files, "video")

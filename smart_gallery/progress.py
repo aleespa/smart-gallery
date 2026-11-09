@@ -30,6 +30,7 @@ CANCELLED_EXIT = 130  # the conventional exit code for an interrupted command
 FINDING = "Finding files"
 HASHING = "Comparing files"
 READING = "Reading metadata"
+ROTATING = "Reading rotation"
 COPYING = "Copying files"
 SCANNING = "Scanning faces"
 FILING = "Sorting faces"

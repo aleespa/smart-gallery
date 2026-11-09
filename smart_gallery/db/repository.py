@@ -470,6 +470,25 @@ class GalleryRepository(FaceLabelsMixin, FaceUndoMixin, MirrorStoreMixin):
         for r in run("SELECT id FROM persons").fetchall():
             self.recompute_person(r["id"])
 
+    def rows_missing_orientation(self) -> List[Tuple[int, str, str]]:
+        """``(id, relpath, media_type)`` of images/videos whose orientation has
+        not been read yet."""
+        rows = self.conn.execute(
+            "SELECT id, relpath, media_type FROM media_items "
+            "WHERE media_type IN ('image','video') AND orientation IS NULL"
+        ).fetchall()
+        return [(r["id"], r["relpath"], r["media_type"]) for r in rows]
+
+    def set_orientations(self, values: Dict[int, int]) -> None:
+        """Write only the ``orientation`` column (not ``updated_at``)."""
+        if not values:
+            return
+        self.conn.executemany(
+            "UPDATE media_items SET orientation=? WHERE id=?",
+            [(o, i) for i, o in values.items()],
+        )
+        self.conn.commit()
+
     def invalidate_faces_by_relpath(self, relpaths: Iterable[str]) -> int:
         """Clear face data for changed files (sync calls this for updated rows so
         the next scan re-processes them), keeping the user's decisions for the

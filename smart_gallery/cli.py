@@ -933,7 +933,8 @@ def _handle_sync(args):
             cb.close()
     logger.success(
         f"Sync {'(dry-run) ' if args.dry_run else ''}— "
-        f"+{report.added} ~{report.updated} -{report.deleted} ={report.unchanged}"
+        f"+{report.added} ~{report.updated} -{report.deleted} ={report.unchanged} "
+        f"rotation={report.rotation_read}"
     )
 
 

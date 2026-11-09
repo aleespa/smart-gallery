@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from loguru import logger
 
-from smart_gallery.analysis import analyze_paths
+from smart_gallery.analysis import analyze_paths, read_orientations
 from smart_gallery.config import FACE_DET_VERSION, iter_files, to_relpath
 from smart_gallery.db import GalleryRepository
 from smart_gallery.progress import FINDING, ProgressCallback, counted
@@ -26,6 +26,7 @@ class SyncReport:
     updated: int = 0
     deleted: int = 0
     unchanged: int = 0
+    rotation_read: int = 0
 
     @property
     def changed(self) -> int:
@@ -108,9 +109,25 @@ def sync_drive(
         unchanged=len(live) - len(to_add) - len(to_update),
     )
 
+    # Rows from before schema v9 have no orientation yet: read just that tag.
+    # Skip offloaded rows (file absent) and files being re-analysed anyway.
+    skip = {rel.casefold() for rel in (to_add | to_update)} | offloaded
+    live_by_key = {rel.casefold(): rel for rel in live}
+    id_of: Dict[Path, int] = {}
+    to_read: List[Tuple[Path, str]] = []
+    for media_id, rel, media_type in repo.rows_missing_orientation():
+        key = rel.casefold()
+        if key in skip or key not in live_by_key:
+            continue
+        path = live[live_by_key[key]][0]
+        id_of[path] = media_id
+        to_read.append((path, media_type))
+    report.rotation_read = len(to_read)
+
     logger.info(
         f"Sync plan — add={report.added} update={report.updated} "
-        f"delete={report.deleted} unchanged={report.unchanged}"
+        f"delete={report.deleted} unchanged={report.unchanged} "
+        f"rotation={report.rotation_read}"
     )
     if dry_run:
         return report
@@ -129,6 +146,21 @@ def sync_drive(
     # so the next scan re-processes them. New files are unscanned already.
     if to_update:
         repo.invalidate_faces_by_relpath(to_update)
+
+    if to_read:
+        written = 0
+
+        def _store(found: Dict[Path, int]) -> None:
+            nonlocal written
+            repo.set_orientations({id_of[p]: o for p, o in found.items()})
+            written += len(found)
+
+        try:
+            read_orientations(
+                to_read, progress_callback=progress_callback, on_batch=_store
+            )
+        finally:
+            report.rotation_read = written
 
     pending = repo.count_unscanned_images(FACE_DET_VERSION)
     logger.success(

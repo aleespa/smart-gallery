@@ -160,3 +160,146 @@ def test_sync_clears_offloaded_flag_when_a_hand_copied_original_returns(
         shutil.copy2(keep, drive / "a.txt")
         sync_drive(repo)
         assert repo.offloaded_relpaths() == set()
+
+
+# ── orientation backfill ────────────────────────────────────────────────────
+def _orient_setup(repo, drive, drive_file, make_item, names, **kw):
+    items = []
+    for name in names:
+        p = drive_file(drive, name)
+        st = p.stat()
+        items.append(
+            make_item(
+                name, size_bytes=st.st_size, mtime_ns=st.st_mtime_ns, **kw.get(name, {})
+            )
+        )
+    repo.upsert_many(items)
+
+
+def _row(repo, rel):
+    return dict(
+        repo.conn.execute(
+            "SELECT * FROM media_items WHERE relpath=?", (rel,)
+        ).fetchone()
+    )
+
+
+def test_sync_backfills_orientation_only(
+    repo, drive, drive_file, make_item, monkeypatch
+):
+    import smart_gallery.services.sync as syncmod
+    from smart_gallery.mirror.types import Peer
+
+    _orient_setup(
+        repo,
+        drive,
+        drive_file,
+        make_item,
+        ["a.jpg", "b.jpg", "c.jpg"],
+        **{"b.jpg": {"orientation": 1}},
+    )
+    repo.conn.execute("UPDATE media_items SET updated_at='2020-01-01 00:00:00'")
+    repo.conn.commit()
+    repo.add_peer("working", Peer("d1", "D:/g.db"))
+    repo.add_offloaded(["c.jpg"], "d1")
+    (drive / "c.jpg").unlink()
+    a_id = _row(repo, "a.jpg")["id"]
+    repo.conn.execute(
+        "INSERT INTO faces(media_id, bbox_x, bbox_y, bbox_w, bbox_h, embedding) "
+        "VALUES(?,0,0,1,1,x'00')",
+        (a_id,),
+    )
+    repo.conn.commit()
+    before = _row(repo, "a.jpg")
+    seen = []
+
+    def fake(items, progress_callback=None, on_batch=None):
+        seen.append([p.name for p, _ in items])
+        found = {p: 6 for p, _ in items if p.name == "a.jpg"}
+        on_batch(found)
+        return found
+
+    monkeypatch.setattr(syncmod, "read_orientations", fake)
+    report = sync_drive(repo)
+    after = _row(repo, "a.jpg")
+    assert seen == [["a.jpg"]]
+    assert report.rotation_read == 1
+    assert after["orientation"] == 6
+    assert {k: v for k, v in after.items() if k != "orientation"} == {
+        k: v for k, v in before.items() if k != "orientation"
+    }
+    assert repo.conn.execute("SELECT COUNT(*) FROM faces").fetchone()[0] == 1
+
+
+def test_sync_backfill_skips_rows_being_reanalysed(
+    repo, drive, drive_file, make_item, monkeypatch
+):
+    import smart_gallery.services.sync as syncmod
+
+    _orient_setup(repo, drive, drive_file, make_item, ["a.jpg"])
+    repo.conn.execute("UPDATE media_items SET mtime_ns = mtime_ns + 5")
+    repo.conn.commit()
+    analysed, read = [], []
+    monkeypatch.setattr(
+        syncmod, "analyze_paths", lambda paths, **k: analysed.append(list(paths)) or []
+    )
+    monkeypatch.setattr(
+        syncmod, "read_orientations", lambda items, **k: read.append(items) or {}
+    )
+    report = sync_drive(repo)
+    assert [p.name for p in analysed[0]] == ["a.jpg"]
+    assert read == [] or read == [[]]
+    assert report.rotation_read == 0
+
+
+def test_sync_backfill_leaves_null_when_unreadable(
+    repo, drive, drive_file, make_item, monkeypatch
+):
+    import smart_gallery.services.sync as syncmod
+
+    _orient_setup(repo, drive, drive_file, make_item, ["a.jpg"])
+    calls = []
+    monkeypatch.setattr(
+        syncmod, "read_orientations", lambda items, **k: calls.append(items) or {}
+    )
+    sync_drive(repo)
+    sync_drive(repo)
+    assert _row(repo, "a.jpg")["orientation"] is None
+    assert len(calls) == 2
+
+
+def test_sync_dry_run_counts_rotation_reads(
+    repo, drive, drive_file, make_item, monkeypatch
+):
+    import smart_gallery.services.sync as syncmod
+
+    _orient_setup(repo, drive, drive_file, make_item, ["a.jpg", "b.jpg"])
+
+    def boom(*a, **k):
+        raise AssertionError("reader must not run on a dry run")
+
+    monkeypatch.setattr(syncmod, "read_orientations", boom)
+    report = sync_drive(repo, dry_run=True)
+    assert report.rotation_read == 2
+    assert _row(repo, "a.jpg")["orientation"] is None
+
+
+def test_backfill_keeps_finished_batches_on_cancel(
+    repo, drive, drive_file, make_item, monkeypatch
+):
+    import pytest
+
+    import smart_gallery.services.sync as syncmod
+    from smart_gallery.progress import Cancelled
+
+    _orient_setup(repo, drive, drive_file, make_item, ["a.jpg", "b.jpg"])
+
+    def fake(items, progress_callback=None, on_batch=None):
+        on_batch({items[0][0]: 6})
+        raise Cancelled()
+
+    monkeypatch.setattr(syncmod, "read_orientations", fake)
+    with pytest.raises(Cancelled):
+        sync_drive(repo)
+    got = sorted(_row(repo, r)["orientation"] or 0 for r in ("a.jpg", "b.jpg"))
+    assert got == [0, 6]

@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
 
 from smart_gallery.gui import icons, theme
 from smart_gallery.gui.context import AppContext
-from smart_gallery.gui.collapsible_filters import CollapsibleFilters
+from smart_gallery.gui.collapsible_filters import CollapsibleFilters, CollapsiblePanel
 from smart_gallery.gui.filters_panel import FilterPanel
 from smart_gallery.gui.ui.metrics import FILTER_WIDTH, SIDEBAR_WIDTH
 from smart_gallery.gui.ui.widgets import EmptyState, PanelFooter
@@ -93,7 +93,11 @@ EXPORT_TEXT = "Export…"
 EXPORT_TIP = "Copy the files these filters select to a folder"
 EXPORT_SIZE = (720, 720)
 IMPORT_SIZE = (860, 760)
-STATE_FILE = "library.json"  # {"filters_shown": bool}
+STATE_FILE = "library.json"  # {"filters_shown", "tree_shown", "row_height"}
+TREE_TITLE = "Folders"
+TREE_SHOWN_KEY = "tree_shown"
+HIDE_TREE_TIP = "Hide the folders"
+SHOW_TREE_TIP = "Show the folders"
 
 NO_GALLERY = "Open or create a gallery to browse it here."
 DISCONNECTED = "Drive not connected. Plug in {label} to browse it."
@@ -336,13 +340,28 @@ class LibraryView(QWidget):
         self.tree.setModel(self.tree_model)
         self.subfolders = QCheckBox("Include subfolders")
         self.subfolders.setChecked(True)
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
+        self.tree_panel = QWidget()
+        left_layout = QVBoxLayout(self.tree_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
+        tree_top = QHBoxLayout()
+        tree_top.addWidget(QLabel(TREE_TITLE), 1)
+        left_layout.addLayout(tree_top)
         left_layout.addWidget(self.tree, 1)
         footer = PanelFooter()
         footer.add(self.subfolders)
         left_layout.addWidget(footer)
+        # Like the filters, the tree hides with « in its top row and comes
+        # back from a slim strip at the page's left edge.
+        self.tree_collapsible = CollapsiblePanel(
+            self.tree_panel,
+            tree_top,
+            STATE_FILE,
+            shown_key=TREE_SHOWN_KEY,
+            strip_text=TREE_TITLE,
+            hide_tip=HIDE_TREE_TIP,
+            show_tip=SHOW_TREE_TIP,
+        )
+        self.tree_strip = self.tree_collapsible.strip
 
         self.filters = FilterPanel(ctx)
 
@@ -408,13 +427,16 @@ class LibraryView(QWidget):
         right_layout.addWidget(self.stack, 1)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(left)
+        splitter.addWidget(self.tree_strip)
+        splitter.addWidget(self.tree_panel)
         splitter.addWidget(self.filters)
         splitter.addWidget(self.collapsible.strip)
         splitter.addWidget(right)
-        splitter.setStretchFactor(3, 1)
-        splitter.setCollapsible(2, False)  # else the strip shows at width 0
-        splitter.setSizes([SIDEBAR_WIDTH, FILTER_WIDTH, 0, 800])
+        splitter.setStretchFactor(4, 1)
+        # Else a strip could be dragged down to width 0 and vanish.
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(3, False)
+        splitter.setSizes([0, SIDEBAR_WIDTH, FILTER_WIDTH, 0, 800])
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.addWidget(splitter)

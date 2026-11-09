@@ -386,6 +386,37 @@ def test_filters_hide_behind_a_strip_and_come_back(qtbot, repo):
     assert view.filters.isVisible() and not view.filters_strip.isVisible()
 
 
+def test_folder_tree_hides_behind_a_strip_and_comes_back(qtbot, repo):
+    view, _ = _view(qtbot, repo.db_path)
+    view.show()
+    assert view.tree_panel.isVisible() and not view.tree_strip.isVisible()
+    view.tree_collapsible.hide_btn.click()
+    assert not view.tree_panel.isVisible() and view.tree_strip.isVisible()
+    assert view.filters.isVisible()  # the filters stay as they were
+    view.tree_strip.click()
+    assert view.tree_panel.isVisible() and not view.tree_strip.isVisible()
+
+
+def test_folder_tree_strip_sits_where_the_tree_was(qtbot, repo):
+    view, _ = _view(qtbot, repo.db_path)
+    splitter = view.tree_panel.parentWidget()
+    order = [splitter.widget(i) for i in range(splitter.count())]
+    assert order.index(view.tree_strip) == order.index(view.tree_panel) - 1
+    assert order.index(view.tree_panel) < order.index(view.filters)
+
+
+def test_folder_tree_shown_persists_beside_filters(qtbot, repo):
+    view, _ = _view(qtbot, repo.db_path)
+    view.collapsible.hide_btn.click()
+    view.tree_collapsible.hide_btn.click()
+    again, _ = _view(qtbot, repo.db_path)
+    assert not again.tree_collapsible.shown
+    assert not again.collapsible.shown  # each panel keeps its own key
+    again.tree_collapsible.set_shown(True)
+    third, _ = _view(qtbot, repo.db_path)
+    assert third.tree_collapsible.shown and not third.collapsible.shown
+
+
 def test_sync_options_sit_right_of_sort(qtbot, repo):
     view, _ = _view(qtbot, repo.db_path)
     layout = view.header_controls.layout()

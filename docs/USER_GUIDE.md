@@ -317,7 +317,9 @@ RAW picker.
 
 The filter panel sits between the folder tree and the photos. Press **«** at
 its top to hide it; a slim **Filters** strip stays in its place, and clicking
-it brings the panel back.
+it brings the panel back. The folder tree works the same way: **«** next to
+**Folders** hides it behind a **Folders** strip at the left edge. The Library
+remembers which panels you left open.
 
 ![The Library with the filter panel open](images/library-filters.png)
 

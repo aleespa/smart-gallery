@@ -1,8 +1,10 @@
-"""A filter panel that hides behind a slim strip, remembering its state.
+"""Side panels that hide behind a slim strip, remembering their state.
 
-Shared by the Library and Stats. The panel's top row gets a « button; while the
-panel is hidden the ``strip`` stands in for it and brings it back. Whether it is
-shown persists under ``"filters_shown"`` in the page's JSON state file.
+The filter panel (Library and Stats) and the Library's folder tree use it. The
+panel's top row gets a « button; while the panel is hidden the ``strip``
+stands in for it and brings it back. Whether it is shown persists under the
+panel's own key (``"filters_shown"``, ``"tree_shown"``) in the page's JSON
+state file.
 """
 
 from __future__ import annotations
@@ -11,7 +13,13 @@ import logging
 
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QPainter, QPalette
-from PySide6.QtWidgets import QAbstractButton, QSizePolicy, QToolButton, QWidget
+from PySide6.QtWidgets import (
+    QAbstractButton,
+    QBoxLayout,
+    QSizePolicy,
+    QToolButton,
+    QWidget,
+)
 
 from smart_gallery.gui.filters_panel import FilterPanel
 from smart_gallery.gui.paths import app_data_dir
@@ -19,7 +27,8 @@ from smart_gallery.gui.state_store import load_json, save_json
 
 logger = logging.getLogger(__name__)
 
-HIDE_FILTERS_TEXT = "«"
+HIDE_TEXT = "«"
+HIDE_FILTERS_TEXT = HIDE_TEXT
 HIDE_FILTERS_TIP = "Hide the filters"
 SHOW_FILTERS_TIP = "Show the filters"
 FILTERS_STRIP_TEXT = "Filters"
@@ -73,25 +82,38 @@ class CollapsedStrip(QAbstractButton):
         super().leaveEvent(event)
 
 
-class CollapsibleFilters:
-    """Wires ``panel`` to a hide button and a ``strip``; the caller adds both
-    to its splitter. ``state_file`` is the JSON file name under app_data_dir()."""
+class CollapsiblePanel:
+    """Wires ``panel`` to a « button at the end of ``top_row`` and a
+    ``strip`` labelled ``strip_text``; the caller adds the panel and the strip
+    to its splitter. ``state_file`` is the JSON file name under
+    app_data_dir(); ``shown_key`` is this panel's key in it."""
 
-    def __init__(self, panel: FilterPanel, state_file: str):
+    def __init__(
+        self,
+        panel: QWidget,
+        top_row: QBoxLayout,
+        state_file: str,
+        *,
+        shown_key: str,
+        strip_text: str,
+        hide_tip: str,
+        show_tip: str,
+    ):
         self.panel = panel
         self.state_path = app_data_dir() / state_file
+        self.shown_key = shown_key
         self.hide_btn = QToolButton()
-        self.hide_btn.setText(HIDE_FILTERS_TEXT)
-        self.hide_btn.setToolTip(HIDE_FILTERS_TIP)
+        self.hide_btn.setText(HIDE_TEXT)
+        self.hide_btn.setToolTip(hide_tip)
         self.hide_btn.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
         )
-        panel.top_row.addWidget(self.hide_btn)
-        self.strip = CollapsedStrip(FILTERS_STRIP_TEXT)
-        self.strip.setToolTip(SHOW_FILTERS_TIP)
+        top_row.addWidget(self.hide_btn)
+        self.strip = CollapsedStrip(strip_text)
+        self.strip.setToolTip(show_tip)
         self.hide_btn.clicked.connect(lambda: self.set_shown(False))
         self.strip.clicked.connect(lambda: self.set_shown(True))
-        self.shown = load_json(self.state_path).get(SHOWN_KEY) is not False
+        self.shown = load_json(self.state_path).get(shown_key) is not False
         self._apply()
 
     def set_shown(self, shown: bool) -> None:
@@ -100,7 +122,7 @@ class CollapsibleFilters:
         self.shown = shown
         self._apply()
         state = load_json(self.state_path)  # merge: the page keeps its own keys
-        state[SHOWN_KEY] = shown
+        state[self.shown_key] = shown
         try:
             save_json(self.state_path, state)
         except OSError as exc:
@@ -113,3 +135,18 @@ class CollapsibleFilters:
         else:
             self.panel.setVisible(False)
         self.strip.setVisible(not self.shown)
+
+
+class CollapsibleFilters(CollapsiblePanel):
+    """The filter panel's « button (in its top row) and "Filters" strip."""
+
+    def __init__(self, panel: FilterPanel, state_file: str):
+        super().__init__(
+            panel,
+            panel.top_row,
+            state_file,
+            shown_key=SHOWN_KEY,
+            strip_text=FILTERS_STRIP_TEXT,
+            hide_tip=HIDE_FILTERS_TIP,
+            show_tip=SHOW_FILTERS_TIP,
+        )

@@ -231,7 +231,8 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   `MainWindow` builds each area on its first visit and shows each as a tab in
   the top bar. Every page sits under a header that names it; a page that exposes a `header_controls`
   widget gets those controls on the header's right (Library's sort and
-  Sync options; its filter panel hides behind a slim strip instead).
+  Sync options; its folder tree and filter panel each hide behind a slim
+  strip instead).
 - **No system frame.** `MainWindow` is frameless: its top bar is a
   `gui/titlebar.py:TitleBar` (drag to move, double-click to maximize) with
   `WindowButtons` at the right, and a `ResizeFrame` margin resizes it. Moving
@@ -282,7 +283,9 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   pads the page stack and pages have zero root margins; a page may expose
   `summary_changed = Signal(str)` (emit from data callbacks only, `""` when
   there is no gallery or it failed), shown muted beside the title.
-  `gui/collapsible_filters.py` is shared by Library and Stats.
+  `gui/collapsible_filters.py` (`CollapsiblePanel`, `CollapsibleFilters`) is
+  shared by Library and Stats; the Library's folder tree uses it too, with
+  its own `tree_shown` key in library.json.
   `tests/gui/test_button_roles.py` enforces one visible primary button per
   page and an icon on every `Browse…` button; icons come from
   `gui/icons.py` (`set_button_icon`).

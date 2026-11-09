@@ -1,3 +1,5 @@
+import pytest
+
 from smart_gallery.db import GalleryRepository
 from smart_gallery.services import init_drive, sync_drive
 
@@ -303,3 +305,27 @@ def test_backfill_keeps_finished_batches_on_cancel(
         sync_drive(repo)
     got = sorted(_row(repo, r)["orientation"] or 0 for r in ("a.jpg", "b.jpg"))
     assert got == [0, 6]
+
+
+def test_sync_without_exiftool_leaves_orientation_null(
+    repo, drive, drive_file, make_item, monkeypatch
+):
+    import smart_gallery.services.sync as syncmod
+
+    _orient_setup(repo, drive, drive_file, make_item, ["a.jpg", "b.jpg"])
+
+    def missing(items, **k):
+        raise FileNotFoundError("exiftool")
+
+    monkeypatch.setattr(syncmod, "read_orientations", missing)
+    report = sync_drive(repo)
+    assert report.rotation_read == 0
+    assert _row(repo, "a.jpg")["orientation"] is None
+
+    # Found up front to be missing: ExifTool is not even tried.
+    monkeypatch.setattr(syncmod, "exiftool_available", lambda: False)
+    monkeypatch.setattr(
+        syncmod, "read_orientations", lambda *a, **k: pytest.fail("called")
+    )
+    assert sync_drive(repo).rotation_read == 0
+    assert _row(repo, "b.jpg")["orientation"] is None

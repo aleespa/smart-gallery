@@ -1235,8 +1235,8 @@ command with `--expect-plan` pointing at that file (9.3, 9.4).
 `content_hash`, `date_taken` (`YYYY-MM-DD`), `time_taken` (`HH:MM:SS`),
 `taken_ts`, `camera`, `lens`, `focal_length`, `aperture`, `iso`,
 `shutter_speed_text`, `shutter_speed_sec`, `latitude`, `longitude`,
-`altitude`, `width`, `height`, `orientation`, `duration_ms`, `codec`,
-`frame_rate`, `created_at`, `updated_at`.
+`altitude`, `width`, `height`, `duration_ms`, `codec`,
+`frame_rate`, `created_at`, `updated_at`, `orientation`.
 
 `orientation` is the EXIF orientation 1-8. NULL means not read yet; a file
 with no orientation tag is stored as 1. Videos map their Rotation 0/90/180/270

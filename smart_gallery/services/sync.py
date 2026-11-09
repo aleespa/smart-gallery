@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Set, Tuple
 from loguru import logger
 
 from smart_gallery.analysis import analyze_paths, read_orientations
+from smart_gallery.analysis.extract import exiftool_available
 from smart_gallery.config import FACE_DET_VERSION, iter_files, to_relpath
 from smart_gallery.db import GalleryRepository
 from smart_gallery.progress import FINDING, ProgressCallback, counted
@@ -122,6 +123,12 @@ def sync_drive(
         path = live[live_by_key[key]][0]
         id_of[path] = media_id
         to_read.append((path, media_type))
+    if to_read and not exiftool_available():
+        logger.warning(
+            "ExifTool not found: photo rotation is not read now and will be "
+            "retried on a later sync."
+        )
+        to_read, id_of = [], {}
     report.rotation_read = len(to_read)
 
     logger.info(
@@ -158,6 +165,11 @@ def sync_drive(
         try:
             read_orientations(
                 to_read, progress_callback=progress_callback, on_batch=_store
+            )
+        except FileNotFoundError:
+            logger.warning(
+                "ExifTool not found: photo rotation is not read now and will "
+                "be retried on a later sync."
             )
         finally:
             report.rotation_read = written

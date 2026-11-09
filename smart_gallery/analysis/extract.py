@@ -9,6 +9,7 @@ import concurrent.futures
 import json
 import math
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -62,6 +63,11 @@ def _get_exiftool_path() -> str:
         if os.path.isfile(bundled):
             return bundled
     return "exiftool"
+
+
+def exiftool_available() -> bool:
+    """True when the exiftool executable can be found."""
+    return shutil.which(_get_exiftool_path()) is not None
 
 
 def _get_exiftool_base_args(tag_profile: str = "all") -> List[str]:
@@ -199,11 +205,13 @@ def _run_batches(
             done, pending = concurrent.futures.wait(
                 pending, timeout=1, return_when=concurrent.futures.FIRST_COMPLETED
             )
+            # Keep batches that finished in this wait even if a cancel is
+            # pending: their records are already paid for.
+            for future in done:
+                on_records(future.result(), futures[future])
             check_cancelled()
             if stop_event and stop_event.is_set():
                 break
-            for future in done:
-                on_records(future.result(), futures[future])
     except BaseException:
         # Cancelled (or failed): drop the queued batches without waiting.
         ex.shutdown(wait=False, cancel_futures=True)

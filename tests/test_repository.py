@@ -166,3 +166,11 @@ def test_read_only_v8_catalog_tolerates_missing_orientation(drive, make_item):
         assert "orientation" not in cols  # read-only open did not migrate
     report = compare_galleries(path, path)
     assert report.counts["unchanged"] == 1
+
+
+def test_write_compare_report_writes_a_file(tmp_path):
+    from smart_gallery.services.compare import CompareReport, write_compare_report
+
+    report = CompareReport(match_by="path", rows=())
+    out = write_compare_report(report, tmp_path / "r.txt")
+    assert out.read_text(encoding="utf-8")

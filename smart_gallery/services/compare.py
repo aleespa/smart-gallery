@@ -7,7 +7,7 @@ import json
 import sqlite3
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
 from smart_gallery.db import GalleryRepository

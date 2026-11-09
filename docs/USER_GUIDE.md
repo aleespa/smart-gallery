@@ -469,13 +469,16 @@ catches up:
 
 Sync is quick: it compares each file's size and modification time with the
 catalog, reads only new or changed files, and removes entries for files that
-are gone. Its summary looks like `+12 ~3 -5 =40100`: 12 added, 3 updated,
-5 removed, 40,100 unchanged.
+are gone. Its summary looks like `+12 ~3 -5 =40100 rotation=0`: 12 added,
+3 updated, 5 removed, 40,100 unchanged, and how many photos and videos had
+their rotation read.
 
 The first sync after updating Smart Gallery also reads each photo's and
-video's rotation once (*Reading rotation* in the progress bar), so sideways
-shots show upright in the Library. This can take a while on a big library and
-is not repeated.
+video's rotation once (*Reading rotation* in the progress bar), so portrait
+photos get portrait-shaped tiles in the Library (thumbnails were already
+upright; this fixes the tile's shape). This can take a while on a big library
+and is not repeated. Without ExifTool the rotation read is skipped and done on
+a later sync.
 
 If face recognition is set up, sync also tells you how many new images are
 waiting for a face scan.

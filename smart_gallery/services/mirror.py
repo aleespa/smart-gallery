@@ -209,6 +209,8 @@ def plan_mirror_sync(
 ) -> MirrorPreview:
     m_uuid = _check(working, mirror)
     sync_drive(working, progress_callback=progress_callback)
+    # Copy E's rotation to D first so D's sync need not read it from disk.
+    fill_mirror_orientation(working, mirror, m_uuid)
     sync_drive(mirror, progress_callback=progress_callback)
     w_rows, m_rows = working.mirror_rows(), mirror.mirror_rows()
     offloaded = {key(r) for r in working.offloaded_relpaths()}
@@ -761,6 +763,7 @@ def free_up_space(
     uuid = _check(working, mirror)
     # Fresh catalogs: a changed file loses its stored hash and its face scan.
     sync_drive(working, progress_callback=progress_callback)
+    fill_mirror_orientation(working, mirror, uuid)
     sync_drive(mirror, progress_callback=progress_callback)
     offloaded = {key(r) for r in working.offloaded_relpaths()}
     candidates = [

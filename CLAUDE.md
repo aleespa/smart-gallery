@@ -87,8 +87,10 @@ drift apart:
   `analysis/extract.py:read_orientations` (rotation-only ExifTool profile,
   `-fast`), progress step "Reading rotation", written by
   `repo.set_orientations` (only that column, committed per batch), counted in
-  `SyncReport.rotation_read` and `--dry-run`. `sync-mirror` fills D rows with
-  NULL orientation from E (`services/mirror.py:fill_mirror_orientation`) only
+  `SyncReport.rotation_read` (skipped with one warning when ExifTool is
+  missing, retried next sync) and `--dry-run`. Mirror preview and free-up fill D rows with
+  NULL orientation from E (`services/mirror.py:fill_mirror_orientation`) after
+  E's sync and before D's, so D's sync reads nothing, only
   when the baseline proves both files are the same bytes. Read-only opens can
   meet an unmigrated catalog: `GalleryRepository.media_select_list()` selects
   NULL for columns it lacks and `MediaItem.from_row` tolerates missing keys.

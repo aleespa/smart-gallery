@@ -743,3 +743,31 @@ def test_new_copy_to_mirror_carries_orientation(two_drives):
     _set_orientation(e, "b.txt", 8)
     _sync(e, d)
     assert _orientation(d, "b.txt") == 8
+
+
+def test_preview_fills_mirror_orientation_without_reading_it(two_drives, monkeypatch):
+    import smart_gallery.services.sync as syncmod
+
+    e, d = two_drives
+    _setup_pair(e, d, "a.txt", "b.txt")
+    for root in (e, d):
+        with GalleryRepository.open(root) as r:
+            r.conn.execute("UPDATE media_items SET media_type='image'")
+            r.conn.commit()
+    _set_orientation(e, "a.txt", 6)
+    _set_orientation(e, "b.txt", 8)
+    _set_orientation(d, "a.txt", None)
+    _set_orientation(d, "b.txt", None)
+    # D spells one path in another letter case than E.
+    os.rename(d / "b.txt", d / "B.txt")
+    with GalleryRepository.open(d) as m:
+        m.conn.execute("UPDATE media_items SET relpath='B.txt' WHERE relpath='b.txt'")
+        m.conn.commit()
+    read = []
+    monkeypatch.setattr(
+        syncmod, "read_orientations", lambda items, **k: read.append(items) or {}
+    )
+    _plan(e, d)
+    assert read == []
+    assert _orientation(d, "a.txt") == 6
+    assert _orientation(d, "B.txt") == 8

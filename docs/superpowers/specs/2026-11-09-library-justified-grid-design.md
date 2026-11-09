@@ -91,7 +91,8 @@ change) so rotated photos get the right shape.
 - **`sync`**: after its diff, for rows that are `image`/`video`, present on
   the drive (not offloaded), not being re-analysed this run, and
   `orientation IS NULL`, read only the rotation tag with ExifTool (batched,
-  `-fast2`, same worker pool settings) and `UPDATE` only `orientation`. It is
+  `-fast`, same worker pool settings; not `-fast2`, because a video's moov
+  atom can follow its mdat) and `UPDATE` only `orientation`. It is
   its own counted progress step, "Reading rotation". A file ExifTool could
   not read stays `NULL` and is retried next sync. `--dry-run` reports how
   many would be read. First sync after upgrading reads every photo once.

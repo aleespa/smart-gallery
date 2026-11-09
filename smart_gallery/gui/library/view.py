@@ -135,6 +135,9 @@ class LibraryGridModel(QAbstractListModel):
     ``PIXMAP_CACHE_BYTES``.
     """
 
+    # Every pixmap was dropped (another catalog): scaled copies are stale too.
+    thumbnails_forgotten = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.rows: list[LibraryRow] = []
@@ -159,8 +162,10 @@ class LibraryGridModel(QAbstractListModel):
             return PurePosixPath(row.relpath).name
         if role == ASPECT_ROLE:
             return row.aspect
-        if role == DURATION_ROLE:
-            if row.media_type != "video" or row.duration_ms is None:
+        if role == DURATION_ROLE:  # None: no chip; "": a play chip alone
+            if row.media_type != "video":
+                return None
+            if row.duration_ms is None:
                 return ""
             return format_duration(row.duration_ms)
         if role == OFFLOADED_ROLE:
@@ -214,6 +219,7 @@ class LibraryGridModel(QAbstractListModel):
         """Drop every pixmap: ids from another catalog mean other files."""
         self._pixmaps.clear()
         self._pixmap_bytes = 0
+        self.thumbnails_forgotten.emit()
         self._missing.clear()
 
     def needs_thumbnail(self, row: LibraryRow) -> bool:
@@ -249,6 +255,19 @@ class LibraryGridModel(QAbstractListModel):
             index, index, [Qt.ItemDataRole.DecorationRole, PLACEHOLDER_ROLE]
         )
         return True
+
+
+def attach_tiles(
+    grid: GroupedGrid,
+    model: LibraryGridModel,
+    delegate: PhotoTileDelegate | None = None,
+) -> PhotoTileDelegate:
+    """Paint ``grid``'s tiles with ``delegate`` (a new ``PhotoTileDelegate``
+    by default), whose scaled copies go when ``model`` forgets its pixmaps."""
+    delegate = delegate or PhotoTileDelegate(grid)
+    grid.setItemDelegate(delegate)
+    model.thumbnails_forgotten.connect(delegate.clear_cache)
+    return delegate
 
 
 def _holders(repo) -> dict:
@@ -349,9 +368,9 @@ class LibraryView(QWidget):
             )
 
         self.grid = GroupedGrid()
-        self.grid.setItemDelegate(PhotoTileDelegate(self.grid))
         self.grid_model = LibraryGridModel(self)
         self.grid.setModel(self.grid_model)
+        attach_tiles(self.grid, self.grid_model)
         self.message = EmptyState()
         self.stack = QStackedWidget()
         self.stack.addWidget(self.grid)

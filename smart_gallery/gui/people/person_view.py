@@ -30,8 +30,11 @@ from smart_gallery.gui import theme
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.library.grid import GroupedGrid
 from smart_gallery.gui.library.model import LibraryQuery, group_rows, library_rows
-from smart_gallery.gui.library.tiles import PhotoTileDelegate
-from smart_gallery.gui.library.view import THUMB_DEBOUNCE_MS, LibraryGridModel
+from smart_gallery.gui.library.view import (
+    THUMB_DEBOUNCE_MS,
+    LibraryGridModel,
+    attach_tiles,
+)
 from smart_gallery.gui.library.viewer import MediaViewer
 from smart_gallery.gui.people import model
 from smart_gallery.gui.people.faces_grid import FaceActionBar, FaceGrid
@@ -104,9 +107,9 @@ class PhotoGrid(QWidget):
         self.root: Path | None = None
         self.viewer: MediaViewer | None = None
         self.grid = GroupedGrid()
-        self.grid.setItemDelegate(PhotoTileDelegate(self.grid))
         self.model = LibraryGridModel(self)
         self.grid.setModel(self.model)
+        attach_tiles(self.grid, self.model)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.grid)

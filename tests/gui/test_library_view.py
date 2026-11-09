@@ -473,15 +473,14 @@ def _tile_grid(qtbot, rows, holders=None, delegate=None, size=(800, 500)):
 
     from smart_gallery.gui.library.grid import GroupedGrid
     from smart_gallery.gui.library.model import group_rows
-    from smart_gallery.gui.library.tiles import PhotoTileDelegate
-    from smart_gallery.gui.library.view import LibraryGridModel
+    from smart_gallery.gui.library.view import LibraryGridModel, attach_tiles
 
     grid = GroupedGrid()
     qtbot.addWidget(grid)
     grid.setFrameShape(QFrame.Shape.NoFrame)
     model = LibraryGridModel(grid)
     grid.setModel(model)
-    grid.setItemDelegate(delegate or PhotoTileDelegate(grid))
+    attach_tiles(grid, model, delegate)
     grid.set_groups(group_rows(rows, "date"))
     model.set_rows(rows, holders)
     grid.resize(*size)
@@ -497,20 +496,40 @@ def _recording_delegate():
         def __init__(self):
             super().__init__()
             self.texts = []
+            self.chips = []  # (text, top_right) per chip painted
 
         def _draw_text(self, painter, rect, flags, text):
             self.texts.append(text)
             super()._draw_text(painter, rect, flags, text)
 
+        def _paint_chip(self, painter, image, text, top_right, play=False):
+            self.chips.append((text, top_right))
+            super()._paint_chip(painter, image, text, top_right, play)
+
     return Recording()
 
 
-def test_tiles_draw_no_file_name(qtbot):
+def test_tiles_draw_no_file_name(qtbot, monkeypatch):
+    from PySide6.QtGui import QPainter
+    from PySide6.QtWidgets import QStyledItemDelegate
+
     delegate = _recording_delegate()
     grid, model = _tile_grid(qtbot, [_row(1, "a.jpg")], delegate=delegate)
+    drawn, styled = [], []
+    draw_text = QPainter.drawText
+
+    def recording_draw_text(painter, *args):
+        drawn.append(args)
+        return draw_text(painter, *args)
+
+    monkeypatch.setattr(QPainter, "drawText", recording_draw_text)
+    # Qt's own item painting (which draws DisplayRole) must never run.
+    monkeypatch.setattr(QStyledItemDelegate, "paint", lambda *args: styled.append(args))
     delegate.texts.clear()
     grid.grab()
-    assert delegate.texts == []
+    assert delegate.texts == [] and styled == []
+    assert drawn  # the heading went through the patch
+    assert not any("a.jpg" in str(arg) for args in drawn for arg in args)
     assert model.data(model.index(0), Qt.ItemDataRole.DisplayRole) == "a.jpg"
 
 
@@ -524,10 +543,40 @@ def test_video_tile_has_duration_role(qtbot):
     delegate = _recording_delegate()
     grid, model = _tile_grid(qtbot, rows, delegate=delegate)
     assert model.data(model.index(0), DURATION_ROLE) == "0:42"
-    assert model.data(model.index(1), DURATION_ROLE) == ""
+    assert model.data(model.index(1), DURATION_ROLE) is None
     delegate.texts.clear()
+    delegate.chips.clear()
     grid.grab()
     assert delegate.texts == ["0:42"]  # the chip, once; no names
+    assert delegate.chips == [("0:42", True)]  # the photo has none
+
+
+def test_video_of_unknown_length_keeps_its_play_chip(qtbot, tmp_path):
+    from smart_gallery.gui.library.tiles import DURATION_ROLE
+
+    frame = tmp_path / "f.jpg"
+    Image.new("RGB", (512, 288), (0, 0, 255)).save(frame)
+    rows = [
+        _row(1, "v.mp4", media_type="video", duration_ms=None),
+        _row(2, "a.jpg"),
+    ]
+    delegate = _recording_delegate()
+    grid, model = _tile_grid(qtbot, rows, delegate=delegate)
+    model.set_thumbnail(1, str(frame))
+    assert model.data(model.index(0), DURATION_ROLE) == ""
+    assert model.data(model.index(1), DURATION_ROLE) is None
+    delegate.texts.clear()
+    delegate.chips.clear()
+    grid.grab()
+    assert delegate.chips == [("", True)]  # play glyph only, top-right
+    assert delegate.texts == []
+    rect = grid.visualRect(model.index(0))
+    image = grid.viewport().grab().toImage()
+    # Just inside the chip's right edge the frame is darkened by the chip.
+    chip = image.pixelColor(rect.right() - 8, rect.top() + 11)
+    frame_colour = image.pixelColor(rect.center().x(), rect.bottom() - 10)
+    assert frame_colour.blue() > 200
+    assert chip.blue() < 160
 
 
 def test_tiles_answer_their_aspect_as_soon_as_rows_are_set(qtbot):
@@ -637,6 +686,18 @@ def test_selected_tile_is_inset_in_an_accent_ring(qtbot, tmp_path):
     background = image.pixelColor(2, rect.center().y())
     assert image.pixelColor(x, rect.top() + 4) == background
     assert image.pixelColor(x, rect.top() + int(rect.height() * 0.1)).green() > 150
+
+
+def test_gallery_change_drops_the_delegates_scaled_tiles(qtbot, tmp_path):
+    thumb = tmp_path / "t.jpg"
+    Image.new("RGB", (512, 341), "green").save(thumb)
+    grid, model = _tile_grid(qtbot, [_row(1, "a.jpg")])
+    model.set_thumbnail(1, str(thumb))
+    grid.grab()
+    delegate = grid.itemDelegate()
+    assert delegate._cache
+    model.forget_thumbnails()
+    assert not delegate._cache and delegate._cache_bytes == 0
 
 
 def test_delegate_scales_once_per_size_and_scale(qtbot):

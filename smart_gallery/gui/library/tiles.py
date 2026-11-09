@@ -20,7 +20,8 @@ from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 from smart_gallery.gui import theme
 
-# The video's length as the chip shows it ("0:42"), or "" for anything else.
+# A video's length as its chip shows it ("0:42"); "" for a video of unknown
+# length (the chip shows the play sign alone); None for anything else.
 DURATION_ROLE = Qt.ItemDataRole.UserRole + 21
 # The label of the mirror that keeps the file's only copy, or None if on disk.
 OFFLOADED_ROLE = Qt.ItemDataRole.UserRole + 22
@@ -54,6 +55,11 @@ class PhotoTileDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._cache: OrderedDict[tuple, QPixmap] = OrderedDict()
+        self._cache_bytes = 0
+
+    def clear_cache(self) -> None:
+        """Drop every scaled copy (their thumbnails are gone)."""
+        self._cache.clear()
         self._cache_bytes = 0
 
     def sizeHint(self, option, index) -> QSize:  # the grid lays tiles out itself
@@ -115,7 +121,7 @@ class PhotoTileDelegate(QStyledItemDelegate):
             painter.fillRect(image, _HOVER)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         duration = index.data(DURATION_ROLE)
-        if duration:
+        if duration is not None:
             self._paint_chip(painter, image, duration, top_right=True, play=True)
         if holder is not None:
             self._paint_chip(painter, image, f"On {holder}", top_right=False)
@@ -202,9 +208,11 @@ class PhotoTileDelegate(QStyledItemDelegate):
         metrics = painter.fontMetrics()
         height = metrics.height() + 4
         glyph = round(metrics.ascent() * 0.7) if play else 0
-        gap = 4 if play else 0
+        gap = 4 if play and text else 0
         room = image.width() - 2 * CHIP_MARGIN - 2 * CHIP_PAD - glyph - gap
         text = metrics.elidedText(text, Qt.TextElideMode.ElideRight, max(0, room))
+        if not text:
+            gap = 0  # nothing after the play sign
         width = CHIP_PAD * 2 + glyph + gap + metrics.horizontalAdvance(text)
         chip = QRectF(0, 0, width, height)
         if top_right:
@@ -232,10 +240,11 @@ class PhotoTileDelegate(QStyledItemDelegate):
                 )
             )
             x += glyph + gap
-        painter.setPen(_BADGE_TEXT)
-        box = QRectF(x, chip.y(), chip.right() - CHIP_PAD - x, height)
-        align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        self._draw_text(painter, box, align, text)
+        if text:
+            painter.setPen(_BADGE_TEXT)
+            box = QRectF(x, chip.y(), chip.right() - CHIP_PAD - x, height)
+            align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            self._draw_text(painter, box, align, text)
         painter.restore()
 
     def _draw_text(self, painter: QPainter, rect: QRectF, flags, text: str) -> None:

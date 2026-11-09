@@ -71,13 +71,27 @@ drift apart:
   `db/schema.py:migrate()` runs on every **read-write** open, so it must stay
   idempotent; add an `if current < N:` block for each new version. Read-only
   opens (export, report, people, compare, dashboard) never migrate.
-- **Mirror schema (v7, `SCHEMA_VERSION = 7`).** `mirror_peers`,
+- **Mirror schema (added in v7).** `mirror_peers`,
   `mirror_baseline` and `mirror_offloaded` (`db/schema.py`, accessed through
   `db/mirror_store.py`) are keyed by relpath and deliberately have **no FK to
   `media_items`**: baseline rows must outlive a deleted media row (that is how
   "deleted on E" is recognised) and offloaded rows describe files absent from
   disk. Read-only opens can meet a catalog without them, so readers tolerate a
   missing table.
+- **Stored rotation (v9, `SCHEMA_VERSION = 9`).** `media_items.orientation`
+  is an EXIF value 1-8; NULL means "not read yet", a read with no tag stores 1,
+  and video Rotation 0/90/180/270 maps to 1/6/3/8
+  (`models.orientation_from_exif`). `models.display_size` swaps width and
+  height for 5-8, and the grid sizes tiles from it. `sync` backfills NULLs for
+  present, non-offloaded image/video rows it did not re-analyse this run:
+  `analysis/extract.py:read_orientations` (rotation-only ExifTool profile,
+  `-fast`), progress step "Reading rotation", written by
+  `repo.set_orientations` (only that column, committed per batch), counted in
+  `SyncReport.rotation_read` and `--dry-run`. `sync-mirror` fills D rows with
+  NULL orientation from E (`services/mirror.py:fill_mirror_orientation`) only
+  when the baseline proves both files are the same bytes. Read-only opens can
+  meet an unmigrated catalog: `GalleryRepository.media_select_list()` selects
+  NULL for columns it lacks and `MediaItem.from_row` tolerates missing keys.
 
 ### Mirror sync (`mirror/`, `services/mirror.py`)
 
@@ -270,6 +284,19 @@ imports `smart_gallery.gui.app` lazily, so the core install never loads Qt.
   `tests/gui/test_button_roles.py` enforces one visible primary button per
   page and an icon on every `Browse…` button; icons come from
   `gui/icons.py` (`set_button_icon`).
+- **Library grid.** `GroupedGrid` lays photos out in justified rows (Google
+  Photos style) instead of fixed tiles. The layout is Qt-free in
+  `gui/library/justify.py` (`justify`, `JustifiedRow`, `tile_aspect`; gap 4,
+  aspect clamped to 0.4-3.0, row height 110-340, default 190, step 20).
+  Each item's aspect comes from `ASPECT_ROLE` (`UserRole+20`), read only on
+  model reset, insert, remove and `layoutChanged`, never per paint. The grid
+  has `set_row_height`/`row_height_changed`, Ctrl+wheel zoom and a pinned
+  heading for the current group. `gui/library/tiles.py:PhotoTileDelegate`
+  paints the tiles (no names; hover check, selected ring, video chip,
+  offloaded chip) for both the Library and the person page. The photo size
+  slider (Library header left of "Sort by"; person page next to the
+  Photos/Faces segment) shares one value, `row_height` in library.json, and
+  `ctx.photo_size_changed`. Thumbnails are 512 px (`THUMB_EDGE`).
 - **Theme** lives in `gui/theme.py`: Segoe UI Variable Text for controls,
   Georgia (`serif_font`) for headings only, and one accent in two shades.
   `ACCENT` (the first Sunset stop, bright coral) is for text and thin lines

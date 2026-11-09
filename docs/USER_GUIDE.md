@@ -175,6 +175,7 @@ flowchart LR
 ## 4. The app window
 
 ![The Library page of the desktop app](images/area-library.png)
+<!-- screenshot outdated: justified grid -->
 
 From top to bottom:
 
@@ -236,6 +237,7 @@ drives**.
 The Library is where you spend most of your time.
 
 ![The Library with a folder selected](images/library-folder.png)
+<!-- screenshot outdated: justified grid -->
 
 ### The folder tree (left)
 
@@ -246,12 +248,21 @@ subfolders; untick it to see only the files directly in that folder.
 
 ### The grid (right)
 
-Each tile is one file, with a thumbnail and its name. Thumbnails are made in
-the background the first time you see them and kept, so scrolling is fast
-afterwards. Tiles are grouped under headings that follow the sort order:
+Photos fill each row edge to edge, like a photo album: portrait shots are
+narrow tiles and landscape shots are wide ones, all the same height. Tiles
+show no file names. Hover a tile to see a tick box for selecting it; the
+viewer shows the details. Videos carry a small video badge, and freed-up
+files a freed-up badge. Thumbnails are made in the background the first time
+you see them and kept, so scrolling is fast afterwards. Tiles are grouped under headings that follow the sort order:
 by month for *Date taken*, by folder for *Name*, by size band for *Size*.
 Click a heading's triangle to fold a group; right-click a heading for
-**Collapse all** and **Expand all**.
+**Collapse all** and **Expand all**. The heading of the group you are in stays
+pinned at the top while you scroll.
+
+**Photo size** (the slider at the top right, left of **Sort by**) makes the
+rows taller or shorter, from 110 to 340 pixels (190 at first). You can also
+hold **Ctrl** and turn the mouse wheel over the grid. The People page's photo
+view has the same slider and shares the setting.
 
 **Sort by** chooses *Date taken*, *Name* or *Size*; the arrow button next to
 it flips between newest/largest first and oldest/smallest first.
@@ -328,6 +339,7 @@ catalog, with their faces and information, so you can still find and count
 them. Hover over one to see which drive keeps it.
 
 ![Freed-up photos shown greyed out](images/library-offloaded.png)
+<!-- screenshot outdated: justified grid -->
 
 ---
 
@@ -452,6 +464,11 @@ Sync is quick: it compares each file's size and modification time with the
 catalog, reads only new or changed files, and removes entries for files that
 are gone. Its summary looks like `+12 ~3 -5 =40100`: 12 added, 3 updated,
 5 removed, 40,100 unchanged.
+
+The first sync after updating Smart Gallery also reads each photo's and
+video's rotation once (*Reading rotation* in the progress bar), so sideways
+shots show upright in the Library. This can take a while on a big library and
+is not repeated.
 
 If face recognition is set up, sync also tells you how many new images are
 waiting for a face scan.

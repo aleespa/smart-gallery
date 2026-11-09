@@ -136,7 +136,7 @@ drive" is recognised.
 
 ### 2.5 Schema versions and migration
 
-`config.SCHEMA_VERSION` is the version this program expects (currently **8**).
+`config.SCHEMA_VERSION` is the version this program expects (currently **9**).
 Each read-write open runs `db/schema.py:migrate`, which applies every step
 newer than the catalog's stored version:
 
@@ -149,6 +149,7 @@ newer than the catalog's stored version:
 | 6 | Indexes for suggestion counts and rejections. |
 | 7 | Mirror tables. |
 | 8 | Face undo tables. |
+| 9 | `media_items.orientation` (stored rotation, see 5.2). |
 
 Every step is "create if missing", so running it twice changes nothing.
 Read-only opens never migrate: an old catalog opened read-only stays at its
@@ -395,6 +396,12 @@ deleted, so the command can simply be run again.
    them; your face decisions are saved for the rescan (10.6).
 7. Deleted files: their faces, scan state and rejections are removed with the
    row.
+8. **Rotation backfill.** Image and video rows that are present (not freed
+   up), were not read in step 4 and have no stored orientation get it read now
+   (progress step *Reading rotation*, a light ExifTool pass). Only the
+   `orientation` column is written, committed in batches, so it can be
+   interrupted. The first sync after upgrading to schema 9 does this for the
+   whole catalog once. With `--dry-run` the files are only counted.
 
 **Freed-up files that come back.** If a freed-up file reappears with the
 catalog row's exact size and mtime (it was copied back), its freed-up flag is
@@ -403,7 +410,8 @@ untouched and a warning is logged, so the next mirror sync can't mistake it
 for an edit and overwrite the mirror's only copy.
 
 **Output:**
-`Sync — +added ~updated -deleted =unchanged`, then, if any photos have
+`Sync — +added ~updated -deleted =unchanged rotation=N` (N = files whose
+rotation was read), then, if any photos have
 never been scanned for faces, `N image(s) pending face scan — run
 smart-gallery find-faces.`
 
@@ -1110,13 +1118,13 @@ by its `db_uuid`, like a mirror (9.2).
 
 ### 12.3 Thumbnails and previews
 
-`gui/thumbs/cache.py`. Thumbnails (256 px) are cached on the gallery's drive
-at `.smart_gallery\thumbs\<id÷1000>\<id>-<mtime_ns>.jpg`; the mtime in the
-name makes an edited file get a fresh thumbnail. RAW thumbnails end in
-`-r1.jpg`: they are turned upright by the RAW's own Orientation tag (the
-embedded previews carry none), and the suffix makes the sideways ones from
-before that be made again, deleting the old file. A `.none` marker records a
-file that couldn't be thumbnailed, so it isn't retried.
+`gui/thumbs/cache.py`. Thumbnails (512 px on the long edge, `THUMB_EDGE`) are cached on the
+gallery's drive at `.smart_gallery\thumbs\<id÷1000>\<id>-<mtime_ns>-s512.jpg`; the mtime in the
+name makes an edited file get a fresh thumbnail, and `s512` is the size. RAW
+thumbnails are turned upright by the RAW's own Orientation tag (the embedded
+previews carry none). Older files (`<id>-<mtime_ns>.jpg`, `-r1.jpg`) and their
+`.none` markers are deleted when the thumbnail is made again, which happens on
+demand. A `.none` marker records a file that couldn't be thumbnailed, so it isn't retried.
 
 | File | Source of the picture |
 |---|---|
@@ -1225,8 +1233,12 @@ command with `--expect-plan` pointing at that file (9.3, 9.4).
 `content_hash`, `date_taken` (`YYYY-MM-DD`), `time_taken` (`HH:MM:SS`),
 `taken_ts`, `camera`, `lens`, `focal_length`, `aperture`, `iso`,
 `shutter_speed_text`, `shutter_speed_sec`, `latitude`, `longitude`,
-`altitude`, `width`, `height`, `duration_ms`, `codec`, `frame_rate`,
-`created_at`, `updated_at`.
+`altitude`, `width`, `height`, `orientation`, `duration_ms`, `codec`,
+`frame_rate`, `created_at`, `updated_at`.
+
+`orientation` is the EXIF orientation 1-8. NULL means not read yet; a file
+with no orientation tag is stored as 1. Videos map their Rotation 0/90/180/270
+to 1/6/3/8. For 5-8, width and height are swapped to get the displayed size.
 
 ### 13.3 Environment variables
 

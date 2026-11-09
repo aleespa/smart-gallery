@@ -716,3 +716,69 @@ def test_delegate_scales_once_per_size_and_scale(qtbot):
     assert hidpi.devicePixelRatio() == 2.0
     bigger = delegate._scaled(source, QSize(300, 200), 1.0)
     assert bigger is not first
+
+
+def _saved_state():
+    from smart_gallery.gui.paths import app_data_dir
+    from smart_gallery.gui.state_store import load_json
+
+    return load_json(app_data_dir() / "library.json")
+
+
+def test_slider_sets_row_height_and_is_remembered(qtbot, repo):
+    view, _ = _view(qtbot, repo.db_path)
+    view.collapsible.hide_btn.click()  # writes filters_shown
+    slider = view.size_slider.slider
+    assert (slider.minimum(), slider.maximum()) == (110, 340)
+    slider.setValue(250)
+    assert view.grid.row_height() == 250
+    state = _saved_state()
+    assert state["row_height"] == 250
+    assert state["filters_shown"] is False
+
+
+def test_ctrl_wheel_moves_slider(qtbot, repo):
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QWheelEvent
+
+    view, _ = _view(qtbot, repo.db_path)
+    view.show()
+    start = view.size_slider.slider.value()
+    pos = QPointF(10, 10)
+    event = QWheelEvent(
+        pos,
+        pos,
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.ControlModifier,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+    view.grid.wheelEvent(event)
+    assert view.size_slider.slider.value() == view.grid.row_height() > start
+    assert _saved_state()["row_height"] == view.grid.row_height()
+
+
+def test_bad_saved_value_falls_back(tmp_path):
+    from smart_gallery.gui.library import photo_size
+    from smart_gallery.gui.paths import app_data_dir
+    from smart_gallery.gui.state_store import save_json
+
+    path = app_data_dir() / "library.json"
+    save_json(path, {"row_height": "huge"})
+    assert photo_size.load_row_height() == 190
+    save_json(path, {"row_height": 9999})
+    assert photo_size.load_row_height() == 340
+    save_json(path, {"row_height": True})
+    assert photo_size.load_row_height() == 190
+
+
+def test_size_change_requests_thumbnails_again(qtbot, repo, make_item, tmp_path):
+    view, ctx = _view(qtbot, repo.db_path)
+    called = []
+    view._request_visible = lambda: called.append(1)
+    view._thumb_timer.timeout.disconnect()
+    view._thumb_timer.timeout.connect(view._request_visible)
+    view.size_slider.slider.setValue(300)
+    qtbot.waitUntil(lambda: bool(called))

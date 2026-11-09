@@ -17,6 +17,7 @@ class AppContext(QObject):
     catalog_updated = Signal()  # a job changed the open catalog
     filters_changed = Signal(object)  # FilterOptions
     navigate = Signal(str)  # area id
+    photo_size_changed = Signal(int)  # row height in px, from a size control
     open_in_actions = Signal(object)  # argv list for the Actions area
     open_in_import = Signal(
         object

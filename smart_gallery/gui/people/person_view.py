@@ -35,6 +35,7 @@ from smart_gallery.gui.library.view import (
     LibraryGridModel,
     attach_tiles,
 )
+from smart_gallery.gui.library.photo_size import PhotoSizeSlider
 from smart_gallery.gui.library.viewer import MediaViewer
 from smart_gallery.gui.people import model
 from smart_gallery.gui.people.faces_grid import FaceActionBar, FaceGrid
@@ -121,6 +122,7 @@ class PhotoGrid(QWidget):
         self.grid.doubleClicked.connect(self.open_viewer)
         self.model.rowsInserted.connect(self._schedule)
         self.grid.groups_toggled.connect(self._schedule)
+        self.grid.row_height_changed.connect(self._schedule)
         self.grid.verticalScrollBar().valueChanged.connect(self._schedule)
         self.grid.viewport().installEventFilter(self)
         if ctx.thumbs is not None:
@@ -223,6 +225,7 @@ class PersonPage(QWidget):
         self.rename_button = QPushButton(RENAME)
         self.library_button = QPushButton(SHOW_IN_LIBRARY)
         self.find_more_button = QPushButton(FIND_MORE)
+        self.size_slider = PhotoSizeSlider(ctx)  # drives self.photos.grid
         switch, self._mode, (self.photos_button, self.faces_button) = _segment(
             PHOTOS, FACES
         )
@@ -240,6 +243,8 @@ class PersonPage(QWidget):
         header.addWidget(self.find_more_button)
         header.addSpacing(12)
         header.addWidget(switch)
+        header.addSpacing(12)
+        header.addWidget(self.size_slider)
 
         # Suggestions strip.
         self.suggest_label = QLabel()
@@ -254,6 +259,7 @@ class PersonPage(QWidget):
 
         # Photos.
         self.photos = PhotoGrid(ctx)
+        self.size_slider.bind(self.photos.grid)
 
         # Faces.
         self.sort = QComboBox()

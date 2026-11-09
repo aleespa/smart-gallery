@@ -47,6 +47,7 @@ from smart_gallery.gui.filters_panel import FilterPanel
 from smart_gallery.gui.ui.metrics import FILTER_WIDTH, SIDEBAR_WIDTH
 from smart_gallery.gui.ui.widgets import EmptyState, PanelFooter
 from smart_gallery.gui.library.grid import ASPECT_ROLE, GroupedGrid
+from smart_gallery.gui.library.photo_size import PhotoSizeSlider
 from smart_gallery.gui.library.model import (
     FolderNode,
     LibraryQuery,
@@ -352,6 +353,9 @@ class LibraryView(QWidget):
         self.header_controls = QWidget()
         header = QHBoxLayout(self.header_controls)
         header.setContentsMargins(0, 0, 0, 0)
+        self.size_slider = PhotoSizeSlider(ctx)
+        header.addWidget(self.size_slider)
+        header.addSpacing(16)
         header.addWidget(QLabel("Sort by"))
         header.addWidget(self.sort)
         header.addWidget(self.descending)
@@ -371,6 +375,7 @@ class LibraryView(QWidget):
         self.grid_model = LibraryGridModel(self)
         self.grid.setModel(self.grid_model)
         attach_tiles(self.grid, self.grid_model)
+        self.size_slider.bind(self.grid)
         self.message = EmptyState()
         self.stack = QStackedWidget()
         self.stack.addWidget(self.grid)
@@ -408,6 +413,7 @@ class LibraryView(QWidget):
         self.grid.doubleClicked.connect(self.open_viewer)
         self.grid_model.rowsInserted.connect(self._schedule_thumbs)
         self.grid.groups_toggled.connect(self._schedule_thumbs)
+        self.grid.row_height_changed.connect(self._schedule_thumbs)
         self.grid.verticalScrollBar().valueChanged.connect(self._schedule_thumbs)
         self.grid.viewport().installEventFilter(self)
         self._tree_query.finished.connect(self._on_tree)

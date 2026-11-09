@@ -748,3 +748,16 @@ def test_face_viewer_outlines_the_face(qtbot, repo, cat):
     assert box.rect == QRectF(100, 100, 80, 80) and box.label == ""
     viewer.faces_btn.setChecked(False)
     assert viewer.boxes() == []
+
+
+def test_person_page_follows_library_size(qtbot, repo, cat):
+    alice = cat.person("Alice")
+    cat.face(cat.photo("2024-03-01"), alice)
+    ctx = _ctx(repo)
+    view = _view(qtbot, ctx)
+    page = _open_person(qtbot, view, alice)
+    ctx.photo_size_changed.emit(150)
+    assert page.photos.grid.row_height() == 150
+    assert page.size_slider.slider.value() == 150
+    page.size_slider.slider.setValue(230)
+    assert page.photos.grid.row_height() == 230

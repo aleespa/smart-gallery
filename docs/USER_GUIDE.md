@@ -253,7 +253,9 @@ narrow tiles and landscape shots are wide ones, all the same height. Tiles
 show no file names. Hover a tile and it brightens slightly. Click a tile to
 select it; the selected one shows a ring and a tick. The viewer shows the
 details. Videos show a play sign with the video's length at top right, and
-freed-up files an *On <drive>* label at bottom left.
+freed-up files a label at bottom left naming the drive that keeps the file,
+such as *On Drive D*.
+
 Thumbnails are made in the background the first time you see them and kept,
 so scrolling is fast afterwards.
 
@@ -336,7 +338,8 @@ the Library also shapes the charts.
 
 ### Greyed-out items
 
-Faded tiles with an *On <drive>* label at bottom left are photos whose file is **not on this drive**
+Faded tiles with a label at bottom left naming the drive that keeps the file,
+such as *On Drive D*, are photos whose file is **not on this drive**
 any more: they were moved to a mirror drive to free up space
 ([section 12](#12-two-drives-a-working-copy-and-a-mirror)). They stay in the
 catalog, with their faces and information, so you can still find and count

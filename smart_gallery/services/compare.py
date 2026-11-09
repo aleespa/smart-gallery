@@ -38,8 +38,8 @@ class CompareReport:
 
 
 def _load_records(repo: GalleryRepository) -> list[dict]:
-    columns = ", ".join(f'"{column}"' for column in DB_COLUMNS)
     try:
+        columns = repo.media_select_list()
         return [dict(row) for row in repo.conn.execute(
             f"SELECT {columns} FROM media_items ORDER BY relpath COLLATE NOCASE"
         )]

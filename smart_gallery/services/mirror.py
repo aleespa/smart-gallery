@@ -40,7 +40,7 @@ from smart_gallery.mirror.types import (
     Peer,
     key,
 )
-from smart_gallery.models import DB_COLUMNS, MediaItem
+from smart_gallery.models import MediaItem
 from smart_gallery.organize.filters import FilterOptions, is_query_empty, matches
 from smart_gallery.organize.organize import copy_atomic, copy_progress
 from smart_gallery.progress import FREEING, ProgressCallback, ProgressEvent
@@ -257,7 +257,6 @@ def plan_mirror_sync(
 # -- apply --------------------------------------------------------------------
 
 BASELINE_BATCH = 200
-_ITEM_SQL = f"SELECT {', '.join(DB_COLUMNS)} FROM media_items WHERE relpath=?"
 _MOVE_SQL = (
     "UPDATE media_items SET relpath=?, name=?, ext=?, directory_rel=?, "
     "size_bytes=?, mtime_ns=?, updated_at=datetime('now') WHERE relpath=?"
@@ -298,7 +297,10 @@ def purge_trash(
 
 
 def _item(repo: GalleryRepository, relpath: str) -> Optional[MediaItem]:
-    row = repo.conn.execute(_ITEM_SQL, (relpath,)).fetchone()
+    row = repo.conn.execute(
+        f"SELECT {repo.media_select_list()} FROM media_items WHERE relpath=?",
+        (relpath,),
+    ).fetchone()
     return MediaItem.from_row(row, repo.drive_root) if row else None
 
 

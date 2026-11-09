@@ -290,7 +290,8 @@ class MediaItem:
     @classmethod
     def from_row(cls, row, drive_root=None) -> "MediaItem":
         """Build from a ``sqlite3.Row`` / mapping of DB columns."""
-        data = {col: row[col] for col in DB_COLUMNS}
+        keys = set(row.keys()) if hasattr(row, "keys") else set(DB_COLUMNS)
+        data = {col: (row[col] if col in keys else None) for col in DB_COLUMNS}
         item = cls(**data)
         if drive_root is not None and item.relpath:
             item.abspath = str(to_abspath(item.relpath, drive_root))

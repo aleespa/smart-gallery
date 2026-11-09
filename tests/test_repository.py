@@ -143,3 +143,26 @@ def test_migrate_v8_adds_orientation(drive):
         ).fetchone()
         assert row[0] == "9"
         migrate(r2.conn)  # second run is harmless
+
+
+def test_read_only_v8_catalog_tolerates_missing_orientation(drive, make_item):
+    from smart_gallery.db import GalleryRepository
+    from smart_gallery.services.compare import compare_galleries
+    from smart_gallery.services.mirror import _item
+
+    r = GalleryRepository.create(drive, label="t")
+    path = r.db_path
+    r.upsert_many([make_item("Photos/a.jpg")])
+    r.conn.execute("ALTER TABLE media_items DROP COLUMN orientation")
+    r.conn.execute("UPDATE meta SET value='8' WHERE key='schema_version'")
+    r.conn.commit()
+    r.close()
+    with GalleryRepository.open(path, read_only=True) as ro:
+        items = ro.query()
+        assert [i.orientation for i in items] == [None]
+        assert ro.get_by_id(items[0].id if hasattr(items[0], "id") else 1)
+        assert _item(ro, "Photos/a.jpg").orientation is None
+        cols = [c[1] for c in ro.conn.execute("PRAGMA table_info(media_items)")]
+        assert "orientation" not in cols  # read-only open did not migrate
+    report = compare_galleries(path, path)
+    assert report.counts["unchanged"] == 1

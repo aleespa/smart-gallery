@@ -93,6 +93,12 @@ class GalleryRepository(FaceLabelsMixin, FaceUndoMixin, MirrorStoreMixin):
         # (carried, dropped) decisions of the last ``add_scan_results`` chunk.
         self.last_carryover: Tuple[int, int] = (0, 0)
 
+    def media_select_list(self) -> str:
+        """``DB_COLUMNS`` for a SELECT, with ``NULL AS col`` for any column an
+        unmigrated (older, read-only) catalog does not have yet."""
+        have = {r[1] for r in self.conn.execute("PRAGMA table_info(media_items)")}
+        return ", ".join(c if c in have else f"NULL AS {c}" for c in DB_COLUMNS)
+
     # ── lifecycle ───────────────────────────────────────────────────────────
     @staticmethod
     def _connect(db_path: Path, read_only: bool) -> sqlite3.Connection:
@@ -244,7 +250,7 @@ class GalleryRepository(FaceLabelsMixin, FaceUndoMixin, MirrorStoreMixin):
     ) -> List[MediaItem]:
         where, params = build_where(filters) if filters else ("", [])
         order_col = order_by if order_by in _ORDER_COLUMNS else "date_taken"
-        sql = f"SELECT {_COLUMN_LIST} FROM media_items{where} ORDER BY {order_col}"
+        sql = f"SELECT {self.media_select_list()} FROM media_items{where} ORDER BY {order_col}"
         sql += " DESC" if descending else " ASC"
         if limit is not None:
             sql += " LIMIT ? OFFSET ?"
@@ -254,7 +260,8 @@ class GalleryRepository(FaceLabelsMixin, FaceUndoMixin, MirrorStoreMixin):
 
     def get_by_id(self, media_id: int) -> Optional[MediaItem]:
         row = self.conn.execute(
-            f"SELECT {_COLUMN_LIST} FROM media_items WHERE id=?", (media_id,)
+            f"SELECT {self.media_select_list()} FROM media_items WHERE id=?",
+            (media_id,),
         ).fetchone()
         return MediaItem.from_row(row, self.drive_root) if row else None
 

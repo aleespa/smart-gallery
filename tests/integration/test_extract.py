@@ -1,9 +1,13 @@
 """ExifTool-backed integration tests. Run when the binary is on PATH."""
 
+import shutil
+import subprocess
+
 import pytest
 
 from smart_gallery.analysis import analyze_paths
 from smart_gallery.db import GalleryRepository
+from smart_gallery.models import display_size
 from smart_gallery.services import init_drive, sync_drive
 
 pytestmark = pytest.mark.exiftool
@@ -42,11 +46,6 @@ def test_init_and_sync_with_real_images(tmp_path, copy_image):
 
 
 def test_exiftool_reads_orientation(tmp_path, images_dir):
-    import shutil
-    import subprocess
-
-    from smart_gallery.models import display_size
-
     f = tmp_path / "o.jpg"
     shutil.copy(images_dir / "test.JPG", f)
     subprocess.run(

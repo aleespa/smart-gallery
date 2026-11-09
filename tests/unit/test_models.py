@@ -1,7 +1,9 @@
 import sqlite3
 
+import pytest
+
 from smart_gallery.db.schema import CREATE_MEDIA_ITEMS
-from smart_gallery.models import DB_COLUMNS, MediaItem
+from smart_gallery.models import DB_COLUMNS, MediaItem, display_size
 from smart_gallery.util import format_shutter, parse_shutter
 
 
@@ -77,11 +79,6 @@ def test_from_exiftool_unset_camera_clock_has_no_date():
     }
     item = MediaItem.from_exiftool(record)
     assert (item.date_taken, item.time_taken, item.taken_ts) == (None, None, None)
-
-
-import pytest  # noqa: E402
-
-from smart_gallery.models import display_size  # noqa: E402
 
 
 @pytest.mark.parametrize(

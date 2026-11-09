@@ -568,6 +568,42 @@ def _drop_stale_baseline(working, mirror, uuid: str) -> None:
         working.update_baseline(uuid, [], stale)
 
 
+def fill_mirror_orientation(
+    working: GalleryRepository, mirror: GalleryRepository, uuid: str
+) -> int:
+    """Copy ``orientation`` from the working catalog to mirror rows that have
+    none, only where the baseline proves both files are the same bytes
+    (equal size, and each drive's mtime as last synced). Returns rows updated."""
+    sql = "SELECT relpath, size_bytes, mtime_ns, orientation FROM media_items"
+    w_rows = {
+        key(r[0]): r
+        for r in working.conn.execute(sql + " WHERE orientation IS NOT NULL")
+    }
+    if not w_rows:
+        return 0
+    base = working.baseline(uuid)
+    updates = []
+    for row in mirror.conn.execute(sql + " WHERE orientation IS NULL").fetchall():
+        k = key(row[0])
+        w, b = w_rows.get(k), base.get(k)
+        if (
+            w is not None
+            and b is not None
+            and w[1] == row[1] == b.size_bytes
+            and w[2] == b.working_mtime_ns
+            and row[2] == b.mirror_mtime_ns
+        ):
+            updates.append((w[3], row[0]))
+    if updates:
+        mirror.conn.executemany(
+            "UPDATE media_items SET orientation=? "
+            "WHERE relpath=? AND orientation IS NULL",
+            updates,
+        )
+        mirror.conn.commit()
+    return len(updates)
+
+
 def apply_mirror_sync(
     working: GalleryRepository,
     mirror: GalleryRepository,
@@ -612,6 +648,7 @@ def apply_mirror_sync(
                 progress_callback(copy_progress(done, len(ops), ok, 0))
     finally:
         applier.pending.flush()  # keep finished work, even on Cancelled
+    fill_mirror_orientation(working, mirror, uuid)
     _drop_stale_baseline(working, mirror, uuid)
     report.faces = sync_face_data(working, mirror, progress_callback)
     purge_trash(mirror)

@@ -689,3 +689,57 @@ def test_preview_sizes_the_files_it_would_trash(two_drives):
     assert sorted(pv.plan.trash) == ["a.txt", "bb.txt"]
     assert pv.trash_bytes == len("a.txt") + len("bb.txt")
     assert pv.mirror_trash_bytes == 100
+
+
+# -- orientation -------------------------------------------------------------
+
+
+def _set_orientation(root, rel, value):
+    with GalleryRepository.open(root) as r:
+        r.conn.execute(
+            "UPDATE media_items SET orientation=? WHERE relpath=?", (value, rel)
+        )
+        r.conn.commit()
+
+
+def _orientation(root, rel):
+    with GalleryRepository.open(root, read_only=True) as r:
+        return r.conn.execute(
+            "SELECT orientation FROM media_items WHERE relpath=?", (rel,)
+        ).fetchone()[0]
+
+
+def test_mirror_sync_fills_null_orientation_for_unchanged_files(two_drives):
+    e, d = two_drives
+    _setup_pair(e, d, "a.txt")
+    _set_orientation(e, "a.txt", 6)
+    _set_orientation(d, "a.txt", None)
+    _sync(e, d)
+    assert _orientation(d, "a.txt") == 6
+
+
+def test_mirror_sync_leaves_orientation_when_files_differ(two_drives):
+    e, d = two_drives
+    _setup_pair(e, d, "a.txt")
+    _set_orientation(e, "a.txt", 6)
+    with GalleryRepository.open(d) as m:
+        m.conn.execute(
+            "UPDATE media_items SET orientation=NULL, mtime_ns=mtime_ns+1 "
+            "WHERE relpath='a.txt'"
+        )
+        m.conn.commit()
+    with GalleryRepository.open(e) as w, GalleryRepository.open(d) as m:
+        n = mirror_service.fill_mirror_orientation(w, m, m.get_meta("db_uuid"))
+    assert n == 0
+    assert _orientation(d, "a.txt") is None
+
+
+def test_new_copy_to_mirror_carries_orientation(two_drives):
+    e, d = two_drives
+    _setup_pair(e, d, "a.txt")
+    _put(e, "b.txt", "new")
+    with GalleryRepository.open(e) as w:
+        mirror_service.sync_drive(w)
+    _set_orientation(e, "b.txt", 8)
+    _sync(e, d)
+    assert _orientation(d, "b.txt") == 8

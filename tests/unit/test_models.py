@@ -77,3 +77,61 @@ def test_from_exiftool_unset_camera_clock_has_no_date():
     }
     item = MediaItem.from_exiftool(record)
     assert (item.date_taken, item.time_taken, item.taken_ts) == (None, None, None)
+
+
+import pytest  # noqa: E402
+
+from smart_gallery.models import display_size  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "o,expected",
+    [
+        (1, (6000, 4000)),
+        (3, (6000, 4000)),
+        (5, (4000, 6000)),
+        (6, (4000, 6000)),
+        (7, (4000, 6000)),
+        (8, (4000, 6000)),
+        (None, (6000, 4000)),
+        (2, (6000, 4000)),
+        (4, (6000, 4000)),
+    ],
+)
+def test_display_size(o, expected):
+    assert display_size(6000, 4000, o) == expected
+
+
+def test_display_size_missing_dims():
+    assert display_size(None, 4000, 6) == (4000, None)
+
+
+def test_from_exiftool_photo_orientation():
+    rec = {
+        "SourceFile": "E:/a.jpg",
+        "FileName": "a.jpg",
+        "Orientation": 6,
+        "ImageWidth": 6000,
+        "ImageHeight": 4000,
+    }
+    item = MediaItem.from_exiftool(rec)
+    assert (item.width, item.height, item.orientation) == (6000, 4000, 6)
+
+
+def test_from_exiftool_photo_without_tag_is_1():
+    rec = {"SourceFile": "E:/a.jpg", "FileName": "a.jpg"}
+    assert MediaItem.from_exiftool(rec).orientation == 1
+
+
+@pytest.mark.parametrize(
+    "deg,o", [(0, 1), (90, 6), (180, 3), (270, 8), (-90, 8), (45, 1)]
+)
+def test_from_exiftool_video_rotation(deg, o):
+    rec = {"SourceFile": "E:/v.mp4", "FileName": "v.mp4", "Rotation": deg}
+    assert MediaItem.from_exiftool(rec).orientation == o
+
+
+def test_from_path_leaves_orientation_unread(tmp_path):
+    f = tmp_path / "notes.txt"
+    f.write_text("x")
+    assert MediaItem.from_path(f).orientation is None

@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS media_items (
     codec              TEXT,
     frame_rate         REAL,
     created_at         TEXT DEFAULT (datetime('now')),
-    updated_at         TEXT DEFAULT (datetime('now'))
+    updated_at         TEXT DEFAULT (datetime('now')),
+    orientation        INTEGER
 );
 """
 
@@ -325,6 +326,11 @@ def migrate(conn: sqlite3.Connection) -> None:
     if current < 8:
         for stmt in CREATE_UNDO_TABLES:
             conn.execute(stmt)
+
+    if current < 9:
+        have = {r["name"] for r in conn.execute("PRAGMA table_info(media_items)")}
+        if "orientation" not in have:
+            conn.execute("ALTER TABLE media_items ADD COLUMN orientation INTEGER")
 
     conn.execute(
         "INSERT INTO meta(key, value) VALUES('schema_version', ?) "

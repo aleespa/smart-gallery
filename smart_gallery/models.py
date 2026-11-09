@@ -49,7 +49,31 @@ DB_COLUMNS = (
     "duration_ms",
     "codec",
     "frame_rate",
+    "orientation",
 )
+
+
+_ROTATION_TO_ORIENTATION = {0: 1, 90: 6, 180: 3, 270: 8}
+
+
+def orientation_from_exif(record: dict, media_type: str) -> int:
+    """EXIF orientation (1-8) for an ExifTool record; 1 when absent/unknown."""
+    if media_type == "video":
+        deg = to_float(record.get("Rotation"))
+        if deg is None:
+            return 1
+        return _ROTATION_TO_ORIENTATION.get(int(deg) % 360, 1)
+    value = to_int(record.get("Orientation"))
+    return value if value is not None and 1 <= value <= 8 else 1
+
+
+def display_size(
+    width: Optional[int], height: Optional[int], orientation: Optional[int]
+) -> tuple[Optional[int], Optional[int]]:
+    """Upright (width, height): swapped for the transposing orientations 5-8."""
+    if orientation is not None and 5 <= orientation <= 8:
+        return height, width
+    return width, height
 
 
 def _parse_capture(value) -> tuple[Optional[str], Optional[str], Optional[int]]:
@@ -123,6 +147,8 @@ class MediaItem:
     duration_ms: Optional[float] = None
     codec: Optional[str] = None
     frame_rate: Optional[float] = None
+    # EXIF orientation 1-8; None = not read yet, 1 = read with no tag.
+    orientation: Optional[int] = None
 
     # Working handle: the absolute filesystem path. Not a DB column; set during
     # extraction/organize and when reading rows back from the database.
@@ -245,6 +271,7 @@ class MediaItem:
             item.altitude = to_float(exif.get("GPSAltitude"))
             item.width = to_int(exif.get("ImageWidth") or exif.get("ExifImageWidth"))
             item.height = to_int(exif.get("ImageHeight") or exif.get("ExifImageHeight"))
+            item.orientation = orientation_from_exif(exif, media_type)
         elif media_type == "video":
             item.width = to_int(exif.get("ImageWidth"))
             item.height = to_int(exif.get("ImageHeight"))
@@ -254,6 +281,7 @@ class MediaItem:
                 exif.get("VideoCodecID") or exif.get("CompressorID")
             )
             item.frame_rate = to_float(exif.get("VideoFrameRate"))
+            item.orientation = orientation_from_exif(exif, media_type)
 
         if drive_root is not None:
             item.anchor(drive_root)

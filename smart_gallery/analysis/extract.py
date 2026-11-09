@@ -40,6 +40,7 @@ EXIFTOOL_IMAGE_TAG_ARGS = [
     "-GPSAltitude",
     "-ImageWidth",
     "-ImageHeight",
+    "-Orientation",
 ]
 EXIFTOOL_VIDEO_TAG_ARGS = [
     "-ImageWidth",
@@ -48,6 +49,7 @@ EXIFTOOL_VIDEO_TAG_ARGS = [
     "-VideoCodecID",
     "-CompressorID",
     "-VideoFrameRate",
+    "-Rotation",
 ]
 
 

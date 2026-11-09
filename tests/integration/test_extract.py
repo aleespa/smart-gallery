@@ -39,3 +39,23 @@ def test_init_and_sync_with_real_images(tmp_path, copy_image):
         sync_report = sync_drive(repo)
         assert sync_report.deleted == 1
         assert repo.counts()["image"] == 1
+
+
+def test_exiftool_reads_orientation(tmp_path, images_dir):
+    import shutil
+    import subprocess
+
+    from smart_gallery.models import display_size
+
+    f = tmp_path / "o.jpg"
+    shutil.copy(images_dir / "test.JPG", f)
+    subprocess.run(
+        ["exiftool", "-n", "-Orientation=6", "-overwrite_original", str(f)],
+        check=True,
+        capture_output=True,
+    )
+    items = analyze_paths([f])
+    assert items[0].orientation == 6
+    w, h = display_size(items[0].width, items[0].height, items[0].orientation)
+    assert items[0].width > items[0].height
+    assert h > w

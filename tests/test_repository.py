@@ -123,3 +123,23 @@ def test_value_counts_most_used_first(repo, make_item):
         ]
     )
     assert repo.value_counts("camera") == [("Canon", 2), ("Sony", 1)]
+
+
+def test_migrate_v8_adds_orientation(drive):
+    from smart_gallery.db import GalleryRepository
+    from smart_gallery.db.schema import migrate
+
+    r = GalleryRepository.create(drive, label="t")
+    path = r.db_path
+    r.conn.execute("ALTER TABLE media_items DROP COLUMN orientation")
+    r.conn.execute("UPDATE meta SET value='8' WHERE key='schema_version'")
+    r.conn.commit()
+    r.close()
+    with GalleryRepository.open(path) as r2:
+        cols = [c["name"] for c in r2.conn.execute("PRAGMA table_info(media_items)")]
+        assert "orientation" in cols
+        row = r2.conn.execute(
+            "SELECT value FROM meta WHERE key='schema_version'"
+        ).fetchone()
+        assert row[0] == "9"
+        migrate(r2.conn)  # second run is harmless

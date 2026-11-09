@@ -31,8 +31,8 @@ def _forbid_open(monkeypatch):
 
 def test_thumb_path_layout(tmp_path):
     p = thumb_path(tmp_path, 12345, 99)
-    assert p == tmp_path / ".smart_gallery" / "thumbs" / "12" / "12345-99.jpg"
-    assert thumb_path(tmp_path, 7, None).name == "7-0.jpg"
+    assert p == tmp_path / ".smart_gallery" / "thumbs" / "12" / "12345-99-s512.jpg"
+    assert thumb_path(tmp_path, 7, None).name == "7-0-s512.jpg"
 
 
 def test_thumbnail_jpeg(copy_image, drive):
@@ -368,19 +368,52 @@ def test_raw_preview_with_its_own_orientation_keeps_it(drive, monkeypatch):
     assert asked == []  # the preview's own tag wins; no second lookup
 
 
+def _legacy(drive, suffix, media_id=1, mtime_ns=100):
+    folder = drive / ".smart_gallery" / "thumbs" / str(media_id // 1000)
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder / f"{media_id}-{mtime_ns}{suffix}"
+
+
+def test_thumbnail_long_edge_is_512(drive):
+    Image.new("RGB", (2000, 1000), "blue").save(drive / "big.jpg")
+    out = _ensure(drive, "big.jpg")
+    assert out.name == "1-100-s512.jpg"
+    with Image.open(out) as im:
+        assert im.size == (512, 256)
+
+
+def test_raw_and_plain_share_the_new_name(drive):
+    assert thumb_path(drive, 1, 100, ".cr3") == thumb_path(drive, 1, 100, ".jpg")
+
+
+def test_old_256_thumbnail_is_not_reused_and_is_removed(drive):
+    Image.new("RGB", (2000, 1000), "blue").save(drive / "big.jpg")
+    old = [_legacy(drive, ".jpg"), _legacy(drive, "-r1.jpg")]
+    for path in old:
+        path.write_bytes(b"old 256 px thumbnail")
+    out = _ensure(drive, "big.jpg")
+    assert out == thumb_path(drive, 1, 100) and out.name.endswith("-s512.jpg")
+    assert not any(path.exists() for path in old)
+
+
+def test_old_none_marker_does_not_block_new_thumbnail(drive):
+    Image.new("RGB", (200, 100), "blue").save(drive / "ok.jpg")
+    markers = [_legacy(drive, ".none"), _legacy(drive, "-r1.none")]
+    for path in markers:
+        path.touch()
+    out = _ensure(drive, "ok.jpg")
+    assert out is not None and out.is_file()
+    assert not any(path.exists() for path in markers)
+
+
 def test_raw_thumbnail_replaces_the_old_sideways_one(drive, monkeypatch):
     _fake_raw(monkeypatch, b"6")
     (drive / "x.cr3").write_bytes(b"raw")
-    old = thumb_path(drive, 1, 100)
-    old.parent.mkdir(parents=True)
+    old = _legacy(drive, ".jpg")
     old.write_bytes(b"old sideways thumbnail")
     out = _ensure(drive, "x.cr3", ext=".cr3")
     assert out == thumb_path(drive, 1, 100, ".cr3") and out != old
     assert not old.exists()
-
-
-def test_jpeg_thumbnail_name_unchanged(drive):
-    assert thumb_path(drive, 1, 100, ".jpg") == thumb_path(drive, 1, 100)
 
 
 def test_load_preview_largest_asks_jpgfromraw_first(drive, monkeypatch):

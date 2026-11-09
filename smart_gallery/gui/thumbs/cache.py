@@ -1,7 +1,7 @@
 """On-drive thumbnail cache. No Qt here; Pillow is imported inside functions.
 
 Thumbnails live beside the catalog at
-``<root>/.smart_gallery/thumbs/<id // 1000>/<id>-<mtime_ns>.jpg``. The mtime in
+``<root>/.smart_gallery/thumbs/<id // 1000>/<id>-<mtime_ns>-s512.jpg``. The mtime in
 the name makes a changed file regenerate. A ``.none`` marker with the same stem
 records a failure so a broken file is only opened once.
 
@@ -22,7 +22,7 @@ from pathlib import Path
 
 from smart_gallery.analysis.extract import _get_exiftool_path
 
-THUMB_EDGE = 256
+THUMB_EDGE = 512
 JPEG_QUALITY = 85
 EXIFTOOL_TIMEOUT_S = 30
 FFMPEG_TIMEOUT_S = 60
@@ -45,14 +45,15 @@ class _Unavailable(Exception):
     """ExifTool could not run (missing, timed out): retry later, no marker."""
 
 
-# RAW thumbnails made before previews were turned upright have the plain name;
-# this suffix makes them be made again (and the old file is removed then).
-RAW_THUMB_SUFFIX = "-r1"
+# Thumbnails were 256 px under ``<id>-<mtime>.jpg`` (RAW: ``...-r1.jpg``). The
+# size in the name makes them be made again; the old files go once replaced.
+THUMB_SUFFIX = f"-s{THUMB_EDGE}"
+LEGACY_SUFFIXES = ("", "-r1")
 
 
 def thumb_path(root: Path, media_id: int, mtime_ns: int | None, ext: str = "") -> Path:
-    suffix = RAW_THUMB_SUFFIX if (ext or "").lower() in RAW_EXTENSIONS else ""
-    name = f"{media_id}-{mtime_ns or 0}{suffix}.jpg"
+    """``ext`` is kept for callers; every file type shares one name."""
+    name = f"{media_id}-{mtime_ns or 0}{THUMB_SUFFIX}.jpg"
     return Path(root) / ".smart_gallery" / "thumbs" / str(media_id // 1000) / name
 
 
@@ -113,15 +114,14 @@ def _ensure(root, media_id, mtime_ns, abspath, ext, media_type) -> Path | None:
 
 
 def _remove_legacy(root, media_id, mtime_ns, dest: Path) -> None:
-    """Delete the thumbnail a RAW had under its old name, now replaced."""
-    legacy = thumb_path(root, media_id, mtime_ns)
-    if legacy == dest:
-        return
-    for path in (legacy, _marker_path(legacy)):
-        try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            pass
+    """Delete the 256 px thumbnails and failure markers, now replaced."""
+    for suffix in LEGACY_SUFFIXES:
+        for ext in (".jpg", ".none"):
+            path = dest.with_name(f"{media_id}-{mtime_ns or 0}{suffix}{ext}")
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _write_marker(marker: Path) -> None:

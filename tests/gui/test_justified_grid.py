@@ -220,8 +220,8 @@ def test_page_down_moves_about_one_viewport(qtbot):
 
 
 def test_pinned_heading_toggles_its_group(qtbot):
-    groups = [RowGroup(0, 40, "A"), RowGroup(40, 40, "B")]
-    grid, model = _grid(qtbot, [1.5] * 80, groups)
+    groups = [RowGroup(0, 40, "A"), RowGroup(40, 40, "B"), RowGroup(80, 40, "C")]
+    grid, model = _grid(qtbot, [1.5] * 120, groups)
     bar = grid.verticalScrollBar()
     b_heading = _rect(grid, model, 40).top() + grid.verticalOffset() - HEADER_HEIGHT
     bar.setValue(300)  # inside A: A's heading is pinned
@@ -233,6 +233,11 @@ def test_pinned_heading_toggles_its_group(qtbot):
     qtbot.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton, pos=QPoint(20, 5))
     assert grid.is_collapsed("B")
     assert not grid.is_collapsed("A")
+    # The view stays on B: its heading sits at the top, no longer pinned.
+    assert grid.heading_at(QPoint(20, 5)) == 1
+    assert grid._pinned()[0] == -1
+    assert grid.verticalOffset() == b_heading
+    assert _rect(grid, model, 80).top() == 2 * HEADER_HEIGHT  # C follows
 
 
 def test_pinned_heading_is_pushed_up_by_the_next(qtbot):
@@ -277,3 +282,13 @@ def test_pinned_heading_is_painted_over_the_tiles(qtbot):
     assert grid.indexAt(QPoint(x, HEADER_HEIGHT + 30)).isValid()
     assert image.pixelColor(x, HEADER_HEIGHT + 30) == QColor("red")
     assert image.pixelColor(x, 2) == back  # the pinned band, not a tile
+
+
+def test_scroll_to_a_tall_tile_keeps_its_top_under_the_band(qtbot):
+    groups = [RowGroup(0, 40, "A")]
+    grid, model = _grid(qtbot, [1.5] * 40, groups, height=150)  # rows 161 tall
+    grid.scrollTo(model.index(20, 0))
+    assert grid._pinned()[0] == 0
+    assert _rect(grid, model, 20).top() == HEADER_HEIGHT  # just under the band
+    grid.scrollTo(model.index(0, 0))
+    assert grid.verticalOffset() == 0  # the first row brings its heading

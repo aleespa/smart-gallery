@@ -50,6 +50,8 @@ from smart_gallery.gui.library.justify import (
 from smart_gallery.gui.library.model import RowGroup
 
 # Width / height of an index's tile; the grid reads it, the model provides it.
+# Read only on modelReset, rowsInserted, rowsRemoved and layoutChanged: a
+# dataChanged on this role does not lay the grid out again.
 ASPECT_ROLE = Qt.ItemDataRole.UserRole + 20
 FALLBACK_ASPECT = 1.5  # an index without a usable aspect: a 3:2 photo
 HEADER_HEIGHT = 40
@@ -400,7 +402,8 @@ class GroupedGrid(QAbstractItemView):
         elif top < bar.value():
             bar.setValue(top)
         elif rect.bottom() > bar.value() + page:
-            bar.setValue(rect.bottom() - page + 1)
+            # A tile taller than the room under the band keeps its top in view.
+            bar.setValue(min(top, rect.bottom() - page + 1))
 
     def horizontalOffset(self) -> int:
         return 0
@@ -513,8 +516,13 @@ class GroupedGrid(QAbstractItemView):
     def mousePressEvent(self, event) -> None:
         gi = self.heading_at(event.position().toPoint())
         if gi >= 0 and event.button() == Qt.MouseButton.LeftButton:
+            pinned = self._pinned()[0] == gi
             label = self._layout[gi].label
             self.set_collapsed(label, not self.is_collapsed(label))
+            if pinned:
+                # Its rows above the top edge changed; keep its heading at
+                # the top instead of landing inside a later group.
+                self.verticalScrollBar().setValue(self._tops[gi])
             return
         super().mousePressEvent(event)
 

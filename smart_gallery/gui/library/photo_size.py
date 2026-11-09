@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QHBoxLayout, QSlider, QWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QSlider, QWidget
 
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.library.justify import (
@@ -87,6 +87,10 @@ class PhotoSizeSlider(QWidget):
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(SAVE_DELAY_MS)
         self._save_timer.timeout.connect(self.flush)
+        # A change in the last SAVE_DELAY_MS before quitting is still saved.
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self._flush_pending)
         self.slider.valueChanged.connect(self._on_slider)
         ctx.photo_size_changed.connect(self._on_context)
 
@@ -120,6 +124,11 @@ class PhotoSizeSlider(QWidget):
         """Write the current size now."""
         self._save_timer.stop()
         save_row_height(self._current)
+
+    def _flush_pending(self) -> None:
+        """Write a size still waiting out its delay (nothing otherwise)."""
+        if self._save_timer.isActive():
+            self.flush()
 
     def _on_context(self, px: int) -> None:
         """A change made elsewhere: follow it without saving or re-emitting."""

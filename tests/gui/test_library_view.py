@@ -855,3 +855,20 @@ def test_library_tells_the_model_which_rows_are_on_screen(qtbot, repo, make_item
     visible = view.grid.visible_rows()
     keys = {view.grid_model._key(view.grid_model.rows[i]) for i in visible}
     assert keys and view.grid_model._on_screen == keys
+
+
+def test_size_save_is_flushed_on_quit(qtbot, repo, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+
+    from smart_gallery.gui.library import photo_size
+
+    writes = []
+    monkeypatch.setattr(photo_size, "save_row_height", writes.append)
+    view, _ = _view(qtbot, repo.db_path)
+    QApplication.instance().aboutToQuit.emit()
+    assert writes == []  # nothing changed: nothing to write
+    view.size_slider.slider.setValue(250)
+    assert writes == []  # still waiting out the drag
+    QApplication.instance().aboutToQuit.emit()
+    assert writes == [250]
+    assert not view.size_slider._save_timer.isActive()

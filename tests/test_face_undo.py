@@ -179,7 +179,7 @@ def test_migrate_v7_catalog_adds_undo_tables(drive):
             )
         }
         assert set(UNDO_TABLES) <= names
-        assert repo.schema_version == 8
+        assert repo.schema_version == 9
 
 
 def test_undo_refuses_when_restored_person_was_deleted(cat, repo):

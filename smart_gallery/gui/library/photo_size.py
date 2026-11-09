@@ -7,7 +7,7 @@ to the filter panel's own key) and shared between pages through
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QHBoxLayout, QSlider, QWidget
 
@@ -24,6 +24,7 @@ from smart_gallery.gui.state_store import load_json, save_json
 KEY = "row_height"
 TOOLTIP = "Photo size (Ctrl + scroll wheel)"
 STATE_FILE = "library.json"
+SAVE_DELAY_MS = 300  # one write after a drag, not one per step
 
 
 def _clamp(px: int) -> int:
@@ -82,6 +83,10 @@ class PhotoSizeSlider(QWidget):
         layout.addWidget(self.slider)
         layout.addWidget(_Glyph(12))
         self.setToolTip(TOOLTIP)
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(SAVE_DELAY_MS)
+        self._save_timer.timeout.connect(self.flush)
         self.slider.valueChanged.connect(self._on_slider)
         ctx.photo_size_changed.connect(self._on_context)
 
@@ -108,13 +113,21 @@ class PhotoSizeSlider(QWidget):
             return
         self._current = px
         self._show(px)
-        save_row_height(px)
+        self._save_timer.start()
         self.ctx.photo_size_changed.emit(px)
+
+    def flush(self) -> None:
+        """Write the current size now."""
+        self._save_timer.stop()
+        save_row_height(self._current)
 
     def _on_context(self, px: int) -> None:
         """A change made elsewhere: follow it without saving or re-emitting."""
         px = _clamp(px)
+        if px == self._current:
+            return  # our own change coming back
         self._current = px
         self._show(px)
+        self._save_timer.stop()  # the page that changed it saves
         if self._grid is not None:
             self._grid.set_row_height(px)

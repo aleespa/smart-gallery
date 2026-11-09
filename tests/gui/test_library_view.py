@@ -732,6 +732,7 @@ def test_slider_sets_row_height_and_is_remembered(qtbot, repo):
     assert (slider.minimum(), slider.maximum()) == (110, 340)
     slider.setValue(250)
     assert view.grid.row_height() == 250
+    qtbot.waitUntil(lambda: _saved_state().get("row_height") == 250)
     state = _saved_state()
     assert state["row_height"] == 250
     assert state["filters_shown"] is False
@@ -757,7 +758,7 @@ def test_ctrl_wheel_moves_slider(qtbot, repo):
     )
     view.grid.wheelEvent(event)
     assert view.size_slider.slider.value() == view.grid.row_height() > start
-    assert _saved_state()["row_height"] == view.grid.row_height()
+    qtbot.waitUntil(lambda: _saved_state().get("row_height") == view.grid.row_height())
 
 
 def test_bad_saved_value_falls_back(tmp_path):
@@ -782,3 +783,15 @@ def test_size_change_requests_thumbnails_again(qtbot, repo, make_item, tmp_path)
     view._thumb_timer.timeout.connect(view._request_visible)
     view.size_slider.slider.setValue(300)
     qtbot.waitUntil(lambda: bool(called))
+
+
+def test_drag_writes_once(qtbot, repo, monkeypatch):
+    from smart_gallery.gui.library import photo_size
+
+    writes = []
+    monkeypatch.setattr(photo_size, "save_row_height", writes.append)
+    view, _ = _view(qtbot, repo.db_path)
+    for px in (150, 200, 250, 300):
+        view.size_slider.slider.setValue(px)
+    qtbot.waitUntil(lambda: bool(writes))
+    assert writes == [300]

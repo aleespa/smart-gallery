@@ -447,10 +447,12 @@ class PersonPage(QWidget):
     def _show_mode(self, *_args) -> None:
         if self.faces_button.isChecked():
             self.body.setCurrentWidget(self.faces_page)
+            self.size_slider.hide()
             if self._faces_for != (self.person_id, self.sort.currentData()):
                 self._load_faces()
         else:
             self.body.setCurrentWidget(self.photos)
+            self.size_slider.show()
 
     def _name(self) -> str:
         row = self.summary.row if self.summary is not None else None
@@ -554,6 +556,8 @@ class SeveralPeoplePage(QWidget):
         self.count = QLabel()
         self.library_button = QPushButton(SHOW_IN_LIBRARY)
         self.photos = PhotoGrid(ctx)
+        self.size_slider = PhotoSizeSlider(ctx)
+        self.size_slider.bind(self.photos.grid)
         header = QHBoxLayout()
         header.addWidget(self.title, 1)
         header.addWidget(switch)
@@ -561,6 +565,8 @@ class SeveralPeoplePage(QWidget):
         header.addWidget(self.count)
         header.addSpacing(12)
         header.addWidget(self.library_button)
+        header.addSpacing(12)
+        header.addWidget(self.size_slider)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(header)

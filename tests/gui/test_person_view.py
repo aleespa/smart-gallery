@@ -761,3 +761,49 @@ def test_person_page_follows_library_size(qtbot, repo, cat):
     assert page.size_slider.slider.value() == 150
     page.size_slider.slider.setValue(230)
     assert page.photos.grid.row_height() == 230
+
+
+def test_several_people_page_shares_photo_size(qtbot, repo, cat):
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+
+    ctx = _ctx(repo)
+    view = _view(qtbot, ctx)
+    page = view.several_page
+    assert page.size_slider is not None
+    ctx.photo_size_changed.emit(150)
+    assert page.photos.grid.row_height() == 150
+    seen = []
+    ctx.photo_size_changed.connect(seen.append)
+    pos = QPointF(10, 10)
+    page.photos.grid.wheelEvent(
+        QWheelEvent(
+            pos,
+            pos,
+            QPoint(0, 0),
+            QPoint(0, 120),
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.ControlModifier,
+            Qt.ScrollPhase.NoScrollPhase,
+            False,
+        )
+    )
+    assert seen == [page.photos.grid.row_height()] and seen[0] > 150
+
+
+def test_person_slider_hidden_in_faces_mode_and_resize_requests_thumbs(
+    qtbot, repo, cat
+):
+    alice = cat.person("Alice")
+    cat.face(cat.photo("2024-03-01"), alice)
+    view = _view(qtbot, _ctx(repo))
+    page = _open_person(qtbot, view, alice)
+    called = []
+    page.photos._timer.timeout.disconnect()
+    page.photos._timer.timeout.connect(lambda: called.append(1))
+    page.size_slider.slider.setValue(300)
+    qtbot.waitUntil(lambda: bool(called))
+    _open_faces(qtbot, page)
+    assert page.size_slider.isHidden()
+    page.photos_button.click()
+    assert not page.size_slider.isHidden()

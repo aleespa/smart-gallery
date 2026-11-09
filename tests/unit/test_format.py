@@ -1,4 +1,9 @@
-from smart_gallery.format import format_count, format_duration, format_size
+from smart_gallery.format import (
+    format_count,
+    format_date,
+    format_duration,
+    format_size,
+)
 
 
 def test_size_three_significant_figures():
@@ -34,3 +39,10 @@ def test_size_decimals_follow_rounded_value():
 
 def test_duration_negative_is_zero():
     assert format_duration(-7195) == "0s"
+
+
+def test_date_short_month():
+    assert format_date("2026-03-01") == "1 Mar 2026"
+    assert format_date("2025-12-24 18:30:00") == "24 Dec 2025"
+    assert format_date(None) == ""
+    assert format_date("not a date") == ""

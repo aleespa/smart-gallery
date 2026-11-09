@@ -14,24 +14,18 @@ from PySide6.QtCore import (
     QAbstractListModel,
     QEvent,
     QModelIndex,
-    QPointF,
-    QRectF,
-    QSize,
     Qt,
     QTimer,
     Signal,
 )
 from PySide6.QtGui import (
-    QFont,
     QPainter,
     QPalette,
     QPixmap,
-    QPolygonF,
     QStandardItem,
     QStandardItemModel,
 )
 from PySide6.QtWidgets import (
-    QApplication,
     QCheckBox,
     QComboBox,
     QHBoxLayout,
@@ -52,7 +46,7 @@ from smart_gallery.gui.collapsible_filters import CollapsibleFilters
 from smart_gallery.gui.filters_panel import FilterPanel
 from smart_gallery.gui.ui.metrics import FILTER_WIDTH, SIDEBAR_WIDTH
 from smart_gallery.gui.ui.widgets import EmptyState, PanelFooter
-from smart_gallery.gui.library.grid import GroupedGrid
+from smart_gallery.gui.library.grid import ASPECT_ROLE, GroupedGrid
 from smart_gallery.gui.library.model import (
     FolderNode,
     LibraryQuery,
@@ -62,7 +56,14 @@ from smart_gallery.gui.library.model import (
     library_rows,
     library_stats,
 )
-from smart_gallery.format import format_count
+from smart_gallery.format import format_count, format_date
+from smart_gallery.gui.library.tiles import (
+    DURATION_ROLE,
+    OFFLOADED_OPACITY,
+    OFFLOADED_ROLE,
+    PLACEHOLDER_ROLE,
+    PhotoTileDelegate,
+)
 from smart_gallery.gui.library.viewer import MediaViewer, format_duration, format_size
 from smart_gallery.gui.mirror.menu import MirrorButton, peer_label
 from smart_gallery.mirror.types import key as relpath_key
@@ -70,10 +71,10 @@ from smart_gallery.gui.thumbs.placeholder import placeholder_for
 from smart_gallery.gui.repo_query import RepoQuery
 from smart_gallery.organize.filters import is_query_empty
 
-ICON_EDGE = 150
-GRID_SIZE = QSize(ICON_EDGE + 20, ICON_EDGE + 40)
 THUMB_DEBOUNCE_MS = 120
-PIXMAP_CACHE_SIZE = 600  # ~55 MB of tile pixmaps
+# Thumbnails kept, by their pixels (512 x 341 is 0.7 MB): enough for a full
+# screen of the smallest tiles and a little scrolling either way.
+PIXMAP_CACHE_BYTES = 200 * 1024 * 1024
 TREE_INDENT = theme.TREE_INDENT
 # (label, sort, descending by default): newest, A to Z, largest first.
 SORTS = (("Date taken", "date", True), ("Name", "name", False), ("Size", "size", True))
@@ -97,57 +98,17 @@ DISCONNECTED = "Drive not connected. Plug in {label} to browse it."
 NOTHING = "Nothing matches this folder and the current filters."
 READ_ERROR = "Could not read the catalog: {error}"
 OFFLOADED_TIP = "On {label} only"
-OFFLOADED_OPACITY = 0.35
-
-_BADGE_BG = theme.qcolor(theme.BADGE_BACK)
-_BADGE_FG = theme.qcolor(theme.BADGE_TEXT)
-
-
-def _with_video_badge(frame: QPixmap, duration: str) -> QPixmap:
-    """``frame`` with a play sign in the middle and ``duration`` in the
-    bottom-right corner, so a video tile still reads as a video."""
-    tile = QPixmap(frame)
-    w, h = tile.width(), tile.height()
-    p = QPainter(tile)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setPen(Qt.PenStyle.NoPen)
-    radius = min(w, h) * 0.16
-    cx, cy = w / 2, h / 2
-    p.setBrush(_BADGE_BG)
-    p.drawEllipse(QPointF(cx, cy), radius, radius)
-    p.setBrush(_BADGE_FG)
-    side = radius * 0.9
-    tri = [
-        QPointF(cx - side * 0.38, cy - side * 0.55),
-        QPointF(cx - side * 0.38, cy + side * 0.55),
-        QPointF(cx + side * 0.62, cy),
-    ]
-    p.drawPolygon(QPolygonF(tri))
-    if duration:
-        font = QFont(p.font())
-        font.setPointSize(9)
-        font.setBold(True)
-        p.setFont(font)
-        metrics = p.fontMetrics()
-        pad = 4
-        box = QRectF(
-            0, 0, metrics.horizontalAdvance(duration) + pad * 2, metrics.height() + 2
-        )
-        box.moveBottomRight(QPointF(w - 6, h - 6))
-        p.setBrush(_BADGE_BG)
-        p.drawRoundedRect(box, 4, 4)
-        p.setPen(_BADGE_FG)
-        p.drawText(box, Qt.AlignmentFlag.AlignCenter, duration)
-    p.end()
-    return tile
+UNKNOWN_HOLDER = "the mirror"  # an offloaded file whose mirror is not known
+NO_DATE = "No date"
 
 
 _faded: dict[int, QPixmap] = {}
 
 
 def _faded_placeholder(row: LibraryRow) -> QPixmap:
-    """The row's placeholder drawn faint: the file is kept on a mirror only."""
-    tile = placeholder_for(row)
+    """The row's placeholder glyph drawn faint: the file is kept on a mirror
+    only. The tile delegate draws the backing under it."""
+    tile = placeholder_for(row, back=False)
     cached = _faded.get(tile.cacheKey())
     if cached is not None:
         return cached
@@ -161,11 +122,17 @@ def _faded_placeholder(row: LibraryRow) -> QPixmap:
     return faded
 
 
+def _pixmap_bytes(pixmap: QPixmap) -> int:
+    return pixmap.width() * pixmap.height() * 4
+
+
 class LibraryGridModel(QAbstractListModel):
     """The grid's rows; tiles show a cached thumbnail pixmap or a placeholder.
 
-    Pixmaps are keyed by (id, mtime_ns), so a reload keeps the ones whose
-    file did not change, and only the most recently shown are kept.
+    Pixmaps are the thumbnails as loaded (``PhotoTileDelegate`` scales them to
+    the tile), keyed by (id, mtime_ns), so a reload keeps the ones whose file
+    did not change; the most recently shown are kept, up to
+    ``PIXMAP_CACHE_BYTES``.
     """
 
     def __init__(self, parent=None):
@@ -173,6 +140,7 @@ class LibraryGridModel(QAbstractListModel):
         self.rows: list[LibraryRow] = []
         self._row_of: dict[int, int] = {}
         self._pixmaps: OrderedDict[tuple, QPixmap] = OrderedDict()
+        self._pixmap_bytes = 0
         self._missing: set[tuple] = set()  # no thumbnail: keep the placeholder
         self.holders: dict[int, str] = {}  # offloaded row id -> mirror label
 
@@ -187,17 +155,24 @@ class LibraryGridModel(QAbstractListModel):
         if not index.isValid() or index.row() >= len(self.rows):
             return None
         row = self.rows[index.row()]
-        if role == Qt.ItemDataRole.DisplayRole:
+        if role == Qt.ItemDataRole.DisplayRole:  # not painted; for screen readers
             return PurePosixPath(row.relpath).name
+        if role == ASPECT_ROLE:
+            return row.aspect
+        if role == DURATION_ROLE:
+            if row.media_type != "video" or row.duration_ms is None:
+                return ""
+            return format_duration(row.duration_ms)
+        if role == OFFLOADED_ROLE:
+            return self._holder(row) if row.offloaded else None
         if role == Qt.ItemDataRole.ToolTipRole:
+            return self._tooltip(row)
+        if role == PLACEHOLDER_ROLE:
             if row.offloaded:
-                label = self.holders.get(row.id) or "the mirror"
-                return OFFLOADED_TIP.format(label=label)
-            return row.relpath
-        if role == Qt.ItemDataRole.ForegroundRole and row.offloaded:
-            return QApplication.palette().color(
-                QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text
-            )
+                return _faded_placeholder(row)
+            if self._key(row) in self._pixmaps:
+                return None
+            return placeholder_for(row, back=False)
         if role == Qt.ItemDataRole.DecorationRole:
             if row.offloaded:
                 return _faded_placeholder(row)
@@ -208,6 +183,19 @@ class LibraryGridModel(QAbstractListModel):
             self._pixmaps.move_to_end(key)
             return pixmap
         return None
+
+    def _holder(self, row: LibraryRow) -> str:
+        return self.holders.get(row.id) or UNKNOWN_HOLDER
+
+    def _tooltip(self, row: LibraryRow) -> str:
+        """File name, then date taken and size, then where an offloaded file is."""
+        details = format_date(row.date_taken) or NO_DATE
+        if row.size_bytes is not None:
+            details = f"{details} · {format_size(row.size_bytes)}"
+        tip = f"{PurePosixPath(row.relpath).name}\n{details}"
+        if row.offloaded:
+            tip += "\n" + OFFLOADED_TIP.format(label=self._holder(row))
+        return tip
 
     def set_rows(
         self, rows: list[LibraryRow], holders: dict[int, str] | None = None
@@ -225,6 +213,7 @@ class LibraryGridModel(QAbstractListModel):
     def forget_thumbnails(self) -> None:
         """Drop every pixmap: ids from another catalog mean other files."""
         self._pixmaps.clear()
+        self._pixmap_bytes = 0
         self._missing.clear()
 
     def needs_thumbnail(self, row: LibraryRow) -> bool:
@@ -247,20 +236,18 @@ class LibraryGridModel(QAbstractListModel):
         if pixmap.isNull():
             self._missing.add(key)
         else:
-            pixmap = pixmap.scaled(
-                ICON_EDGE,
-                ICON_EDGE,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            if row.media_type == "video":
-                pixmap = _with_video_badge(pixmap, format_duration(row.duration_ms))
+            old = self._pixmaps.pop(key, None)
+            if old is not None:
+                self._pixmap_bytes -= _pixmap_bytes(old)
             self._pixmaps[key] = pixmap
-            self._pixmaps.move_to_end(key)
-            while len(self._pixmaps) > PIXMAP_CACHE_SIZE:
-                self._pixmaps.popitem(last=False)
+            self._pixmap_bytes += _pixmap_bytes(pixmap)
+            while self._pixmap_bytes > PIXMAP_CACHE_BYTES and len(self._pixmaps) > 1:
+                _key, dropped = self._pixmaps.popitem(last=False)
+                self._pixmap_bytes -= _pixmap_bytes(dropped)
         index = self.index(i)
-        self.dataChanged.emit(index, index, [Qt.ItemDataRole.DecorationRole])
+        self.dataChanged.emit(
+            index, index, [Qt.ItemDataRole.DecorationRole, PLACEHOLDER_ROLE]
+        )
         return True
 
 
@@ -362,8 +349,7 @@ class LibraryView(QWidget):
             )
 
         self.grid = GroupedGrid()
-        self.grid.setIconSize(QSize(ICON_EDGE, ICON_EDGE))
-        self.grid.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self.grid.setItemDelegate(PhotoTileDelegate(self.grid))
         self.grid_model = LibraryGridModel(self)
         self.grid.setModel(self.grid_model)
         self.message = EmptyState()

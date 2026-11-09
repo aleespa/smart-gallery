@@ -34,7 +34,9 @@ from smart_gallery.colors import (  # noqa: F401  (re-exported for the GUI)
     ON_WARNING,
     SUNSET,
     TILE_BACK,
+    TILE_CHECK_BACK,
     TILE_GLYPH,
+    TILE_HOVER,
     WARNING,
 )
 

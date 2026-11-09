@@ -511,7 +511,9 @@ def test_library_greys_offloaded_items(qtbot, tmp_path, make_item):
         r.relpath: model.data(model.index(i), Qt.ItemDataRole.ToolTipRole)
         for i, r in enumerate(model.rows)
     }
-    assert tips == {"a.jpg": "On Drive D only", "b.jpg": "b.jpg"}
+    assert tips["a.jpg"].startswith("a.jpg\n")
+    assert tips["a.jpg"].endswith("\nOn Drive D only")
+    assert tips["b.jpg"].startswith("b.jpg\n") and "only" not in tips["b.jpg"]
     offloaded = next(r for r in model.rows if r.offloaded)
     assert not model.needs_thumbnail(offloaded)
     assert view.mirror_btn.parent() is view.header_controls

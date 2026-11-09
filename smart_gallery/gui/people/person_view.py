@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from PySide6.QtCore import QEvent, QModelIndex, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QModelIndex, Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -30,11 +30,8 @@ from smart_gallery.gui import theme
 from smart_gallery.gui.context import AppContext
 from smart_gallery.gui.library.grid import GroupedGrid
 from smart_gallery.gui.library.model import LibraryQuery, group_rows, library_rows
-from smart_gallery.gui.library.view import (
-    ICON_EDGE,
-    THUMB_DEBOUNCE_MS,
-    LibraryGridModel,
-)
+from smart_gallery.gui.library.tiles import PhotoTileDelegate
+from smart_gallery.gui.library.view import THUMB_DEBOUNCE_MS, LibraryGridModel
 from smart_gallery.gui.library.viewer import MediaViewer
 from smart_gallery.gui.people import model
 from smart_gallery.gui.people.faces_grid import FaceActionBar, FaceGrid
@@ -107,8 +104,7 @@ class PhotoGrid(QWidget):
         self.root: Path | None = None
         self.viewer: MediaViewer | None = None
         self.grid = GroupedGrid()
-        self.grid.setIconSize(QSize(ICON_EDGE, ICON_EDGE))
-        self.grid.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self.grid.setItemDelegate(PhotoTileDelegate(self.grid))
         self.model = LibraryGridModel(self)
         self.grid.setModel(self.model)
         layout = QVBoxLayout(self)

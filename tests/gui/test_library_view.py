@@ -1,3 +1,4 @@
+import pytest
 from PIL import Image
 from PySide6.QtCore import QObject, QPoint, Qt, Signal
 from PySide6.QtGui import QPixmap
@@ -127,7 +128,7 @@ def test_thumbnails_requested_for_visible_rows_only(qtbot, repo, make_item, tmp_
     ctx.thumbs.ready.emit(str(repo.drive_root), first.id, str(thumb))
     pixmap = view.grid_model.data(index, Qt.ItemDataRole.DecorationRole)
     assert isinstance(pixmap, QPixmap) and pixmap is not placeholder
-    assert pixmap.width() <= view.grid.iconSize().width()
+    assert (pixmap.width(), pixmap.height()) == (256, 128)  # scaled at paint time
 
 
 def test_scrolling_drops_queued_thumbnails_before_requesting_visible_ones(
@@ -151,9 +152,11 @@ def test_scrolling_drops_queued_thumbnails_before_requesting_visible_ones(
     assert ("request", last) in ctx.thumbs.log
 
 
-def test_video_tile_requests_a_thumbnail_and_badges_it(
+def test_video_tile_requests_a_thumbnail_and_keeps_the_frame(
     qtbot, repo, make_item, tmp_path
 ):
+    from smart_gallery.gui.library.tiles import DURATION_ROLE
+
     repo.upsert_many(
         [make_item("v.mp4", media_type="video", ext=".mp4", duration_ms=83_000)]
     )
@@ -167,17 +170,16 @@ def test_video_tile_requests_a_thumbnail_and_badges_it(
     placeholder = view.grid_model.data(index, Qt.ItemDataRole.DecorationRole)
     assert not placeholder.isNull()
     assert view.grid_model.data(index, Qt.ItemDataRole.DisplayRole) == "v.mp4"
+    assert view.grid_model.data(index, DURATION_ROLE) == "1:23"
 
     frame = tmp_path / "frame.jpg"
     Image.new("RGB", (256, 144), (0, 0, 255)).save(frame)
     ctx.thumbs.ready.emit(str(view._root), row.id, str(frame))
     tile = view.grid_model.data(index, Qt.ItemDataRole.DecorationRole).toImage()
     assert tile.cacheKey() != placeholder.toImage().cacheKey()
-    # The frame shows at the edge; the centre carries the light play badge.
-    edge = tile.pixelColor(8, tile.height() // 2)
-    centre = tile.pixelColor(tile.width() // 2 + 4, tile.height() // 2)
-    assert edge.blue() > 200 and edge.red() < 60
-    assert centre.red() > 150 and centre.green() > 150
+    # The frame as loaded: the delegate paints the play chip, not the model.
+    centre = tile.pixelColor(tile.width() // 2, tile.height() // 2)
+    assert centre.blue() > 200 and centre.red() < 60
 
 
 def test_gallery_change_cancels_pending_thumbnails(qtbot, repo, make_item, tmp_path):
@@ -443,3 +445,213 @@ def test_library_summary_cleared_after_failure_and_gallery_change(
     qtbot.waitUntil(lambda: emitted[-1].startswith("1 file"))
     ctx.set_gallery(None)
     assert view.summary_text == "" and emitted[-1] == ""
+
+
+# ── tile look and model roles ───────────────────────────────────────────────
+
+
+def _row(i, name, **kwargs):
+    from smart_gallery.gui.library.model import LibraryRow
+
+    values = dict(
+        media_type="image",
+        ext="." + name.rsplit(".", 1)[-1],
+        mtime_ns=1,
+        date_taken="2026-03-01",
+        size_bytes=3_250_000,
+        width=3000,
+        height=2000,
+        orientation=1,
+    )
+    values.update(kwargs)
+    return LibraryRow(i, name, **values)
+
+
+def _tile_grid(qtbot, rows, holders=None, delegate=None, size=(800, 500)):
+    """A shown Library grid of ``rows`` painted by ``delegate``."""
+    from PySide6.QtWidgets import QFrame
+
+    from smart_gallery.gui.library.grid import GroupedGrid
+    from smart_gallery.gui.library.model import group_rows
+    from smart_gallery.gui.library.tiles import PhotoTileDelegate
+    from smart_gallery.gui.library.view import LibraryGridModel
+
+    grid = GroupedGrid()
+    qtbot.addWidget(grid)
+    grid.setFrameShape(QFrame.Shape.NoFrame)
+    model = LibraryGridModel(grid)
+    grid.setModel(model)
+    grid.setItemDelegate(delegate or PhotoTileDelegate(grid))
+    grid.set_groups(group_rows(rows, "date"))
+    model.set_rows(rows, holders)
+    grid.resize(*size)
+    grid.show()
+    qtbot.waitExposed(grid)
+    return grid, model
+
+
+def _recording_delegate():
+    from smart_gallery.gui.library.tiles import PhotoTileDelegate
+
+    class Recording(PhotoTileDelegate):
+        def __init__(self):
+            super().__init__()
+            self.texts = []
+
+        def _draw_text(self, painter, rect, flags, text):
+            self.texts.append(text)
+            super()._draw_text(painter, rect, flags, text)
+
+    return Recording()
+
+
+def test_tiles_draw_no_file_name(qtbot):
+    delegate = _recording_delegate()
+    grid, model = _tile_grid(qtbot, [_row(1, "a.jpg")], delegate=delegate)
+    delegate.texts.clear()
+    grid.grab()
+    assert delegate.texts == []
+    assert model.data(model.index(0), Qt.ItemDataRole.DisplayRole) == "a.jpg"
+
+
+def test_video_tile_has_duration_role(qtbot):
+    from smart_gallery.gui.library.tiles import DURATION_ROLE
+
+    rows = [
+        _row(1, "v.mp4", media_type="video", duration_ms=42_000),
+        _row(2, "a.jpg"),
+    ]
+    delegate = _recording_delegate()
+    grid, model = _tile_grid(qtbot, rows, delegate=delegate)
+    assert model.data(model.index(0), DURATION_ROLE) == "0:42"
+    assert model.data(model.index(1), DURATION_ROLE) == ""
+    delegate.texts.clear()
+    grid.grab()
+    assert delegate.texts == ["0:42"]  # the chip, once; no names
+
+
+def test_tiles_answer_their_aspect_as_soon_as_rows_are_set(qtbot):
+    from smart_gallery.gui.library.grid import ASPECT_ROLE
+
+    rows = [_row(1, "a.jpg"), _row(2, "p.jpg", orientation=6)]
+    _grid, model = _tile_grid(qtbot, rows)
+    assert model.data(model.index(0), ASPECT_ROLE) == pytest.approx(1.5)
+    assert model.data(model.index(1), ASPECT_ROLE) == pytest.approx(2 / 3)
+
+
+def test_tooltip_has_name_date_size(qtbot):
+    from smart_gallery.format import format_size
+
+    rows = [_row(1, "a/b/a.jpg"), _row(2, "n.jpg", date_taken=None)]
+    _grid, model = _tile_grid(qtbot, rows)
+    tip = model.data(model.index(0), Qt.ItemDataRole.ToolTipRole)
+    assert tip == f"a.jpg\n1 Mar 2026 · {format_size(3_250_000)}"
+    undated = model.data(model.index(1), Qt.ItemDataRole.ToolTipRole)
+    assert undated.splitlines()[1].startswith("No date · ")
+
+
+def test_offloaded_tooltip_and_role(qtbot):
+    from smart_gallery.gui.library.tiles import OFFLOADED_ROLE
+
+    rows = [_row(1, "a.jpg", offloaded=True), _row(2, "b.jpg")]
+    delegate = _recording_delegate()
+    grid, model = _tile_grid(qtbot, rows, {1: "Drive D"}, delegate=delegate)
+    assert model.data(model.index(0), OFFLOADED_ROLE) == "Drive D"
+    assert model.data(model.index(1), OFFLOADED_ROLE) is None
+    tip = model.data(model.index(0), Qt.ItemDataRole.ToolTipRole)
+    assert tip.startswith("a.jpg\n") and tip.endswith("\nOn Drive D only")
+    delegate.texts.clear()
+    grid.grab()
+    assert delegate.texts == ["On Drive D"]
+
+
+def test_thumbnail_kept_full_size(qtbot, tmp_path):
+    thumb = tmp_path / "t.jpg"
+    Image.new("RGB", (512, 341), "green").save(thumb)
+    _grid, model = _tile_grid(qtbot, [_row(1, "a.jpg")])
+    assert model.set_thumbnail(1, str(thumb))
+    pixmap = model.data(model.index(0), Qt.ItemDataRole.DecorationRole)
+    assert (pixmap.width(), pixmap.height()) == (512, 341)
+
+
+def test_video_thumbnail_has_no_badge_burned_in(qtbot, tmp_path):
+    frame = tmp_path / "f.jpg"
+    Image.new("RGB", (512, 288), (0, 0, 255)).save(frame)
+    rows = [_row(1, "v.mp4", media_type="video", duration_ms=42_000)]
+    _grid, model = _tile_grid(qtbot, rows)
+    model.set_thumbnail(1, str(frame))
+    image = model.data(model.index(0), Qt.ItemDataRole.DecorationRole).toImage()
+    centre = image.pixelColor(image.width() // 2, image.height() // 2)
+    assert centre.blue() > 200 and centre.red() < 60
+
+
+def test_pixmap_cache_holds_a_full_screen_of_small_tiles(qtbot, tmp_path):
+    from smart_gallery.gui.library.view import PIXMAP_CACHE_BYTES, LibraryGridModel
+
+    thumb = tmp_path / "t.jpg"
+    Image.new("RGB", (512, 341), "green").save(thumb)
+    model = LibraryGridModel()
+    model.set_rows([_row(i, f"{i}.jpg") for i in range(1, 321)])
+    for i in range(1, 251):
+        model.set_thumbnail(i, str(thumb))
+    assert all(not model.needs_thumbnail(r) for r in model.rows[:250])
+    # Past the byte cap, the least recently shown go first.
+    for i in range(251, 321):
+        model.set_thumbnail(i, str(thumb))
+    assert 250 * 512 * 341 * 4 <= PIXMAP_CACHE_BYTES < 320 * 512 * 341 * 4
+    assert model.needs_thumbnail(model.rows[0])
+    assert not model.needs_thumbnail(model.rows[-1])
+
+
+def test_thumbnail_fills_its_tile(qtbot, tmp_path):
+    thumb = tmp_path / "t.jpg"
+    Image.new("RGB", (512, 512), (0, 200, 0)).save(thumb)  # square into 3:2
+    grid, model = _tile_grid(qtbot, [_row(1, "a.jpg")])
+    model.set_thumbnail(1, str(thumb))
+    rect = grid.visualRect(model.index(0))
+    image = grid.viewport().grab().toImage()
+    corners = ((rect.left() + 1, rect.top() + 1), (rect.right() - 1, rect.bottom() - 1))
+    for x, y in corners:
+        colour = image.pixelColor(x, y)
+        assert colour.green() > 150 and colour.red() < 60, (x, y)
+
+
+def test_selected_tile_is_inset_in_an_accent_ring(qtbot, tmp_path):
+    from PySide6.QtGui import QColor
+
+    from smart_gallery.gui import theme
+
+    thumb = tmp_path / "t.jpg"
+    Image.new("RGB", (512, 341), (0, 200, 0)).save(thumb)
+    grid, model = _tile_grid(qtbot, [_row(1, "a.jpg")])
+    model.set_thumbnail(1, str(thumb))
+    grid.setCurrentIndex(model.index(0))  # single selection: selects it
+    rect = grid.visualRect(model.index(0))
+    image = grid.viewport().grab().toImage()
+    x = rect.center().x()
+    ring = image.pixelColor(x, rect.top())
+    accent = QColor(theme.ACCENT)
+    assert abs(ring.red() - accent.red()) < 30 and ring.green() < 150
+    # Between the ring and the 90% image: the grid's background, as in the
+    # side padding.
+    background = image.pixelColor(2, rect.center().y())
+    assert image.pixelColor(x, rect.top() + 4) == background
+    assert image.pixelColor(x, rect.top() + int(rect.height() * 0.1)).green() > 150
+
+
+def test_delegate_scales_once_per_size_and_scale(qtbot):
+    from PySide6.QtCore import QSize
+
+    from smart_gallery.gui.library.tiles import PhotoTileDelegate
+
+    delegate = PhotoTileDelegate()
+    source = QPixmap(512, 341)
+    source.fill(Qt.GlobalColor.green)
+    first = delegate._scaled(source, QSize(150, 100), 1.0)
+    assert delegate._scaled(source, QSize(150, 100), 1.0) is first
+    assert (first.width(), first.height()) == (150, 100)
+    hidpi = delegate._scaled(source, QSize(150, 100), 2.0)
+    assert hidpi is not first and (hidpi.width(), hidpi.height()) == (300, 200)
+    assert hidpi.devicePixelRatio() == 2.0
+    bigger = delegate._scaled(source, QSize(300, 200), 1.0)
+    assert bigger is not first

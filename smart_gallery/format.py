@@ -1,6 +1,12 @@
-"""One way to write sizes, counts and durations, shared by every screen."""
+"""One way to write sizes, counts, durations and dates, shared by every screen."""
+
+from datetime import date
 
 _UNITS = ("B", "KB", "MB", "GB", "TB")
+_MONTHS = (
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+)  # fmt: skip
 
 
 def format_size(num_bytes: int) -> str:
@@ -40,3 +46,12 @@ def format_duration(seconds: float) -> str:
     if minutes:
         return f"{minutes}m {secs}s"
     return f"{secs}s"
+
+
+def format_date(date_taken: str | None) -> str:
+    """``1 Mar 2026`` from a catalog date (``YYYY-MM-DD...``); "" if unknown."""
+    try:
+        day = date.fromisoformat((date_taken or "")[:10])
+    except ValueError:
+        return ""
+    return f"{day.day} {_MONTHS[day.month - 1]} {day.year}"

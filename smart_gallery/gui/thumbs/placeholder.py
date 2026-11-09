@@ -10,13 +10,14 @@ from smart_gallery.gui.library.viewer import format_duration
 
 _TILE_BG = theme.qcolor(theme.TILE_BACK)
 _TILE_FG = theme.qcolor(theme.TILE_GLYPH)
-_placeholders: dict[tuple[str, str, int], QPixmap] = {}
+_placeholders: dict[tuple[str, str, int, bool], QPixmap] = {}
 
 
-def _tile(kind: str, text: str, edge: int) -> QPixmap:
+def _tile(kind: str, text: str, edge: int, back: bool = True) -> QPixmap:
     """Tile shown until a thumbnail arrives: a photo glyph, a play sign with
-    the video's duration, or the file extension."""
-    key = (kind, text, edge)
+    the video's duration, or the file extension; ``back=False`` leaves out the
+    rounded backing, for a caller that fills the tile itself."""
+    key = (kind, text, edge, back)
     cached = _placeholders.get(key)
     if cached is not None:
         return cached
@@ -25,8 +26,9 @@ def _tile(kind: str, text: str, edge: int) -> QPixmap:
     p = QPainter(pixmap)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(_TILE_BG)
-    p.drawRoundedRect(QRectF(2, 2, edge - 4, edge - 4), 8, 8)
+    if back:
+        p.setBrush(_TILE_BG)
+        p.drawRoundedRect(QRectF(2, 2, edge - 4, edge - 4), 8, 8)
     p.setBrush(_TILE_FG)
     if kind == "photo":
         p.drawEllipse(QRectF(edge * 0.58, edge * 0.25, edge * 0.14, edge * 0.14))
@@ -56,14 +58,21 @@ def _tile(kind: str, text: str, edge: int) -> QPixmap:
 _KINDS = {"image": "photo", "video": "video", "other": "file"}
 
 
-def placeholder_pixmap(kind: str, size: int, text: str = "") -> QPixmap:
+def placeholder_pixmap(
+    kind: str, size: int, text: str = "", back: bool = True
+) -> QPixmap:
     """A ``size`` square tile for ``kind`` (``image``, ``video`` or ``other``)."""
-    return _tile(_KINDS.get(kind, "file"), text, size)
+    return _tile(_KINDS.get(kind, "file"), text, size, back)
 
 
-def placeholder_for(row, size: int = 150) -> QPixmap:
+def placeholder_for(row, size: int = 150, back: bool = True) -> QPixmap:
+    """``row``'s placeholder; ``back=False`` gives just the glyph (and, for a
+    file that is neither photo nor video, its extension)."""
     if row.media_type == "video":
-        return placeholder_pixmap("video", size, format_duration(row.duration_ms))
+        # Without the backing, the tile's own chip shows the duration.
+        text = format_duration(row.duration_ms) if back else ""
+        return placeholder_pixmap("video", size, text, back)
     if row.media_type == "image":
-        return placeholder_pixmap("image", size)
-    return placeholder_pixmap("other", size, (row.ext or "").lstrip(".").upper()[:5])
+        return placeholder_pixmap("image", size, back=back)
+    ext = (row.ext or "").lstrip(".").upper()[:5]
+    return placeholder_pixmap("other", size, ext, back)
